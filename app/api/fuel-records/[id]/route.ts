@@ -1,0 +1,18 @@
+export const dynamic = 'force-dynamic';
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-options';
+
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    const { id } = await params;
+    await prisma.fuelRecord.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
+    return NextResponse.json({ error: 'Ошибка удаления' }, { status: 500 });
+  }
+}

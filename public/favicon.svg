@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <circle cx="128" cy="128" r="128" fill="#2563EB"/>
+  <path d="M70 100h60v40H70z" fill="#ffffff"/>
+  <path d="M130 110h30l20 20v10h-50z" fill="#ffffff"/>
+  <circle cx="90" cy="155" r="10" fill="#ffffff"/>
+  <circle cx="160" cy="155" r="10" fill="#ffffff"/>
+  <rect x="130" y="140" width="50" height="8" fill="#ffffff"/>
+  <text x="128" y="210" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#ffffff" text-anchor="middle">TMS</text>
+</svg>
