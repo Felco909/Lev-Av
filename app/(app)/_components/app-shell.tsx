@@ -3,46 +3,70 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from 'next-auth/react';
+import { Toaster } from 'sonner';
 import { clearTrail } from '@/lib/nav-history';
+import { useServerSync } from '@/hooks/use-server-sync';
 import {
-  Truck, LayoutDashboard, Route, Users, Car, UserCheck, Building2,
+  LayoutDashboard, Route, Users, Car, UserCheck, Building2,
   Menu, X, LogOut, ChevronRight, ChevronDown, BarChart3, Settings, FolderOpen,
   CalendarDays, PieChart, Wrench, MapPinned, Fuel, ShieldAlert, UserCog, Bell,
-  Search, Wallet, TrendingUp, Receipt,
+  Search, Wallet, TrendingUp, Bot,
 } from 'lucide-react';
+
+function BrandMark({ variant }: { variant?: 'sidebar' | 'compact' }) {
+  const titleCls =
+    variant === 'compact'
+      ? 'font-display font-bold text-xs tracking-tight text-white leading-none'
+      : 'font-display font-bold text-[15px] sm:text-base tracking-tight text-white leading-none';
+  const subCls =
+    variant === 'compact'
+      ? 'hidden'
+      : 'mt-1 text-[10px] leading-snug text-slate-500 font-normal tracking-wide';
+  return (
+    <div className="min-w-0">
+      <p className={titleCls}>
+        <span className="tracking-[0.07em]">LEV</span>
+        <span className="text-white/55">&</span>
+        <span className="tracking-[0.07em]">AV</span>{' '}
+        <span className="font-semibold text-slate-400">TMS</span>
+      </p>
+      {variant !== 'compact' && (
+        <p className={subCls}>Fleet & Logistics Platform</p>
+      )}
+    </div>
+  );
+}
 
 interface NavItem { href: string; label: string; icon: any; }
 interface NavGroup { group: string; items: NavItem[]; }
 
 const navGroups: NavGroup[] = [
-  { group: '', items: [
+  { group: 'Главное', items: [
     { href: '/dashboard', label: 'Главная', icon: LayoutDashboard },
-  ]},
-  { group: 'Работа', items: [
+    { href: '/day-tasks', label: 'Лист дня', icon: CalendarDays },
+    { href: '/director-finance', label: 'Финансы директора', icon: PieChart },
+    { href: '/daily-reports', label: 'Ежедневные отчёты', icon: BarChart3 },
     { href: '/trips', label: 'Заявки', icon: Route },
     { href: '/calendar', label: 'Календарь', icon: CalendarDays },
     { href: '/documents', label: 'Документы', icon: FolderOpen },
+    { href: '/agents', label: 'Агенты', icon: Bot },
   ]},
   { group: 'Финансы', items: [
     { href: '/debts', label: 'Долги', icon: Wallet },
     { href: '/reports', label: 'Отчёты', icon: BarChart3 },
-    { href: '/statistics', label: 'Статистика', icon: PieChart },
   ]},
   { group: 'Справочники', items: [
     { href: '/clients', label: 'Клиенты', icon: Users },
     { href: '/carriers', label: 'Перевозчики', icon: Building2 },
-    { href: '/routes', label: 'Маршруты', icon: MapPinned },
   ]},
   { group: 'Автопарк', items: [
     { href: '/vehicles', label: 'Машины', icon: Car },
     { href: '/drivers', label: 'Водители', icon: UserCheck },
     { href: '/vehicle-trips', label: 'Рейсы машин', icon: TrendingUp },
-    { href: '/driver-analytics', label: 'Аналитика водит.', icon: UserCog },
-
     { href: '/maintenance', label: 'Техобслуживание', icon: Wrench },
     { href: '/expiry', label: 'Сроки документов', icon: ShieldAlert },
   ]},
-  { group: '', items: [
+  { group: 'Система', items: [
     { href: '/settings', label: 'Настройки', icon: Settings },
   ]},
 ];
@@ -160,6 +184,7 @@ export default function AppShell({ children, user }: { children: React.ReactNode
   const [bellTrips, setBellTrips] = useState<{id:string;tripNumber:string;clientName?:string;daysLeft:number}[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const pathname = usePathname() ?? '';
+  const { state: syncState, lastOkAt } = useServerSync();
 
   useEffect(() => {
     fetch('/api/trips/stats').then(r => r.json()).then(d => {
@@ -181,15 +206,12 @@ export default function AppShell({ children, user }: { children: React.ReactNode
 
   return (
     <div className="min-h-screen flex bg-background">
+      <Toaster richColors closeButton position="top-right" />
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-64 bg-slate-900 text-white min-h-screen sticky top-0 h-screen">
-        <div className="p-5 flex items-center gap-3 border-b border-white/10">
-          <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
-            <Truck className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-display font-bold text-sm">TMS Система</h1>
-            <p className="text-[11px] text-slate-400">Управление заявками</p>
+        <div className="p-5 flex items-start gap-3 border-b border-white/[0.08]">
+          <div className="flex-1 min-w-0 pt-0.5">
+            <BrandMark variant="sidebar" />
           </div>
           <div className="relative" data-bell-dropdown>
             <button onClick={() => setBellOpen(!bellOpen)} className="text-slate-400 hover:text-white p-1 relative" title="Уведомления">
@@ -251,6 +273,13 @@ export default function AppShell({ children, user }: { children: React.ReactNode
             <div className="min-w-0">
               <p className="text-xs font-medium truncate">{user?.name ?? 'Пользователь'}</p>
               <p className="text-[11px] text-slate-400 truncate">{user?.email ?? ''}</p>
+              <p className={`text-[10px] mt-1 ${syncState === 'online' ? 'text-emerald-400' : syncState === 'offline' ? 'text-red-400' : 'text-slate-500'}`}>
+                {syncState === 'online'
+                  ? `Связь с сервером OK${lastOkAt ? ` · ${new Date(lastOkAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}`
+                  : syncState === 'offline'
+                    ? 'Нет связи с сервером'
+                    : 'Проверка связи...'}
+              </p>
             </div>
             <button onClick={() => signOut({ callbackUrl: '/login' })} className="text-slate-400 hover:text-white p-1" title="Выход">
               <LogOut className="w-4 h-4" />
@@ -262,9 +291,8 @@ export default function AppShell({ children, user }: { children: React.ReactNode
       {/* Mobile + Content */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="lg:hidden sticky top-0 z-40 bg-slate-900 text-white flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Truck className="w-5 h-5 text-primary" />
-            <span className="font-display font-bold text-sm">TMS</span>
+          <div className="flex items-center min-w-0">
+            <BrandMark variant="compact" />
           </div>
           <div className="flex items-center gap-2">
             <Link href="/dashboard" className="p-1 relative" title="Уведомления">
@@ -282,9 +310,8 @@ export default function AppShell({ children, user }: { children: React.ReactNode
         {open && (
           <div className="lg:hidden fixed inset-0 z-30 bg-black/50" onClick={() => setOpen(false)}>
             <div className="bg-slate-900 w-64 h-full p-4 space-y-1" onClick={(e) => e?.stopPropagation?.()}>
-              <div className="mb-4 flex items-center gap-2 pb-3 border-b border-white/10">
-                <Truck className="w-5 h-5 text-primary" />
-                <span className="font-display font-bold text-sm text-white">TMS Система</span>
+              <div className="mb-4 pb-3 border-b border-white/[0.08]">
+                <BrandMark variant="sidebar" />
               </div>
               {navGroups.map((g, gi) => (
                 <div key={gi}>

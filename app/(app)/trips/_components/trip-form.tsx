@@ -2,8 +2,22 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Save, Plus, Trash2, DollarSign, MapPin, Info, AlertTriangle, RefreshCw, ChevronDown, CheckCircle2, Lock, Unlock, FileUp, Paperclip, X, Wand2, Loader2, Archive } from 'lucide-react';
-import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER } from '@/lib/utils';
+import { ArrowLeft, Save, Plus, Trash2, DollarSign, MapPin, Info, AlertTriangle, RefreshCw, ChevronDown, CheckCircle2, Lock, Unlock, FileUp, Paperclip, X, Wand2, Loader2, Archive, Download, FileText, Eye } from 'lucide-react';
+import { openTripAttachment } from '@/lib/trip-attachment-open';
+import {
+  detectTripAttachmentSection,
+  getTripAttachmentStorageMessage,
+  TRIP_ATTACHMENT_SECTION_LABELS,
+  type TripAttachmentSection,
+} from '@/lib/trip-attachment-section';
+import {
+  TRIP_ATTACHMENT_SECTION_DESCRIPTIONS,
+  tripSectionToStorageCategory,
+} from '@/lib/trip-attachment-service';
+import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER, canonicalWorkflowTripStatus, RATE_INPUT_CLASS, parseRateInput } from '@/lib/utils';
+import { taxCodeIndicatorLabel } from '@/lib/trip-tax-code';
+import { appToast } from '@/lib/app-toast';
+import { addCalendarDaysFromDateOnly, WARNING_CLIENT_PAYMENT_TERMS } from '@/lib/trip-unload-flow';
 
 const CURRENCIES = ['AMD', 'USD', 'EUR', 'RUB', 'GEL'] as const;
 const CURRENCY_SYMBOLS: Record<string, string> = { AMD: '֏', USD: '$', EUR: '€', RUB: '₽', GEL: '₾' };
@@ -40,7 +54,6 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [busyVehicleIds, setBusyVehicleIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
 
   // Form state
   const [clientId, setClientId] = useState('');
@@ -57,17 +70,21 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [carrierRate, setCarrierRate] = useState(0);
   const [status, setStatus] = useState('new');
   const [tripDate, setTripDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [unloadDate, setUnloadDate] = useState('');
   const [paymentDueDate, setPaymentDueDate] = useState('');
+  const [unloadPaymentHint, setUnloadPaymentHint] = useState('');
+  const paymentDueManualRef = useRef(false);
   const [basisText, setBasisText] = useState('');
   const [clientInvoiceSeries, setClientInvoiceSeries] = useState('');
   const [carrierInvoiceSeries, setCarrierInvoiceSeries] = useState('');
+  const [taxCode, setTaxCode] = useState('');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [notes, setNotes] = useState('');
   const [selectedRouteId, setSelectedRouteId] = useState('');
   const [currency, setCurrency] = useState('AMD');
-  const [exchangeRate, setExchangeRate] = useState(1);
+  const [exchangeRate, setExchangeRate] = useState('1');
   const [carrierCurrency, setCarrierCurrency] = useState('AMD');
-  const [carrierExchangeRate, setCarrierExchangeRate] = useState(1);
+  const [carrierExchangeRate, setCarrierExchangeRate] = useState('1');
   const [dailyRates, setDailyRates] = useState<Record<string, number>>({});
   const [expensesOpen, setExpensesOpen] = useState(false);
   const [completingTrip, setCompletingTrip] = useState(false);
@@ -75,8 +92,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [archiving, setArchiving] = useState(false);
   const [savingSeries, setSavingSeries] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const actionLockRef = useRef({ save: false, complete: false, reopen: false, archive: false, delete: false });
 
-  const isCompleted = status === 'completed' || status === 'paid' || status === 'archived';
+  const isArchived = status === 'archived';
+  const isFinanciallyCompleted = status === 'completed' || status === 'paid';
+  const formLocked = isArchived;
 
   // Payment management
   interface PaymentRecord { id: string; type: string; amount: number; amountAmd: number; currency: string; exchangeRate: number; paymentDate: string; description: string | null; }
@@ -85,15 +105,30 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [savingPay, setSavingPay] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', currency: 'AMD', exchangeRate: '1', paymentDate: '', description: '', method: 'bank_transfer' });
 
-  // Documents (attachments) — NEW
-  interface TripAttachment { id: string; fileName: string; fileType: string; description: string | null; uploadedAt: string; downloadUrl: string; }
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]); // queued for upload after trip is created (new trips)
+  // Documents (attachments)
+  interface TripAttachment {
+    id: string;
+    fileName: string;
+    fileType: string;
+    description: string | null;
+    uploadedAt: string;
+    downloadUrl: string | null;
+    downloadAvailable?: boolean;
+    storageReadable?: boolean;
+    fileSizeBytes?: number | null;
+  }
+  interface PendingAttachment { file: File; section: TripAttachmentSection; }
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]); // queued for upload after trip is created (new trips)
   const [existingAttachments, setExistingAttachments] = useState<TripAttachment[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractData, setExtractData] = useState<any | null>(null);
   const [extractFileName, setExtractFileName] = useState<string>('');
+  const contractInputRef = useRef<HTMLInputElement>(null);
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
+  const actInputRef = useRef<HTMLInputElement>(null);
+  const signedInputRef = useRef<HTMLInputElement>(null);
+  const otherInputRef = useRef<HTMLInputElement>(null);
 
 
   // Load reference data
@@ -120,44 +155,58 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   // Load existing attachments for edit mode
   useEffect(() => {
     if (!tripId) { setExistingAttachments([]); return; }
-    fetch(`/api/trips/${tripId}/attachments`)
-      .then(r => r.json())
+    fetch(`/api/trips/${tripId}/attachments`, { credentials: 'include' })
+      .then((r) => {
+        if (!r.ok) throw new Error('attachments');
+        return r.json();
+      })
       .then(d => setExistingAttachments(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      .catch(() => setExistingAttachments([]));
   }, [tripId]);
 
   // Documents: add / remove pending files
-  const addPendingFiles = useCallback((files: FileList | File[] | null) => {
+  const addPendingFiles = useCallback((files: FileList | File[] | null, section: TripAttachmentSection) => {
     if (!files) return;
     const arr = Array.from(files as any as File[]);
     if (arr.length === 0) return;
-    setPendingFiles(prev => [...prev, ...arr]);
+    setPendingFiles(prev => [...prev, ...arr.map((file) => ({ file, section }))]);
   }, []);
 
   const removePendingFile = useCallback((idx: number) => {
     setPendingFiles(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
-  // Upload a single file to S3 and save attachment record for a given trip
-  const uploadSingleFile = useCallback(async (file: File, targetTripId: string, description: string = 'Договор-заявка') => {
+  const sectionDescription = TRIP_ATTACHMENT_SECTION_DESCRIPTIONS;
+
+  const formatFileSize = useCallback((bytes?: number | null) => {
+    if (bytes == null || Number.isNaN(bytes)) return 'н/д';
+    if (bytes < 1024) return `${bytes} Б`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+  }, []);
+
+  // Upload a single file to local storage and save attachment record for a given trip
+  const uploadSingleFile = useCallback(async (file: File, targetTripId: string, description: string = 'Договор-заявка', section: TripAttachmentSection = 'contract') => {
     const presignRes = await fetch('/api/upload/presigned', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, contentType: file.type || 'application/octet-stream', isPublic: false }),
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream',
+          storageCategory: tripSectionToStorageCategory(section),
+        }),
     });
     if (!presignRes.ok) throw new Error('Ошибка получения URL для загрузки');
     const { uploadUrl, cloud_storage_path } = await presignRes.json();
 
     const uploadHeaders: Record<string, string> = { 'Content-Type': file.type || 'application/octet-stream' };
-    const urlObj = new URL(uploadUrl);
-    const signedHeaders = urlObj.searchParams.get('X-Amz-SignedHeaders') || '';
-    if (signedHeaders.includes('content-disposition')) uploadHeaders['Content-Disposition'] = 'attachment';
-    const uploadRes = await fetch(uploadUrl, { method: 'PUT', headers: uploadHeaders, body: file });
+    const uploadRes = await fetch(uploadUrl, { method: 'PUT', headers: uploadHeaders, body: file, credentials: 'include' });
     if (!uploadRes.ok) throw new Error('Ошибка загрузки файла');
 
-    await fetch(`/api/trips/${targetTripId}/attachments`, {
+    const saveRes = await fetch(`/api/trips/${targetTripId}/attachments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         fileName: file.name,
         fileType: file.type || 'application/octet-stream',
@@ -166,6 +215,10 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         description,
       }),
     });
+    if (!saveRes.ok) {
+      const err = await saveRes.json().catch(() => ({}));
+      throw new Error(err?.error || 'Ошибка сохранения вложения');
+    }
   }, []);
 
   // Upload all pending files and (for edit mode) refresh existing list
@@ -173,13 +226,13 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (pendingFiles.length === 0) return;
     setUploadingAttachments(true);
     try {
-      for (const f of pendingFiles) {
-        try { await uploadSingleFile(f, targetTripId, 'Документ заявки'); } catch (e) { console.error('upload error for', f.name, e); }
+      for (const p of pendingFiles) {
+        try { await uploadSingleFile(p.file, targetTripId, sectionDescription[p.section], p.section); } catch (e) { console.error('upload error for', p.file.name, e); }
       }
       setPendingFiles([]);
       if (tripId) {
         try {
-          const r = await fetch(`/api/trips/${tripId}/attachments`);
+          const r = await fetch(`/api/trips/${tripId}/attachments`, { credentials: 'include' });
           const d = await r.json();
           if (Array.isArray(d)) setExistingAttachments(d);
         } catch {}
@@ -194,10 +247,36 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (!tripId) return;
     if (!confirm('Удалить файл?')) return;
     try {
-      await fetch(`/api/trips/${tripId}/attachments?attachmentId=${attachmentId}`, { method: 'DELETE' });
+      await fetch(`/api/trips/${tripId}/attachments?attachmentId=${attachmentId}`, { method: 'DELETE', credentials: 'include' });
       setExistingAttachments(prev => prev.filter(a => a.id !== attachmentId));
-    } catch { alert('Ошибка удаления'); }
+    } catch { appToast.error('Ошибка удаления'); }
   }, [tripId]);
+
+  const replaceExistingAttachment = useCallback(async (attachment: TripAttachment, section: TripAttachmentSection) => {
+    if (!tripId) return;
+    if (!confirm(`Заменить файл "${attachment.fileName}"?`)) return;
+
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    picker.onchange = async () => {
+      const nextFile = picker.files?.[0];
+      if (!nextFile) return;
+      setUploadingAttachments(true);
+      try {
+        await uploadSingleFile(nextFile, tripId, sectionDescription[section], section);
+        await fetch(`/api/trips/${tripId}/attachments?attachmentId=${attachment.id}`, { method: 'DELETE', credentials: 'include' });
+        const r = await fetch(`/api/trips/${tripId}/attachments`, { credentials: 'include' });
+        const d = await r.json();
+        if (Array.isArray(d)) setExistingAttachments(d);
+      } catch {
+        appToast.error('Ошибка замены файла');
+      } finally {
+        setUploadingAttachments(false);
+      }
+    };
+    picker.click();
+  }, [tripId, sectionDescription, uploadSingleFile]);
 
   // Extract contract data from a file (LLM)
   const extractFromFile = useCallback(async (file: File) => {
@@ -209,10 +288,10 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       fd.append('file', file);
       const res = await fetch('/api/trips/extract-contract', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) { alert(data?.error || 'Ошибка распознавания'); return; }
+      if (!res.ok) { appToast.error(data?.error || 'Ошибка распознавания'); return; }
       setExtractData(data);
     } catch {
-      alert('Ошибка соединения');
+      appToast.error('Ошибка соединения');
     } finally {
       setExtracting(false);
     }
@@ -239,16 +318,6 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     setExtractData(null);
     setExtractFileName('');
   }, [extractData, clients]);
-
-  // 1.4: Auto-fill payment due date = tripDate + 14 days (only if empty)
-  useEffect(() => {
-    if (!tripDate || paymentDueDate) return;
-    try {
-      const d = new Date(tripDate);
-      d.setDate(d.getDate() + 14);
-      setPaymentDueDate(d.toISOString().split('T')[0]);
-    } catch {}
-  }, [tripDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load vehicle availability when date changes
   useEffect(() => {
@@ -279,12 +348,18 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         setDriverId(t?.driverId ?? '');
         setCarrierId(t?.carrierId ?? '');
         setCarrierRate(t?.carrierRate ?? 0);
+        paymentDueManualRef.current = false;
+        setUnloadPaymentHint('');
         if (copyFromId) {
           setStatus('new');
           setTripDate(new Date().toISOString().split('T')[0]);
+          setUnloadDate('');
         } else {
-          setStatus(t?.status ?? 'new');
+          const st = t?.status ?? 'new';
+          const normalized = st === 'paid' ? 'completed' : st;
+          setStatus(normalized);
           setTripDate(t?.tripDate ? new Date(t.tripDate).toISOString().split('T')[0] : '');
+          setUnloadDate(t?.unloadDate ? new Date(t.unloadDate).toISOString().split('T')[0] : '');
         }
         if ((t?.expenses ?? []).length > 0) setExpensesOpen(true);
         setExpenses((t?.expenses ?? []).map((e: any) => ({
@@ -296,13 +371,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           description: e?.description ?? '',
         })));
         setCurrency(t?.currency || 'AMD');
-        setExchangeRate(Number(t?.exchangeRate ?? 1));
+        setExchangeRate(String(t?.exchangeRate ?? 1));
         setCarrierCurrency(t?.carrierCurrency || t?.currency || 'AMD');
-        setCarrierExchangeRate(Number(t?.carrierExchangeRate ?? t?.exchangeRate ?? 1));
+        setCarrierExchangeRate(String(t?.carrierExchangeRate ?? t?.exchangeRate ?? 1));
         setPaymentDueDate(t?.paymentDueDate || '');
         setBasisText(t?.basisText || '');
         setClientInvoiceSeries(t?.clientInvoiceSeries || '');
         setCarrierInvoiceSeries(t?.carrierInvoiceSeries || '');
+        setTaxCode(t?.taxCode || '');
         setNotes(t?.notes || '');
       })
       .catch(() => {})
@@ -386,7 +462,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
   const payComputedAmd = payForm.currency === 'AMD'
     ? Number(payForm.amount) || 0
-    : Math.round((Number(payForm.amount) || 0) * (Number(payForm.exchangeRate) || 1) * 100) / 100;
+    : Math.round((Number(payForm.amount) || 0) * (parseRateInput(payForm.exchangeRate) || 1) * 100) / 100;
 
   // Route template selection handler
   const handleRouteSelect = (id: string) => {
@@ -420,11 +496,50 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
   const selectedOptionValue = `${clientId}||${contactId}`;
 
+  const applyPaymentDueFromUnload = useCallback(
+    (dateStr: string, clientIdOverride?: string) => {
+      if (!dateStr) {
+        setUnloadPaymentHint('');
+        return;
+      }
+      if (paymentDueManualRef.current) return;
+      const id = clientIdOverride ?? clientId;
+      const c = clients.find((x: any) => x.id === id);
+      const d = c?.paymentTermsDays;
+      if (d != null && Number(d) > 0) {
+        const base = new Date(`${dateStr}T12:00:00`);
+        const due = addCalendarDaysFromDateOnly(base, Number(d));
+        setPaymentDueDate(due.toISOString().slice(0, 10));
+        setUnloadPaymentHint('');
+      } else {
+        setUnloadPaymentHint(WARNING_CLIENT_PAYMENT_TERMS);
+      }
+    },
+    [clients, clientId],
+  );
+
   const handleClientOptionChange = (val: string) => {
     const [cId, ctId] = val.split('||');
-    setClientId(cId || '');
+    const nextClient = cId || '';
+    setClientId(nextClient);
     setContactId(ctId || '');
+    paymentDueManualRef.current = false;
+    if (unloadDate) applyPaymentDueFromUnload(unloadDate, nextClient);
   };
+
+  /** После загрузки заявки: предупреждение, если есть разгрузка, но у клиента не задан срок в днях (дату не трогаем). */
+  useEffect(() => {
+    if (loading || clients.length === 0) return;
+    if (!unloadDate || !clientId) {
+      if (!unloadDate) setUnloadPaymentHint('');
+      return;
+    }
+    if (paymentDueManualRef.current) return;
+    const c = clients.find((x: any) => x.id === clientId);
+    const d = c?.paymentTermsDays;
+    if (d != null && Number(d) > 0) setUnloadPaymentHint('');
+    else setUnloadPaymentHint(WARNING_CLIENT_PAYMENT_TERMS);
+  }, [loading, unloadDate, clientId, clients]);
 
   // Last rate hint for client+route
   const [lastRateHint, setLastRateHint] = useState<{ rate: number; currency: string; date: string } | null>(null);
@@ -455,8 +570,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   // Calculate totals (all in AMD)
   const totalExpensesAmd = useMemo(() => (expenses ?? []).reduce((s: number, e: Expense) => s + (e?.amountAmd ?? 0), 0), [expenses]);
 
-  const effectiveRate = currency === 'AMD' ? 1 : exchangeRate;
-  const effectiveCarrierRate = carrierCurrency === 'AMD' ? 1 : carrierExchangeRate;
+  const effectiveRate = currency === 'AMD' ? 1 : (parseRateInput(exchangeRate) || 1);
+  const effectiveCarrierRate = carrierCurrency === 'AMD' ? 1 : (parseRateInput(carrierExchangeRate) || 1);
   const clientRateAmd = Math.round(clientRate * effectiveRate * 100) / 100;
   const carrierRateAmd = Math.round(carrierRate * effectiveCarrierRate * 100) / 100;
   const profitAmd = useMemo(() => {
@@ -466,31 +581,23 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
   const handleCurrencyChange = (cur: string) => {
     setCurrency(cur);
-    if (cur === 'AMD') {
-      setExchangeRate(1);
-    } else if (dailyRates[cur] && dailyRates[cur] > 0) {
-      setExchangeRate(dailyRates[cur]);
-    }
+    if (cur === 'AMD') setExchangeRate('1');
   };
 
   const handleCarrierCurrencyChange = (cur: string) => {
     setCarrierCurrency(cur);
-    if (cur === 'AMD') {
-      setCarrierExchangeRate(1);
-    } else if (dailyRates[cur] && dailyRates[cur] > 0) {
-      setCarrierExchangeRate(dailyRates[cur]);
-    }
+    if (cur === 'AMD') setCarrierExchangeRate('1');
   };
 
   const applyDailyRate = () => {
     if (currency !== 'AMD' && dailyRates[currency] && dailyRates[currency] > 0) {
-      setExchangeRate(dailyRates[currency]);
+      setExchangeRate(String(dailyRates[currency]));
     }
   };
 
   const applyCarrierDailyRate = () => {
     if (carrierCurrency !== 'AMD' && dailyRates[carrierCurrency] && dailyRates[carrierCurrency] > 0) {
-      setCarrierExchangeRate(dailyRates[carrierCurrency]);
+      setCarrierExchangeRate(String(dailyRates[carrierCurrency]));
     }
   };
 
@@ -505,10 +612,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         const amt = Number(field === 'amount' ? value : updated.amount) || 0;
         const cur = field === 'currency' ? value : updated.currency;
         let rate = Number(field === 'exchangeRate' ? value : updated.exchangeRate) || 1;
-        // Auto-fill rate from dailyRates when currency changes
         if (field === 'currency') {
-          if (value === 'AMD') { rate = 1; } else if (dailyRates[value] > 0) { rate = dailyRates[value]; }
-          updated.exchangeRate = rate;
+          if (value === 'AMD') {
+            rate = 1;
+            updated.exchangeRate = 1;
+          }
         }
         updated.amountAmd = cur === 'AMD' ? amt : Math.round(amt * rate * 100) / 100;
       }
@@ -519,89 +627,124 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
 
   const handleCompleteTrip = async () => {
-    if (!tripId || completingTrip) return;
+    if (!tripId || completingTrip || actionLockRef.current.complete) return;
     // 2.6: Warn about unpaid balance
     const clientDebt = clientRateAmd - clientPaidAmd;
     const carrierDebt = carrierRateAmd - carrierPaidAmd;
-    let warnMsg = 'Вы уверены, что хотите завершить заявку?\nВсе задолженности будут закрыты.';
+    let warnMsg = 'Перевести заявку в статус «Оплачен / Завершён»? Автозакрытие долгов не выполняется.';
     if (clientDebt > 0 || carrierDebt > 0) {
       const parts: string[] = [];
       if (clientDebt > 0) parts.push(`Клиент: ${clientDebt.toLocaleString('ru-RU')} ֏`);
       if (carrierDebt > 0) parts.push(`Перевозчик: ${carrierDebt.toLocaleString('ru-RU')} ֏`);
-      warnMsg = `⚠ Есть неоплаченный долг:\n${parts.join('\n')}\n\nВсё равно завершить? Задолженности будут закрыты.`;
+      warnMsg = `Есть неоплаченный остаток:\n${parts.join('\n')}\n\nВсё равно перевести в «Оплачен / Завершён»? Долги не закрываются автоматически.`;
     }
     if (!confirm(warnMsg)) return;
+    actionLockRef.current.complete = true;
     setCompletingTrip(true);
     try {
-      const res = await fetch(`/api/trips/${tripId}/close`, {
-        method: 'POST',
+      const res = await fetch(`/api/trips/${tripId}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ closeDebts: true }),
+        body: JSON.stringify({ status: 'completed' }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-        alert(err.error || 'Ошибка завершения заявки');
+        appToast.error(err.error || 'Ошибка завершения заявки');
         return;
       }
       setStatus('completed');
       await loadPayments();
-      alert('Заявка завершена. Все задолженности закрыты.');
-    } catch { alert('Ошибка завершения заявки'); }
-    finally { setCompletingTrip(false); }
+      appToast.success('Статус изменён на «Оплачен / Завершён». Налоговый код можно внести до отправки в архив.');
+    } catch { appToast.error('Ошибка завершения заявки'); }
+    finally {
+      actionLockRef.current.complete = false;
+      setCompletingTrip(false);
+    }
   };
 
   const handleReopenTrip = async () => {
-    if (!tripId || reopeningTrip) return;
-    if (!confirm('Открыть заявку снова? Статус изменится на «Разгружен».')) return;
+    if (!tripId || reopeningTrip || actionLockRef.current.reopen) return;
+    if (!confirm('Открыть заявку снова? Статус изменится на «На оплату».')) return;
+    actionLockRef.current.reopen = true;
     setReopeningTrip(true);
     try {
       const res = await fetch(`/api/trips/${tripId}/close`, { method: 'PUT' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-        alert(err.error || 'Ошибка');
+        appToast.error(err.error || 'Ошибка');
         return;
       }
-      setStatus('unloaded');
-    } catch { alert('Ошибка'); }
-    finally { setReopeningTrip(false); }
+      setStatus('awaiting_payment');
+      appToast.success('Заявка снова в статусе «На оплату».');
+    } catch { appToast.error('Ошибка'); }
+    finally {
+      actionLockRef.current.reopen = false;
+      setReopeningTrip(false);
+    }
   };
 
   const handleArchiveToggle = async () => {
-    if (!tripId || archiving) return;
-    const newStatus = status === 'archived' ? 'completed' : 'archived';
-    const msg = status === 'archived' ? 'Вернуть заявку из архива?' : 'Перенести заявку в архив?';
-    if (!confirm(msg)) return;
+    if (!tripId || archiving || actionLockRef.current.archive) return;
+    if (status === 'archived') {
+      if (!confirm('Вернуть заявку из архива в статус «Оплачен / Завершён»?')) return;
+      actionLockRef.current.archive = true;
+      setArchiving(true);
+      try {
+        const res = await fetch(`/api/trips/${tripId}/archive`, { method: 'PUT' });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Ошибка' }));
+          appToast.error(err.error || 'Ошибка');
+          return;
+        }
+        setStatus('completed');
+        appToast.success('Заявка возвращена из архива в статус «Оплачен / Завершён».');
+      } catch { appToast.error('Ошибка'); }
+      finally {
+        actionLockRef.current.archive = false;
+        setArchiving(false);
+      }
+      return;
+    }
+
+    if (!confirm('Отправить заявку в архив? Проверятся статус, налоговый код и документы.')) return;
+    actionLockRef.current.archive = true;
     setArchiving(true);
     try {
-      const res = await fetch(`/api/trips/${tripId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      const res = await fetch(`/api/trips/${tripId}/archive`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-        alert(err.error || 'Ошибка');
+        appToast.error(data?.error || 'Нельзя отправить в архив');
         return;
       }
-      setStatus(newStatus);
-    } catch { alert('Ошибка'); }
-    finally { setArchiving(false); }
+      setStatus('archived');
+      appToast.success('Заявка отправлена в архив.');
+    } catch { appToast.error('Ошибка'); }
+    finally {
+      actionLockRef.current.archive = false;
+      setArchiving(false);
+    }
   };
 
   const handleDeleteTrip = async () => {
-    if (!tripId || deleting) return;
-    if (!confirm('Вы уверены, что хотите удалить заявку? Это действие нельзя отменить.')) return;
+    if (!tripId || deleting || actionLockRef.current.delete) return;
+    if (!confirm('Удалить заявку без возможности восстановления?')) return;
+    if (!confirm('Подтвердите удаление ещё раз. Операция необратима.')) return;
+    actionLockRef.current.delete = true;
     setDeleting(true);
     try {
       const res = await fetch(`/api/trips/${tripId}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Ошибка удаления' }));
-        alert(err.error || 'Ошибка удаления');
+        appToast.error(err.error || 'Ошибка удаления');
         return;
       }
+      appToast.success('Заявка удалена');
       router.push('/trips');
-    } catch { alert('Ошибка удаления'); }
-    finally { setDeleting(false); }
+    } catch { appToast.error('Ошибка удаления'); }
+    finally {
+      actionLockRef.current.delete = false;
+      setDeleting(false);
+    }
   };
 
   const seriesInitRef = useRef(false);
@@ -616,31 +759,31 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           body: JSON.stringify({
             clientInvoiceSeries: clientInvoiceSeries || null,
             carrierInvoiceSeries: carrierInvoiceSeries || null,
+            taxCode: taxCode.trim() || null,
           }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-          alert(err.error || 'Ошибка сохранения серии');
+          appToast.error(err.error || 'Ошибка сохранения серии');
         }
-      } catch { alert('Ошибка сохранения серии'); }
+      } catch { appToast.error('Ошибка сохранения серии'); }
       finally { setSavingSeries(false); }
     }, 800);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientInvoiceSeries, carrierInvoiceSeries]);
+  }, [clientInvoiceSeries, carrierInvoiceSeries, taxCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    if (saving || actionLockRef.current.save) return;
 
-    // Validation
-    if (!clientId) { setError('Выберите клиента'); return; }
-    if (!routeFrom || !routeTo) { setError('Укажите маршрут'); return; }
-    if (!tripDate) { setError('Укажите дату'); return; }
-    if (!clientRate || clientRate <= 0) { setError('Укажите ставку клиента (> 0)'); return; }
+    if (!clientId) { appToast.error('Выберите клиента'); return; }
+    if (!routeFrom || !routeTo) { appToast.error('Укажите маршрут'); return; }
+    if (!tripDate) { appToast.error('Укажите дату'); return; }
+    if (!clientRate || clientRate <= 0) { appToast.error('Укажите ставку клиента (> 0)'); return; }
     if (tripType === 'own_transport') {
-      if (!vehicleId) { setError('Выберите машину для собственного транспорта'); return; }
-      if (!driverId) { setError('Выберите водителя'); return; }
+      if (!vehicleId) { appToast.error('Выберите машину для собственного транспорта'); return; }
+      if (!driverId) { appToast.error('Выберите водителя'); return; }
     }
 
     // Check for potential duplicates
@@ -655,14 +798,17 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       } catch {}
     }
 
+    actionLockRef.current.save = true;
     setSaving(true);
     try {
       const body: any = {
         clientId, contactId: contactId || null, routeFrom, routeTo, tripType, clientRate, status, tripDate,
+        unloadDate: unloadDate || null,
         paymentDueDate: paymentDueDate || null,
         basisText: basisText || null,
         clientInvoiceSeries: clientInvoiceSeries || null,
         carrierInvoiceSeries: carrierInvoiceSeries || null,
+        taxCode: taxCode.trim() || null,
         notes: notes || null,
         currency, exchangeRate: effectiveRate,
         distance: distance ? Number(distance) : null,
@@ -680,7 +826,17 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       const method = isEdit ? 'PUT' : 'POST';
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
-      if (!res.ok) { setError(data?.error ?? '\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f'); return; }
+      if (!res.ok) { appToast.error(data?.error ?? 'Ошибка сохранения'); return; }
+
+      if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
+        appToast.warning(data.warnings.join('\n\n'));
+      }
+      appToast.success(isEdit ? 'Заявка сохранена' : 'Заявка создана');
+      if (data?.status && isEdit) {
+        setStatus(data.status === 'paid' ? 'completed' : data.status);
+      }
+      if (data?.unloadDate) setUnloadDate(String(data.unloadDate).slice(0, 10));
+      if (data?.paymentDueDate) setPaymentDueDate(String(data.paymentDueDate).slice(0, 10));
 
       // Upload any queued documents to the newly-created/edited trip
       const targetId = isEdit ? (tripId as string) : (data?.id as string);
@@ -711,8 +867,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         router.replace(`/trips/${data?.id}`);
       }
     } catch {
-      setError('Ошибка соединения');
+      appToast.error('Ошибка соединения');
     } finally {
+      actionLockRef.current.save = false;
       setSaving(false);
     }
   };
@@ -727,17 +884,24 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       </div>
 
       {/* Completed / Archived banner */}
-      {isEdit && isCompleted && (
+      {isEdit && (isFinanciallyCompleted || isArchived) && (
         <div className={`${status === 'archived' ? 'bg-slate-50 dark:bg-slate-950/30 border-slate-200 dark:border-slate-800' : 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'} border rounded-xl p-4 flex items-center justify-between gap-4`}>
           <div className="flex items-center gap-3">
             <Lock className={`w-5 h-5 ${status === 'archived' ? 'text-slate-600' : 'text-green-600'} shrink-0`} />
             <div>
               <p className={`text-sm font-semibold ${status === 'archived' ? 'text-slate-800 dark:text-slate-300' : 'text-green-800 dark:text-green-300'}`}>
-                {status === 'archived' ? 'Заявка в архиве' : 'Заявка завершена'}
+                {status === 'archived' ? 'Заявка в архиве' : 'Оплачен / завершён'}
               </p>
               <p className={`text-xs ${status === 'archived' ? 'text-slate-600 dark:text-slate-400' : 'text-green-600 dark:text-green-400'}`}>
-                Редактирование заблокировано. Нажмите «Открыть заявку снова» для изменений.
+                {status === 'archived'
+                  ? 'Редактирование заблокировано. Можно вернуть из архива.'
+                  : 'Финансово закрыта. Налоговый код можно внести до ручной отправки в архив.'}
               </p>
+              {isFinanciallyCompleted && !isArchived && (
+                <p className={`text-xs mt-1 font-medium ${taxCode.trim() ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {taxCodeIndicatorLabel(taxCode)}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -748,11 +912,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 {archiving ? '...' : 'Вернуть из архива'}
               </button>
             )}
-            {(status === 'completed' || status === 'paid') && (
+            {isFinanciallyCompleted && !isArchived && (
               <button type="button" onClick={handleArchiveToggle} disabled={archiving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-500 text-white text-sm font-medium rounded-lg hover:bg-slate-600 disabled:opacity-60 transition">
+                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-600 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-60 transition">
                 <Archive className="w-4 h-4" />
-                {archiving ? '...' : 'В архив'}
+                {archiving ? '...' : 'Отправить в архив'}
               </button>
             )}
             <button type="button" onClick={handleReopenTrip} disabled={reopeningTrip}
@@ -765,7 +929,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-      <fieldset disabled={isCompleted} className={`space-y-6 ${isCompleted ? 'opacity-70 pointer-events-none' : ''}`}>
+      <fieldset disabled={formLocked} className={`space-y-6 ${formLocked ? 'opacity-70 pointer-events-none' : ''}`}>
         {/* Route Template Quick Select */}
         {routeTemplates.length > 0 && (
           <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
@@ -822,9 +986,10 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 {STATUS_ORDER.map((key) => {
                   const s = STATUS_MAP[key];
                   if (!s) return null;
-                  const active = status === key;
+                  const workflow = canonicalWorkflowTripStatus(status);
+                  const active = workflow === key;
                   // 1.3: Only allow adjacent status steps (current ±1)
-                  const currentIdx = STATUS_ORDER.indexOf(status);
+                  const currentIdx = STATUS_ORDER.indexOf(workflow);
                   const keyIdx = STATUS_ORDER.indexOf(key);
                   const isAllowed = active || Math.abs(currentIdx - keyIdx) <= 1 || status === 'archived';
                   return (
@@ -848,10 +1013,40 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 )}
               </div>
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Дата оплаты (дедлайн)</label>
-              <input type="date" value={paymentDueDate} onChange={(e) => setPaymentDueDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Дата разгрузки</label>
+                <input
+                  type="date"
+                  value={unloadDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setUnloadDate(v);
+                    applyPaymentDueFromUnload(v);
+                  }}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Срок оплаты</label>
+                <input
+                  type="date"
+                  value={paymentDueDate}
+                  onChange={(e) => {
+                    paymentDueManualRef.current = true;
+                    setPaymentDueDate(e.target.value);
+                    if (e.target.value) setUnloadPaymentHint('');
+                  }}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
+                />
+              </div>
             </div>
+            {unloadPaymentHint ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-2 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                {unloadPaymentHint}
+              </p>
+            ) : null}
           </div>
           <div className="mt-3">
             <label className="text-xs text-muted-foreground mb-1 block">{"\u0414\u043E\u0433\u043E\u0432\u043E\u0440-\u0437\u0430\u044F\u0432\u043A\u0430 (\u043E\u0441\u043D\u043E\u0432\u0430\u043D\u0438\u0435)"}</label>
@@ -871,6 +1066,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               {selectedClient.inn && <div><span className="text-muted-foreground">{"\u0418\u041D\u041D"}</span><p className="font-medium mt-0.5">{selectedClient.inn}</p></div>}
               {selectedClient.phone && <div><span className="text-muted-foreground">{"\u0422\u0435\u043B\u0435\u0444\u043E\u043D"}</span><p className="font-medium mt-0.5">{selectedClient.phone}</p></div>}
               {selectedClient.address && <div><span className="text-muted-foreground">{"\u0410\u0434\u0440\u0435\u0441"}</span><p className="font-medium mt-0.5">{selectedClient.address}</p></div>}
+              <div>
+                <span className="text-muted-foreground">Срок оплаты, дней</span>
+                <p className="font-medium mt-0.5">
+                  {selectedClient.paymentTermsDays != null
+                    ? `${selectedClient.paymentTermsDays} дн.`
+                    : '—'}
+                </p>
+              </div>
             </div>
             {selectedContact && (
               <div className="mt-3 pt-2 border-t border-slate-200 dark:border-slate-700">
@@ -960,8 +1163,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">{"\u041A\u0443\u0440\u0441 \u0440\u0430\u0441\u0445\u043E\u0434\u0430 \u043A AMD"}</label>
                     <div className="flex gap-1">
-                      <input type="number" min={0} step="0.01" value={carrierExchangeRate} onChange={(e) => setCarrierExchangeRate(Number(e.target.value))}
-                        className="flex-1 border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                      <input type="text" inputMode="decimal" value={carrierExchangeRate} onChange={(e) => setCarrierExchangeRate(e.target.value)}
+                        className={`flex-1 ${RATE_INPUT_CLASS}`} />
                       {dailyRates[carrierCurrency] > 0 && (
                         <button type="button" onClick={applyCarrierDailyRate} title={`\u041A\u0443\u0440\u0441 \u0434\u043D\u044F: ${dailyRates[carrierCurrency]}`}
                           className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
@@ -970,7 +1173,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                       )}
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-1">1 {carrierCurrency} = {carrierExchangeRate} AMD</p>
-                    {dailyRates[carrierCurrency] > 0 && Math.abs(carrierExchangeRate - dailyRates[carrierCurrency]) / dailyRates[carrierCurrency] > 0.15 && (
+                    {dailyRates[carrierCurrency] > 0 && Math.abs(parseRateInput(carrierExchangeRate) - dailyRates[carrierCurrency]) / dailyRates[carrierCurrency] > 0.15 && (
                       <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Курс отличается от дневного более чем на 15%</p>
                     )}
                   </div>
@@ -1025,7 +1228,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                       <div className="flex items-center gap-3 pl-1">
                         <div className="flex items-center gap-1">
                           <span className="text-[10px] text-muted-foreground">{"\u041A\u0443\u0440\u0441"}:</span>
-                          <input type="number" min={0} step="0.01" value={exp?.exchangeRate ?? 1} onChange={(e) => updateExpense(idx, 'exchangeRate', Number(e.target.value))} className="border rounded px-2 py-1 text-xs bg-background w-20 font-mono" />
+                          <input type="text" inputMode="decimal" value={exp?.exchangeRate ?? 1} onChange={(e) => updateExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className={`${RATE_INPUT_CLASS} !py-1 !px-2 !text-xs w-20`} />
                           {dailyRates[exp.currency] > 0 && exp.exchangeRate !== dailyRates[exp.currency] && (
                             <button type="button" onClick={() => updateExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline" title={`\u041A\u0443\u0440\u0441 \u0434\u043D\u044F: ${dailyRates[exp.currency]}`}>
                               {dailyRates[exp.currency]}
@@ -1063,8 +1266,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Курс к AMD</label>
                 <div className="flex gap-1">
-                  <input type="number" min={0} step="0.01" value={exchangeRate} onChange={(e) => setExchangeRate(Number(e.target.value))}
-                    className="flex-1 border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                  <input type="text" inputMode="decimal" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)}
+                    className={`flex-1 ${RATE_INPUT_CLASS}`} />
                   {dailyRates[currency] > 0 && (
                     <button type="button" onClick={applyDailyRate} title={`Курс дня: ${dailyRates[currency]}`}
                       className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
@@ -1073,7 +1276,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                   )}
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1">1 {currency} = {exchangeRate} AMD</p>
-                {dailyRates[currency] > 0 && Math.abs(exchangeRate - dailyRates[currency]) / dailyRates[currency] > 0.15 && (
+                {dailyRates[currency] > 0 && Math.abs(parseRateInput(exchangeRate) - dailyRates[currency]) / dailyRates[currency] > 0.15 && (
                   <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Курс отличается от дневного более чем на 15%</p>
                 )}
               </div>
@@ -1175,17 +1378,17 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                       <div>
                         <label className="text-[10px] text-muted-foreground">Валюта</label>
                         <select value={payForm.currency}
-                          onChange={e => { const cur = e.target.value; const rate = cur === 'AMD' ? '1' : (dailyRates[cur] > 0 ? String(dailyRates[cur]) : '1'); setPayForm(f => ({ ...f, currency: cur, exchangeRate: rate })); }}
+                          onChange={e => { const cur = e.target.value; setPayForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'AMD' ? '1' : f.exchangeRate })); }}
                           className="w-full border rounded-md px-2 py-1.5 text-sm bg-background">
                           {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground">Курс</label>
-                        <input type="number" step="0.0001" min="0.0001" value={payForm.exchangeRate}
+                        <input type="text" inputMode="decimal" value={payForm.exchangeRate}
                           onChange={e => setPayForm(f => ({ ...f, exchangeRate: e.target.value }))}
                           disabled={payForm.currency === 'AMD'}
-                          className="w-full border rounded-md px-2 py-1.5 text-sm bg-background disabled:opacity-50 font-mono" />
+                          className={`w-full ${RATE_INPUT_CLASS} !rounded-md disabled:opacity-50`} />
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground">Дата *</label>
@@ -1296,17 +1499,17 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                         <div>
                           <label className="text-[10px] text-muted-foreground">Валюта</label>
                           <select value={payForm.currency}
-                            onChange={e => { const cur = e.target.value; const rate = cur === 'AMD' ? '1' : (dailyRates[cur] > 0 ? String(dailyRates[cur]) : '1'); setPayForm(f => ({ ...f, currency: cur, exchangeRate: rate })); }}
+                            onChange={e => { const cur = e.target.value; setPayForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'AMD' ? '1' : f.exchangeRate })); }}
                             className="w-full border rounded-md px-2 py-1.5 text-sm bg-background">
                             {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
                           </select>
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground">Курс</label>
-                          <input type="number" step="0.0001" min="0.0001" value={payForm.exchangeRate}
+                          <input type="text" inputMode="decimal" value={payForm.exchangeRate}
                             onChange={e => setPayForm(f => ({ ...f, exchangeRate: e.target.value }))}
                             disabled={payForm.currency === 'AMD'}
-                            className="w-full border rounded-md px-2 py-1.5 text-sm bg-background disabled:opacity-50 font-mono" />
+                            className={`w-full ${RATE_INPUT_CLASS} !rounded-md disabled:opacity-50`} />
                         </div>
                         <div>
                           <label className="text-[10px] text-muted-foreground">Дата *</label>
@@ -1355,76 +1558,217 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           {/* ═══ Документы ═══ */}
           <div className="pt-3 border-t border-dashed space-y-3">
             <label className="text-sm font-medium flex items-center gap-2">
-              <Paperclip className="w-4 h-4 text-primary" /> Документы
-              <span className="text-[10px] text-muted-foreground font-normal">(PDF, Word, Excel, фото)</span>
+              <Paperclip className="w-4 h-4 text-primary" /> Документы заявки
             </label>
-
-            {/* Drag-drop zone */}
-            <div
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { e.preventDefault(); setIsDragging(false); addPendingFiles(e.dataTransfer.files); }}
-              className={`border-2 border-dashed rounded-xl p-5 text-center transition ${isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/30 hover:border-primary/50'}`}
-            >
-              <FileUp className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground mb-2">Перетащите файлы сюда или</p>
-              <label className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition cursor-pointer">
-                <FileUp className="w-3.5 h-3.5" /> Выбрать файлы
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  className="hidden"
-                  onChange={(e) => { addPendingFiles(e.target.files); e.target.value = ''; }}
-                />
-              </label>
-              <p className="text-[10px] text-muted-foreground mt-2">Можно выбрать несколько файлов</p>
-            </div>
-
-            {/* Pending files list (queued, not yet uploaded) */}
-            {pendingFiles.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-muted-foreground">{isEdit ? 'К загрузке:' : 'Загрузятся после сохранения:'}</p>
-                {pendingFiles.map((f, i) => {
-                  const isPdf = (f.type || '').toLowerCase().includes('pdf') || f.name.toLowerCase().endsWith('.pdf');
-                  const isImage = (f.type || '').toLowerCase().startsWith('image/');
-                  return (
-                    <div key={`${f.name}-${i}`} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg text-xs">
-                      <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <span className="flex-1 truncate">{f.name}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(f.size / 1024)} КБ</span>
-                      {(isPdf || isImage) && (
-                        <button type="button" onClick={() => extractFromFile(f)} disabled={extracting}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 text-[10px] font-medium transition disabled:opacity-60"
-                          title="Попытаться извлечь данные (номер, дату, клиента, сумму)">
-                          {extracting && extractFileName === f.name ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                          Распознать
-                        </button>
-                      )}
-                      <button type="button" onClick={() => removePendingFile(i)} className="p-1 hover:bg-red-100 rounded-md transition" title="Удалить">
-                        <X className="w-3 h-3 text-red-500" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Existing attachments (edit mode) */}
+            <p className="text-[11px] text-muted-foreground">
+              Статусы показываются отдельно по секциям: договор-заявка, счёт, акт, подписанные и прочие документы.
+            </p>
             {existingAttachments.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-medium text-muted-foreground">Уже загружено:</p>
-                {existingAttachments.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 p-2 bg-card border rounded-lg text-xs">
-                    <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <a href={a.downloadUrl} target="_blank" rel="noopener noreferrer" className="flex-1 truncate text-primary hover:underline">{a.fileName}</a>
-                    <button type="button" onClick={() => deleteExistingAttachment(a.id)} className="p-1 hover:bg-red-100 rounded-md transition" title="Удалить">
-                      <Trash2 className="w-3 h-3 text-red-500" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[11px] text-muted-foreground">Всего сохранено файлов: {existingAttachments.length}</p>
             )}
+
+            <input
+              ref={contractInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => { addPendingFiles(e.target.files, 'contract'); e.target.value = ''; }}
+            />
+            <input
+              ref={invoiceInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => { addPendingFiles(e.target.files, 'invoice'); e.target.value = ''; }}
+            />
+            <input
+              ref={actInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => { addPendingFiles(e.target.files, 'act'); e.target.value = ''; }}
+            />
+            <input
+              ref={otherInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => { addPendingFiles(e.target.files, 'other'); e.target.value = ''; }}
+            />
+            <input
+              ref={signedInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => { addPendingFiles(e.target.files, 'signed'); e.target.value = ''; }}
+            />
+
+            {(['contract', 'invoice', 'act', 'signed', 'other'] as TripAttachmentSection[]).map((section) => {
+              const queued = pendingFiles.filter((p) => p.section === section);
+              const existing = existingAttachments
+                .filter((a) => detectTripAttachmentSection(a) === section)
+                .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+              const hasAny = queued.length + existing.length > 0;
+              const viewableAttachment = existing.find((a) => a.downloadUrl) ?? existing[0] ?? null;
+              const openPicker = () => {
+                if (section === 'contract') contractInputRef.current?.click();
+                if (section === 'invoice') invoiceInputRef.current?.click();
+                if (section === 'act') actInputRef.current?.click();
+                if (section === 'signed') signedInputRef.current?.click();
+                if (section === 'other') otherInputRef.current?.click();
+              };
+              const openSectionView = () => {
+                if (!viewableAttachment?.downloadUrl) return;
+                openTripAttachment({
+                  downloadUrl: viewableAttachment.downloadUrl,
+                  fileName: viewableAttachment.fileName,
+                  fileType: viewableAttachment.fileType,
+                });
+              };
+              return (
+                <div key={section} className="rounded-xl border p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">{TRIP_ATTACHMENT_SECTION_LABELS[section]}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${hasAny ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
+                      {hasAny ? `${existing.length + queued.length} файл(ов)` : 'Нет файла'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={openPicker}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition"
+                    >
+                      <FileUp className="w-3.5 h-3.5" /> Загрузить файл
+                    </button>
+                    {viewableAttachment?.downloadUrl && (
+                      <button
+                        type="button"
+                        onClick={openSectionView}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 border border-primary/30 text-primary text-xs font-medium rounded-lg hover:bg-primary/5 transition"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Просмотр
+                      </button>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">{isEdit ? 'Файл привяжется к текущей заявке' : 'Файл привяжется после сохранения заявки'}</span>
+                  </div>
+                  {queued.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-medium text-muted-foreground">{isEdit ? 'К загрузке:' : 'Загрузятся после сохранения:'}</p>
+                      {queued.map((p) => {
+                        const idx = pendingFiles.findIndex((x) => x === p);
+                        const f = p.file;
+                        const isPdf = (f.type || '').toLowerCase().includes('pdf') || f.name.toLowerCase().endsWith('.pdf');
+                        const isImage = (f.type || '').toLowerCase().startsWith('image/');
+                        return (
+                          <div key={`${f.name}-${idx}`} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg text-xs">
+                            <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <span className="flex-1 truncate">{f.name}</span>
+                            <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(f.size / 1024)} КБ</span>
+                            {(isPdf || isImage) && (
+                              <button type="button" onClick={() => extractFromFile(f)} disabled={extracting}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 text-[10px] font-medium transition disabled:opacity-60"
+                                title="Попытаться извлечь данные (номер, дату, клиента, сумму)">
+                                {extracting && extractFileName === f.name ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                                Распознать
+                              </button>
+                            )}
+                            <button type="button" onClick={() => removePendingFile(idx)} className="p-1 hover:bg-red-100 rounded-md transition" title="Удалить">
+                              <X className="w-3 h-3 text-red-500" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {existing.length > 0 && (
+                    <div className="space-y-1.5">
+                      {existing.map((a) => (
+                        <div key={a.id} className="p-2 bg-card border rounded-lg text-xs space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            {a.downloadUrl ? (
+                              <a
+                                href={a.downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 truncate text-primary hover:underline"
+                                title="Открыть файл"
+                              >
+                                {a.fileName}
+                              </a>
+                            ) : (
+                              <div className="flex-1 min-w-0">
+                                <p className="truncate text-foreground">{a.fileName}</p>
+                                <p className="text-[10px] text-amber-700">Файл есть в базе, ссылка временно недоступна</p>
+                              </div>
+                            )}
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground whitespace-nowrap">{TRIP_ATTACHMENT_SECTION_LABELS[section]}</span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-2">
+                            <span>Размер: {formatFileSize(a.fileSizeBytes)}</span>
+                            <span>Дата: {new Date(a.uploadedAt).toLocaleDateString('ru-RU')}</span>
+                            {getTripAttachmentStorageMessage(a) && (
+                              <span className="text-amber-700">{getTripAttachmentStorageMessage(a)}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {a.downloadUrl && (
+                              <button
+                                type="button"
+                                onClick={() => openTripAttachment({
+                                  downloadUrl: a.downloadUrl as string,
+                                  fileName: a.fileName,
+                                  fileType: a.fileType,
+                                })}
+                                className="inline-flex items-center gap-1 px-2 py-1 hover:bg-muted rounded-md transition"
+                                title="Просмотр"
+                              >
+                                <Eye className="w-3 h-3 text-primary" /> Просмотр
+                              </button>
+                            )}
+                            {a.downloadUrl && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!a.downloadUrl) return;
+                                  const link = document.createElement('a');
+                                  link.href = a.downloadUrl;
+                                  link.download = a.fileName;
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 hover:bg-primary/10 rounded-md transition"
+                                title="Скачать"
+                              >
+                                <Download className="w-3 h-3 text-primary" /> Скачать
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => replaceExistingAttachment(a, section)}
+                              className="inline-flex items-center gap-1 px-2 py-1 hover:bg-amber-100 rounded-md transition"
+                              title="Заменить файл"
+                            >
+                              <RefreshCw className="w-3 h-3 text-amber-700" /> Заменить файл
+                            </button>
+                            <button type="button" onClick={() => deleteExistingAttachment(a.id)} className="inline-flex items-center gap-1 px-2 py-1 hover:bg-red-100 rounded-md transition" title="Удалить">
+                              <Trash2 className="w-3 h-3 text-red-500" /> Удалить
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Extract confirmation dialog */}
             {extractData && (
@@ -1476,6 +1820,29 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
       </fieldset>
 
+      {/* ═══ Налоговый код (отдельно от серии счёта) ═══ */}
+      {isEdit && (
+        <div className="bg-card border rounded-xl p-5 space-y-3">
+          <p className="text-sm font-semibold flex items-center gap-2">
+            <FileText className="w-4 h-4 text-primary" /> Налоговый код
+          </p>
+          <p className={`text-xs font-medium ${taxCode.trim() ? 'text-emerald-700' : 'text-amber-700'}`}>
+            {taxCodeIndicatorLabel(taxCode)}
+          </p>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Код налоговой</label>
+            <input
+              type="text"
+              value={taxCode}
+              onChange={(e) => setTaxCode(e.target.value)}
+              disabled={isArchived}
+              placeholder="Код после одобрения налоговой"
+              className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none disabled:opacity-60"
+            />
+          </div>
+        </div>
+      )}
+
       {/* ═══ Серии счетов (вне fieldset — всегда редактируемы) ═══ */}
       {isEdit && (
         <div className="bg-card border rounded-xl p-5 space-y-3">
@@ -1506,9 +1873,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         </div>
       )}
 
-        {error && <p className="text-sm text-red-500 bg-red-50 p-3 rounded-lg">{error}</p>}
-
-        {!isCompleted ? (
+        {!formLocked ? (
           <div className="flex items-center gap-3 flex-wrap">
             <button type="submit" disabled={saving}
               className="inline-flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-60 transition">
