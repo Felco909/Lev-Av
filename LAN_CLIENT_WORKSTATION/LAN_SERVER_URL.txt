@@ -1,0 +1,6 @@
+http://WIN-H4E5L2021CS:3000
+http://192.168.0.100:3000
+
+# Auto-updated by start.bat on main server PC.
+# First URL uses stable server host name, second uses current LAN IPv4.
+# If server IP changes, run start.bat again and copy LAN_CLIENT_WORKSTATION to other PCs.
