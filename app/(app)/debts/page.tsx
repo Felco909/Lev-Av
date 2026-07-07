@@ -6,11 +6,11 @@ import { useNavState } from '@/hooks/use-nav-state';
 import { Wallet, ArrowUpRight, ArrowDownRight, Eye, AlertTriangle, Clock } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
-interface DebtRow {
+interface TripDebtRow {
   id: string;
   tripNumber: string;
-  clientName?: string;
-  carrierName?: string;
+  routeFrom: string;
+  routeTo: string;
   rateAmd: number;
   paidAmd: number;
   remaining: number;
@@ -20,12 +20,25 @@ interface DebtRow {
   daysLeft: number | null;
   isOverdue: boolean;
   isUrgent: boolean;
+  cashGap: number;
+}
+
+interface GroupedClient {
+  client: { id: string; name: string; phone: string | null; email: string | null };
+  trips: TripDebtRow[];
+  totalDebt: number;
+}
+
+interface GroupedCarrier {
+  carrier: { id: string; name: string };
+  trips: TripDebtRow[];
+  totalDebt: number;
 }
 
 export default function DebtsPage() {
   const [loading, setLoading] = useState(true);
-  const [clientDebts, setClientDebts] = useState<DebtRow[]>([]);
-  const [carrierDebts, setCarrierDebts] = useState<DebtRow[]>([]);
+  const [groupedClient, setGroupedClient] = useState<GroupedClient[]>([]);
+  const [groupedCarrier, setGroupedCarrier] = useState<GroupedCarrier[]>([]);
   const [totalClient, setTotalClient] = useState(0);
   const [totalCarrier, setTotalCarrier] = useState(0);
 
@@ -33,8 +46,8 @@ export default function DebtsPage() {
     fetch('/api/debts')
       .then(r => r.json())
       .then(data => {
-        setClientDebts(data?.clientDebts ?? []);
-        setCarrierDebts(data?.carrierDebts ?? []);
+        setGroupedClient(data?.grouped ?? []);
+        setGroupedCarrier(data?.groupedCarrier ?? []);
         setTotalClient(data?.totalClientDebt ?? 0);
         setTotalCarrier(data?.totalCarrierDebt ?? 0);
       })
@@ -42,7 +55,6 @@ export default function DebtsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // ═══ Navigation state preservation (scroll only) ═══
   const scrollRef = useRef(0);
   useNavState('debts',
     () => ({ scrollY: typeof window !== 'undefined' ? window.scrollY : 0 }),
@@ -59,20 +71,10 @@ export default function DebtsPage() {
 
   const fmt = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 0 });
 
-  // Sort: overdue first, then urgent, then normal, then no-date
-  const sortByUrgency = (a: DebtRow, b: DebtRow) => {
-    const scoreA = a.isOverdue ? 0 : a.isUrgent ? 1 : a.paymentDueDate ? 2 : 3;
-    const scoreB = b.isOverdue ? 0 : b.isUrgent ? 1 : b.paymentDueDate ? 2 : 3;
-    if (scoreA !== scoreB) return scoreA - scoreB;
-    if (a.daysLeft != null && b.daysLeft != null) return a.daysLeft - b.daysLeft;
-    return 0;
-  };
-  const sortedClient = [...clientDebts].sort(sortByUrgency);
-  const sortedCarrier = [...carrierDebts].sort(sortByUrgency);
-
-  // Totals only for truly OVERDUE debt (красная строка банка)
-  const overdueClientTotal = sortedClient.filter(d => d.isOverdue).reduce((s, d) => s + d.remaining, 0);
-  const overdueCarrierTotal = sortedCarrier.filter(d => d.isOverdue).reduce((s, d) => s + d.remaining, 0);
+  const totalClientTrips = groupedClient.reduce((s, g) => s + g.trips.length, 0);
+  const totalCarrierTrips = groupedCarrier.reduce((s, g) => s + g.trips.length, 0);
+  const overdueClientTotal = groupedClient.flatMap(g => g.trips).filter(t => t.isOverdue).reduce((s, t) => s + t.remaining, 0);
+  const overdueCarrierTotal = groupedCarrier.flatMap(g => g.trips).filter(t => t.isOverdue).reduce((s, t) => s + t.remaining, 0);
 
   if (loading) {
     return (
@@ -82,27 +84,39 @@ export default function DebtsPage() {
     );
   }
 
-  const renderDueCell = (d: DebtRow) => {
-    if (!d.paymentDueDate) {
-      return <span className="text-xs text-muted-foreground">—</span>;
-    }
-    const dateStr = new Date(d.paymentDueDate).toLocaleDateString('ru-RU');
-    if (d.isOverdue) {
+  const tripRowBg = (t: TripDebtRow) => {
+    if (t.isOverdue) return 'bg-red-50/60 dark:bg-red-950/20';
+    if (t.cashGap > 0) return 'bg-orange-50/60 dark:bg-orange-950/20';
+    if (t.isUrgent) return 'bg-amber-50/40 dark:bg-amber-950/20';
+    return '';
+  };
+
+  const remainingClass = (t: TripDebtRow) => {
+    if (t.isOverdue) return 'text-red-600 font-bold';
+    if (t.cashGap > 0) return 'text-orange-700 dark:text-orange-400 font-semibold';
+    if (t.isUrgent) return 'text-amber-700 dark:text-amber-400 font-semibold';
+    return 'font-semibold';
+  };
+
+  const renderDue = (t: TripDebtRow) => {
+    if (!t.paymentDueDate) return <span className="text-xs text-muted-foreground">—</span>;
+    const dateStr = new Date(t.paymentDueDate).toLocaleDateString('ru-RU');
+    if (t.isOverdue) {
       return (
         <div className="flex flex-col items-end gap-0.5">
           <span className="text-xs font-mono text-red-700 dark:text-red-400">{dateStr}</span>
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-100 dark:bg-red-950/50 dark:text-red-300 px-1.5 py-0.5 rounded">
-            <AlertTriangle className="w-2.5 h-2.5" /> просрочено {Math.abs(d.daysLeft ?? 0)} дн.
+            <AlertTriangle className="w-2.5 h-2.5" /> просрочено {Math.abs(t.daysLeft ?? 0)} дн.
           </span>
         </div>
       );
     }
-    if (d.isUrgent) {
+    if (t.isUrgent) {
       return (
         <div className="flex flex-col items-end gap-0.5">
           <span className="text-xs font-mono text-amber-700 dark:text-amber-400">{dateStr}</span>
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 px-1.5 py-0.5 rounded">
-            <Clock className="w-2.5 h-2.5" /> {d.daysLeft === 0 ? 'сегодня' : `через ${d.daysLeft} дн.`}
+            <Clock className="w-2.5 h-2.5" /> {t.daysLeft === 0 ? 'сегодня' : `через ${t.daysLeft} дн.`}
           </span>
         </div>
       );
@@ -110,24 +124,19 @@ export default function DebtsPage() {
     return (
       <div className="flex flex-col items-end gap-0.5">
         <span className="text-xs font-mono text-muted-foreground">{dateStr}</span>
-        {d.daysLeft != null && <span className="text-[10px] text-muted-foreground">через {d.daysLeft} дн.</span>}
+        {t.daysLeft != null && <span className="text-[10px] text-muted-foreground">через {t.daysLeft} дн.</span>}
       </div>
     );
   };
 
-  const remainingCellClass = (d: DebtRow) =>
-    d.isOverdue
-      ? 'text-red-600 font-bold'
-      : d.isUrgent
-      ? 'text-amber-700 dark:text-amber-400 font-semibold'
-      : 'text-foreground font-semibold';
-
-  const rowBgClass = (d: DebtRow) =>
-    d.isOverdue
-      ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30'
-      : d.isUrgent
-      ? 'bg-amber-50/40 dark:bg-amber-950/20 hover:bg-amber-50 dark:hover:bg-amber-950/30'
-      : 'hover:bg-muted/30';
+  const sortTrips = (trips: TripDebtRow[]) =>
+    [...trips].sort((a, b) => {
+      const sa = a.isOverdue ? 0 : a.cashGap > 0 ? 1 : a.isUrgent ? 2 : a.paymentDueDate ? 3 : 4;
+      const sb = b.isOverdue ? 0 : b.cashGap > 0 ? 1 : b.isUrgent ? 2 : b.paymentDueDate ? 3 : 4;
+      if (sa !== sb) return sa - sb;
+      if (a.daysLeft != null && b.daysLeft != null) return a.daysLeft - b.daysLeft;
+      return 0;
+    });
 
   return (
     <div className="space-y-6">
@@ -149,7 +158,7 @@ export default function DebtsPage() {
             <div className="flex-1">
               <p className="text-xs text-muted-foreground">Нам должны</p>
               <p className="text-2xl font-bold font-mono text-green-700 dark:text-green-400">{fmt(totalClient)} ֏</p>
-              <p className="text-[10px] text-muted-foreground">{clientDebts.length} заяв{clientDebts.length === 1 ? 'ка' : clientDebts.length < 5 ? 'ки' : 'ок'}</p>
+              <p className="text-[10px] text-muted-foreground">{totalClientTrips} заяв{totalClientTrips === 1 ? 'ка' : totalClientTrips < 5 ? 'ки' : 'ок'} · {groupedClient.length} клиент{groupedClient.length === 1 ? '' : groupedClient.length < 5 ? 'а' : 'ов'}</p>
               {overdueClientTotal > 0 && (
                 <p className="mt-1 text-[11px] font-semibold text-red-700 dark:text-red-400 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" /> Просрочено: {fmt(overdueClientTotal)} ֏
@@ -166,7 +175,7 @@ export default function DebtsPage() {
             <div className="flex-1">
               <p className="text-xs text-muted-foreground">Мы должны</p>
               <p className="text-2xl font-bold font-mono text-red-700 dark:text-red-400">{fmt(totalCarrier)} ֏</p>
-              <p className="text-[10px] text-muted-foreground">{carrierDebts.length} заяв{carrierDebts.length === 1 ? 'ка' : carrierDebts.length < 5 ? 'ки' : 'ок'}</p>
+              <p className="text-[10px] text-muted-foreground">{totalCarrierTrips} заяв{totalCarrierTrips === 1 ? 'ка' : totalCarrierTrips < 5 ? 'ки' : 'ок'} · {groupedCarrier.length} перевозчик{groupedCarrier.length === 1 ? '' : groupedCarrier.length < 5 ? 'а' : 'ов'}</p>
               {overdueCarrierTotal > 0 && (
                 <p className="mt-1 text-[11px] font-semibold text-red-700 dark:text-red-400 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" /> Просрочено: {fmt(overdueCarrierTotal)} ֏
@@ -179,127 +188,163 @@ export default function DebtsPage() {
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded bg-red-500" /> Просрочка (срок оплаты прошёл)
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded bg-amber-500" /> Срок через 1–3 дня
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded bg-slate-300" /> Без установленного срока или срок далёкий
-        </span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-red-500" /> Просрочка</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-orange-400" /> Кассовый разрыв</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400" /> Срок через 1–3 дня</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-slate-300" /> Без срока / далёкий срок</span>
       </div>
 
-      {/* Client debts table */}
-      <div className="bg-card rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <ArrowDownRight className="w-4 h-4 text-green-600" />
-            Долги клиентов
-            <span className="text-xs text-muted-foreground font-normal">(нам должны)</span>
-          </h2>
-        </div>
-        {sortedClient.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground text-sm">Нет долгов клиентов</div>
+      {/* Client debts — grouped by client */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <ArrowDownRight className="w-4 h-4 text-green-600" />
+          Долги клиентов
+          <span className="text-xs text-muted-foreground font-normal">(нам должны)</span>
+        </h2>
+
+        {groupedClient.length === 0 ? (
+          <div className="bg-card rounded-xl p-8 text-center text-muted-foreground text-sm">Нет долгов клиентов</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground bg-muted/50">
-                  <th className="text-left px-4 py-3 font-medium">Заявка</th>
-                  <th className="text-left px-4 py-3 font-medium">Клиент</th>
-                  <th className="text-right px-4 py-3 font-medium">Ставка</th>
-                  <th className="text-right px-4 py-3 font-medium">Оплачено</th>
-                  <th className="text-right px-4 py-3 font-medium">Остаток</th>
-                  <th className="text-right px-4 py-3 font-medium">Срок оплаты</th>
-                  <th className="text-right px-4 py-3 font-medium w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedClient.map(d => (
-                  <tr key={d.id} className={`border-b border-muted last:border-0 transition-colors ${rowBgClass(d)}`}>
-                    <td className="px-4 py-3">
-                      <CrumbLink href={`/trips/${d.id}`} fromLabel="Долги" fromKey="debts" className="font-mono text-xs text-primary hover:underline">{d.tripNumber}</CrumbLink>
-                      <div className="text-[10px] text-muted-foreground">{formatDate(d.tripDate)}</div>
-                    </td>
-                    <td className="px-4 py-3">{d.clientName}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(d.rateAmd)} ֏</td>
-                    <td className="px-4 py-3 text-right font-mono text-green-600">{fmt(d.paidAmd)} ֏</td>
-                    <td className={`px-4 py-3 text-right font-mono ${remainingCellClass(d)}`}>{fmt(d.remaining)} ֏</td>
-                    <td className="px-4 py-3 text-right">{renderDueCell(d)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <CrumbLink href={`/trips/${d.id}`} fromLabel="Долги" fromKey="debts" className="p-1.5 hover:bg-muted rounded-md transition inline-block" title="Просмотр">
-                        <Eye className="w-3.5 h-3.5 text-muted-foreground" />
-                      </CrumbLink>
-                    </td>
-                  </tr>
+          groupedClient.map(group => (
+            <div key={group.client.id} className="bg-card rounded-xl shadow-sm overflow-hidden">
+              {/* Client header */}
+              <div className="px-5 py-3 bg-muted/30 flex items-center justify-between gap-3 border-b">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-semibold truncate">{group.client.name}</span>
+                  {group.client.phone && (
+                    <a href={`tel:${group.client.phone}`} className="text-xs text-muted-foreground hover:text-primary hidden sm:block">{group.client.phone}</a>
+                  )}
+                </div>
+                <div className="shrink-0 text-right">
+                  <span className="text-sm font-bold font-mono text-red-600">{fmt(group.totalDebt)} ֏</span>
+                  <span className="text-[10px] text-muted-foreground ml-1.5">{group.trips.length} заяв.</span>
+                </div>
+              </div>
+
+              {/* Trips */}
+              <div className="divide-y divide-muted">
+                {sortTrips(group.trips).map(t => (
+                  <div key={t.id} className={`px-4 py-3 flex items-center gap-2 flex-wrap transition-colors ${tripRowBg(t)}`}>
+                    {/* Trip number + date */}
+                    <div className="min-w-[80px]">
+                      <CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="font-mono text-xs text-primary hover:underline font-semibold">{t.tripNumber}</CrumbLink>
+                      <div className="text-[10px] text-muted-foreground">{formatDate(t.tripDate)}</div>
+                    </div>
+
+                    {/* Route */}
+                    {(t.routeFrom || t.routeTo) && (
+                      <div className="flex-1 min-w-[100px] text-xs text-muted-foreground truncate">
+                        {t.routeFrom}{t.routeFrom && t.routeTo ? ' → ' : ''}{t.routeTo}
+                      </div>
+                    )}
+
+                    {/* Cash gap badge */}
+                    {t.cashGap > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-orange-700 bg-orange-100 dark:bg-orange-950/50 dark:text-orange-300 px-1.5 py-0.5 rounded whitespace-nowrap">
+                        ⚠ разрыв {fmt(t.cashGap)} ֏
+                      </span>
+                    )}
+
+                    {/* Financials */}
+                    <div className="flex items-center gap-3 text-xs ml-auto shrink-0">
+                      <span className="text-muted-foreground font-mono">{fmt(t.rateAmd)} ֏</span>
+                      <span className="text-green-600 font-mono">{fmt(t.paidAmd)} ֏</span>
+                      <span className={`font-mono ${remainingClass(t)}`}>{fmt(t.remaining)} ֏</span>
+                    </div>
+
+                    {/* Due date */}
+                    <div className="shrink-0">{renderDue(t)}</div>
+
+                    {/* Link */}
+                    <CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="p-1.5 hover:bg-muted rounded-md transition shrink-0" title="Просмотр">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </CrumbLink>
+                  </div>
                 ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-muted/30 font-semibold">
-                  <td className="px-4 py-3" colSpan={4}>Итого</td>
-                  <td className="px-4 py-3 text-right font-mono text-red-600">{fmt(totalClient)} ֏</td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            </table>
+              </div>
+            </div>
+          ))
+        )}
+
+        {groupedClient.length > 0 && (
+          <div className="flex justify-end px-4 py-2 text-sm font-semibold">
+            <span className="text-muted-foreground mr-2">Итого клиенты:</span>
+            <span className="font-mono text-red-600">{fmt(totalClient)} ֏</span>
           </div>
         )}
       </div>
 
-      {/* Carrier debts table */}
-      <div className="bg-card rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <ArrowUpRight className="w-4 h-4 text-red-600" />
-            Долги перевозчикам
-            <span className="text-xs text-muted-foreground font-normal">(мы должны)</span>
-          </h2>
-        </div>
-        {sortedCarrier.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground text-sm">Нет долгов перевозчикам</div>
+      {/* Carrier debts — grouped by carrier */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <ArrowUpRight className="w-4 h-4 text-red-600" />
+          Долги перевозчикам
+          <span className="text-xs text-muted-foreground font-normal">(мы должны)</span>
+        </h2>
+
+        {groupedCarrier.length === 0 ? (
+          <div className="bg-card rounded-xl p-8 text-center text-muted-foreground text-sm">Нет долгов перевозчикам</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground bg-muted/50">
-                  <th className="text-left px-4 py-3 font-medium">Заявка</th>
-                  <th className="text-left px-4 py-3 font-medium">Перевозчик</th>
-                  <th className="text-right px-4 py-3 font-medium">Сумма</th>
-                  <th className="text-right px-4 py-3 font-medium">Оплачено</th>
-                  <th className="text-right px-4 py-3 font-medium">Остаток</th>
-                  <th className="text-right px-4 py-3 font-medium">Срок оплаты</th>
-                  <th className="text-right px-4 py-3 font-medium w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedCarrier.map(d => (
-                  <tr key={d.id} className={`border-b border-muted last:border-0 transition-colors ${rowBgClass(d)}`}>
-                    <td className="px-4 py-3">
-                      <CrumbLink href={`/trips/${d.id}`} fromLabel="Долги" fromKey="debts" className="font-mono text-xs text-primary hover:underline">{d.tripNumber}</CrumbLink>
-                      <div className="text-[10px] text-muted-foreground">{formatDate(d.tripDate)}</div>
-                    </td>
-                    <td className="px-4 py-3">{d.carrierName}</td>
-                    <td className="px-4 py-3 text-right font-mono">{fmt(d.rateAmd)} ֏</td>
-                    <td className="px-4 py-3 text-right font-mono text-green-600">{fmt(d.paidAmd)} ֏</td>
-                    <td className={`px-4 py-3 text-right font-mono ${remainingCellClass(d)}`}>{fmt(d.remaining)} ֏</td>
-                    <td className="px-4 py-3 text-right">{renderDueCell(d)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <CrumbLink href={`/trips/${d.id}`} fromLabel="Долги" fromKey="debts" className="p-1.5 hover:bg-muted rounded-md transition inline-block" title="Просмотр">
-                        <Eye className="w-3.5 h-3.5 text-muted-foreground" />
-                      </CrumbLink>
-                    </td>
-                  </tr>
+          groupedCarrier.map(group => (
+            <div key={group.carrier.id} className="bg-card rounded-xl shadow-sm overflow-hidden">
+              {/* Carrier header */}
+              <div className="px-5 py-3 bg-muted/30 flex items-center justify-between gap-3 border-b">
+                <span className="text-sm font-semibold truncate">{group.carrier.name}</span>
+                <div className="shrink-0 text-right">
+                  <span className="text-sm font-bold font-mono text-red-600">{fmt(group.totalDebt)} ֏</span>
+                  <span className="text-[10px] text-muted-foreground ml-1.5">{group.trips.length} заяв.</span>
+                </div>
+              </div>
+
+              {/* Trips */}
+              <div className="divide-y divide-muted">
+                {sortTrips(group.trips).map(t => (
+                  <div key={t.id} className={`px-4 py-3 flex items-center gap-2 flex-wrap transition-colors ${tripRowBg(t)}`}>
+                    {/* Trip number + date */}
+                    <div className="min-w-[80px]">
+                      <CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="font-mono text-xs text-primary hover:underline font-semibold">{t.tripNumber}</CrumbLink>
+                      <div className="text-[10px] text-muted-foreground">{formatDate(t.tripDate)}</div>
+                    </div>
+
+                    {/* Route */}
+                    {(t.routeFrom || t.routeTo) && (
+                      <div className="flex-1 min-w-[100px] text-xs text-muted-foreground truncate">
+                        {t.routeFrom}{t.routeFrom && t.routeTo ? ' → ' : ''}{t.routeTo}
+                      </div>
+                    )}
+
+                    {/* Cash gap badge */}
+                    {t.cashGap > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-orange-700 bg-orange-100 dark:bg-orange-950/50 dark:text-orange-300 px-1.5 py-0.5 rounded whitespace-nowrap">
+                        ⚠ разрыв {fmt(t.cashGap)} ֏
+                      </span>
+                    )}
+
+                    {/* Financials */}
+                    <div className="flex items-center gap-3 text-xs ml-auto shrink-0">
+                      <span className="text-muted-foreground font-mono">{fmt(t.rateAmd)} ֏</span>
+                      <span className="text-green-600 font-mono">{fmt(t.paidAmd)} ֏</span>
+                      <span className={`font-mono ${remainingClass(t)}`}>{fmt(t.remaining)} ֏</span>
+                    </div>
+
+                    {/* Due date */}
+                    <div className="shrink-0">{renderDue(t)}</div>
+
+                    {/* Link */}
+                    <CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="p-1.5 hover:bg-muted rounded-md transition shrink-0" title="Просмотр">
+                      <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                    </CrumbLink>
+                  </div>
                 ))}
-              </tbody>
-              <tfoot>
-                <tr className="bg-muted/30 font-semibold">
-                  <td className="px-4 py-3" colSpan={4}>Итого</td>
-                  <td className="px-4 py-3 text-right font-mono text-red-600">{fmt(totalCarrier)} ֏</td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            </table>
+              </div>
+            </div>
+          ))
+        )}
+
+        {groupedCarrier.length > 0 && (
+          <div className="flex justify-end px-4 py-2 text-sm font-semibold">
+            <span className="text-muted-foreground mr-2">Итого перевозчики:</span>
+            <span className="font-mono text-red-600">{fmt(totalCarrier)} ֏</span>
           </div>
         )}
       </div>

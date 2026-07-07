@@ -17,6 +17,25 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (trip.status === 'completed' || trip.status === 'paid') {
       return NextResponse.json({ error: 'Заявка уже завершена' }, { status: 400 });
     }
+    if (trip.status !== 'sverka') {
+      return NextResponse.json({ error: 'Завершить можно только из статуса «Сверка».' }, { status: 400 });
+    }
+
+    // 3-condition gate: client debt, carrier debt, taxCode
+    const payments = await prisma.payment.findMany({ where: { tripId } });
+    const clientRateAmd = Number((trip as any).clientRateAmd ?? trip.clientRate ?? 0);
+    const clientPaidAmd = payments.filter((p: any) => p.type === 'client').reduce((s: number, p: any) => s + Number(p.amountAmd || 0), 0);
+    const clientDebt = Math.round(clientRateAmd - clientPaidAmd);
+    const carrierRateAmd = Number((trip as any).carrierRateAmd ?? trip.carrierRate ?? 0);
+    const carrierPaidAmd = payments.filter((p: any) => p.type === 'carrier').reduce((s: number, p: any) => s + Number(p.amountAmd || 0), 0);
+    const carrierDebt = Math.round(carrierRateAmd - carrierPaidAmd);
+    const blockingErrors: string[] = [];
+    if (clientDebt > 0) blockingErrors.push(`Клиент не полностью оплатил (остаток: ${clientDebt.toLocaleString('ru-RU')} AMD)`);
+    if (trip.tripType === 'expedition' && carrierDebt > 0) blockingErrors.push(`Перевозчик не получил полную оплату (остаток: ${carrierDebt.toLocaleString('ru-RU')} AMD)`);
+    if (!(trip as any).taxCode?.trim()) blockingErrors.push('Налоговый код не заполнен');
+    if (blockingErrors.length > 0) {
+      return NextResponse.json({ error: blockingErrors.join('; '), blockingErrors }, { status: 422 });
+    }
 
     const body = await request.json().catch(() => ({}));
     const closeDebts = body?.closeDebts === true;
@@ -116,10 +135,10 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
     await prisma.trip.update({
       where: { id: tripId },
-      data: { status: 'unloaded' },
+      data: { status: 'sverka' },
     });
 
-    return NextResponse.json({ success: true, status: 'unloaded' });
+    return NextResponse.json({ success: true, status: 'sverka' });
   } catch (error) {
     console.error('Reopen trip error:', error);
     return NextResponse.json({ error: 'Ошибка открытия заявки' }, { status: 500 });

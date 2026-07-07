@@ -3,15 +3,78 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { generateInvoiceHtml, generateActHtml, generateCarrierRequestHtml, type DocOverrides } from '@/lib/document-templates';
+import { generateInvoiceHtml, generateActHtml, type DocOverrides } from '@/lib/document-templates';
 import { getCustomTemplate, getClientTemplate, processDocxTemplate, getCompanySettings } from '@/lib/template-processor';
 import { getNextDocNumber } from '@/lib/doc-numbering';
 import {
   invoiceDocx, actDocx, carrierRequestDocx,
   invoiceXlsx, actXlsx, carrierRequestXlsx,
   packDocx,
-  type DocData, type DocOverrides as GenOverrides,
+  type DocData, type DocOverrides as GenOverrides, type OrderForCarrierRequest,
 } from '@/lib/doc-generators';
+import { convertDocxBufferToPdf, convertHtmlToPdf } from '@/lib/pdf-convert';
+
+async function buildProgrammaticDocxBuffer(
+  documentType: string,
+  trip: any,
+  tripData: DocData,
+  ov: GenOverrides | undefined,
+  overrides: any,
+): Promise<Buffer> {
+  switch (documentType) {
+    case 'invoice':
+      return packDocx(invoiceDocx(tripData, ov));
+    case 'act':
+      return packDocx(actDocx(tripData, ov));
+    case 'carrier_request': {
+      const isoS = (v?: string | Date | null) => {
+        if (!v) return '';
+        const s = v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+        const [y, m, d] = s.split('-');
+        return `${d}.${m}.${y}`;
+      };
+      const crOrder: OrderForCarrierRequest = {
+        order_number: (tripData as any).requestNumber ?? `TMS-${trip.tripNumber}`,
+        order_date: isoS(trip.tripDate) || new Date().toLocaleDateString('ru-RU'),
+        contract_number: (tripData as any).contractNumber ?? undefined,
+        contract_date: isoS((tripData as any).contractDate) || undefined,
+        carrier: {
+          company_name: ov?.carrierName ?? trip.carrier?.name ?? '—',
+          truck_plate: trip.vehicle?.plateNumber,
+          trailer_plate: (tripData as any).trailerPlate ?? undefined,
+          truck_type: (tripData as any).truckType ?? undefined,
+        },
+        route: {
+          from_country: trip.routeFrom,
+          to_country: trip.routeTo,
+          from_address: (tripData as any).loadingAddress
+            ? `${trip.routeFrom}, ${(tripData as any).loadingAddress}`
+            : trip.routeFrom,
+          to_address: (tripData as any).unloadingAddress
+            ? `${trip.routeTo}, ${(tripData as any).unloadingAddress}`
+            : trip.routeTo,
+          loading_date: isoS(trip.tripDate) || '—',
+          unloading_date: isoS((tripData as any).unloadDate) || '—',
+          customs_departure: (tripData as any).customsDeparture ?? undefined,
+          customs_destination: (tripData as any).customsDestination ?? undefined,
+        },
+        cargo: {
+          name: (tripData as any).cargoName ?? '—',
+          value: (tripData as any).cargoValue != null ? `${(tripData as any).cargoValue} USD` : undefined,
+          weight_tn: (tripData as any).cargoWeight != null ? String((tripData as any).cargoWeight) : '—',
+        },
+        additional_terms: (tripData as any).additionalTerms ?? undefined,
+        price: Number(ov?.carrierRate ?? tripData.carrierRate ?? 0),
+        currency: ((overrides as any)?.freightCurrency ?? 'USD') as OrderForCarrierRequest['currency'],
+        all_in: false,
+        payment_days: 10,
+      };
+      return carrierRequestDocx(crOrder, { lang: 'ru' });
+    }
+    default:
+      throw new Error('Неизвестный тип документа');
+  }
+}
 
 function formatCurrencyPlain(v: number) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(v);
@@ -141,18 +204,17 @@ export async function POST(request: Request) {
         });
       }
 
-      // Programmatic DOCX generation
-      let doc;
-      switch (documentType) {
-        case 'invoice': doc = invoiceDocx(tripData, ov); break;
-        case 'act': doc = actDocx(tripData, ov); break;
-        case 'carrier_request':
-          if (trip.tripType !== 'expedition') return NextResponse.json({ error: 'Заявка перевозчику доступна только для экспедиции' }, { status: 400 });
-          doc = carrierRequestDocx(tripData, ov);
-          break;
-        default: return NextResponse.json({ error: 'Неизвестный тип документа' }, { status: 400 });
+      if (documentType === 'carrier_request' && trip.tripType !== 'expedition') {
+        return NextResponse.json({ error: 'Заявка перевозчику доступна только для экспедиции' }, { status: 400 });
       }
-      const buffer = await packDocx(doc);
+
+      // Programmatic DOCX generation
+      let buffer: Buffer;
+      try {
+        buffer = await buildProgrammaticDocxBuffer(documentType, trip, tripData, ov, overrides);
+      } catch {
+        return NextResponse.json({ error: 'Неизвестный тип документа' }, { status: 400 });
+      }
       return new NextResponse(buffer, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -182,99 +244,50 @@ export async function POST(request: Request) {
     }
 
     // ====== PDF FORMAT (default) ======
-    const pdfSettings = await getCompanySettings();
-    const docOverrides: DocOverrides | undefined = {
-      docNumber: ov?.docNumber,
-      docDate: ov?.docDate,
-      serviceDescription: ov?.serviceDescription,
-      amount: ov?.amount,
-      clientName: ov?.clientName,
-      clientInn: ov?.clientInn,
-      clientAddress: ov?.clientAddress,
-      clientContact: ov?.clientContact,
-      notes: ov?.notes,
-      basisText: ov?.basisText,
-      sumInWords: ov?.sumInWords,
-      company: pdfSettings,
-      currency: (trip as any).currency || 'AMD',
-    };
-
-    let htmlContent: string;
-    switch (documentType) {
-      case 'invoice':
-        htmlContent = generateInvoiceHtml(tripData as any, docOverrides);
-        break;
-      case 'act':
-        htmlContent = generateActHtml(tripData as any, docOverrides);
-        break;
-      case 'carrier_request':
+    // Rendered locally via LibreOffice headless (no external/paid service).
+    // Invoice/act use the styled HTML template (matches the company's actual paper format);
+    // carrier_request uses the same DOCX generator as the "docx" branch above.
+    let pdfBuffer: Buffer;
+    try {
+      if (documentType === 'invoice' || documentType === 'act') {
+        const pdfSettings = await getCompanySettings();
+        const docOverrides: DocOverrides = {
+          docNumber: ov?.docNumber,
+          docDate: ov?.docDate,
+          serviceDescription: ov?.serviceDescription,
+          amount: ov?.amount,
+          clientName: ov?.clientName,
+          clientInn: ov?.clientInn,
+          clientAddress: ov?.clientAddress,
+          clientContact: ov?.clientContact,
+          notes: ov?.notes,
+          basisText: ov?.basisText,
+          sumInWords: ov?.sumInWords,
+          company: pdfSettings,
+          currency: (trip as any).currency || 'AMD',
+        };
+        const html = documentType === 'invoice'
+          ? generateInvoiceHtml(tripData as any, docOverrides)
+          : generateActHtml(tripData as any, docOverrides);
+        pdfBuffer = await convertHtmlToPdf(html);
+      } else if (documentType === 'carrier_request') {
         if (trip.tripType !== 'expedition') return NextResponse.json({ error: 'Заявка перевозчику доступна только для экспедиции' }, { status: 400 });
-        htmlContent = generateCarrierRequestHtml(tripData as any);
-        break;
-      default:
+        const docxBuffer = await buildProgrammaticDocxBuffer(documentType, trip, tripData, ov, overrides);
+        pdfBuffer = await convertDocxBufferToPdf(docxBuffer);
+      } else {
         return NextResponse.json({ error: 'Неизвестный тип документа' }, { status: 400 });
-    }
-
-    // Create PDF generation request
-    const createResponse = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: htmlContent,
-        pdf_options: {
-          format: 'A4',
-          margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
-          print_background: true,
-        },
-        base_url: process.env.NEXTAUTH_URL || '',
-      }),
-    });
-
-    if (!createResponse.ok) {
-      console.error('PDF create error:', await createResponse.text().catch(() => ''));
-      return NextResponse.json({ success: false, error: 'Ошибка создания PDF' }, { status: 500 });
-    }
-
-    const { request_id } = await createResponse.json();
-    if (!request_id) {
-      return NextResponse.json({ success: false, error: 'Нет request_id' }, { status: 500 });
-    }
-
-    // Poll for status
-    const maxAttempts = 120;
-    let attempts = 0;
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const statusResponse = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusResult = await statusResponse.json();
-      const status = statusResult?.status || 'FAILED';
-      const result = statusResult?.result || null;
-
-      if (status === 'SUCCESS') {
-        if (result && result.result) {
-          const pdfBuffer = Buffer.from(result.result, 'base64');
-          return new NextResponse(pdfBuffer, {
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
-            },
-          });
-        }
-        return NextResponse.json({ success: false, error: 'PDF готов, но данные отсутствуют' }, { status: 500 });
-      } else if (status === 'FAILED') {
-        console.error('PDF generation failed:', result?.error);
-        return NextResponse.json({ success: false, error: result?.error || 'Ошибка генерации PDF' }, { status: 500 });
       }
-      attempts++;
+    } catch (e) {
+      console.error('PDF conversion error:', e);
+      return NextResponse.json({ success: false, error: 'Ошибка генерации PDF' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: false, error: 'Таймаут генерации PDF' }, { status: 500 });
+    return new NextResponse(pdfBuffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+      },
+    });
   } catch (error) {
     console.error('Error generating document:', error);
     return NextResponse.json({ success: false, error: 'Ошибка генерации документа' }, { status: 500 });

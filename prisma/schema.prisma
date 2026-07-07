@@ -38,6 +38,9 @@ model Client {
   numberFormat        String  @default("{prefix}-{number}") @map("number_format")
   resetNumberingYearly Boolean @default(false) @map("reset_numbering_yearly")
   lastResetYear       Int?    @map("last_reset_year")
+  paymentTermsDays    Int?    @map("payment_terms_days")
+  contractFile        String? @map("contract_file")
+  contractFileName    String? @map("contract_file_name")
   createdAt     DateTime @default(now()) @map("created_at")
   trips         Trip[]
   contacts      ClientContact[]
@@ -166,6 +169,26 @@ model Trip {
   clientInvoiceSeries  String? @map("client_invoice_series") // серия счёта клиента
   carrierInvoiceSeries String? @map("carrier_invoice_series") // серия счёта перевозчика
   notes        String?  @db.Text // внутренние заметки (не попадают в документы)
+  // Document number fields (exist in DB)
+  invoiceDocNumber  String?   @map("invoice_doc_number")
+  actDocNumber      String?   @map("act_doc_number")
+  invoiceDocDate    DateTime? @map("invoice_doc_date") @db.Date
+  actDocDate        DateTime? @map("act_doc_date") @db.Date
+  unloadDate        DateTime? @map("unload_date") @db.Date
+  taxCode           String?   @map("tax_code")
+  docTransportText  String?   @map("doc_transport_text") @db.Text
+  clientExpenses    Json?     @map("client_expenses")
+  carrierExpenses   Json?     @map("carrier_expenses")
+  // Carrier request document fields
+  customsDeparture   String?  @map("customs_departure")
+  customsDestination String?  @map("customs_destination")
+  cargoName          String?  @map("cargo_name")
+  cargoValue         Decimal? @map("cargo_value") @db.Decimal(14, 2)
+  truckType          String?  @map("truck_type")
+  loadingAddress     String?  @map("loading_address")
+  unloadingAddress   String?  @map("unloading_address")
+  trailerPlate       String?  @map("trailer_plate")
+  additionalTerms    String?  @map("additional_terms") @db.Text
   vehicleTripId String?  @map("vehicle_trip_id")
   vehicleTrip   VehicleTrip? @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now()) @map("created_at")

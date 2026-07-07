@@ -120,6 +120,16 @@ function TripFinance({ trip }: { trip: any }) {
   const carrierRateAmd = Number(trip?.carrierRateAmd ?? carrierRate);
   const carrierIsMultiCur = carrierCurrency !== 'AMD';
 
+  // ---- Expenses split by __carrier__ marker ----
+  const allExpenses: any[] = Array.isArray(trip?.expenses) ? trip.expenses : [];
+  const clientExpenses = allExpenses.filter((e: any) => e?.description !== '__carrier__');
+  const carrierExpenses = allExpenses.filter((e: any) => e?.description === '__carrier__');
+  const clientExpensesAmd = clientExpenses.reduce((s: number, e: any) => s + Number(e?.amountAmd ?? e?.amount ?? 0), 0);
+  const carrierExpensesAmd = carrierExpenses.reduce((s: number, e: any) => s + Number(e?.amountAmd ?? e?.amount ?? 0), 0);
+  const totalClientAmd = Math.round((clientRateAmd + clientExpensesAmd) * 100) / 100;
+  const totalCarrierAmd = isExpedition ? Math.round((carrierRateAmd + carrierExpensesAmd) * 100) / 100 : 0;
+  const profitAmd = Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100;
+
   // Load payments
   const loadPayments = useCallback(async () => {
     try {
@@ -135,15 +145,24 @@ function TripFinance({ trip }: { trip: any }) {
   const carrierPayments = payments.filter(p => p.type === 'carrier');
 
   const clientPaidAmd = clientPayments.reduce((s, p) => s + (p.amountAmd || 0), 0);
-  const clientRemaining = clientRateAmd - clientPaidAmd;
-
+  const clientRemaining = Math.max(0, totalClientAmd - clientPaidAmd);
   const carrierPaidAmd = carrierPayments.reduce((s, p) => s + (p.amountAmd || 0), 0);
-  const carrierRemaining = carrierRateAmd - carrierPaidAmd;
+  const carrierRemaining = Math.max(0, totalCarrierAmd - carrierPaidAmd);
+
+  // Cash gap: carrier paid out more than received from client
+  const hasCashGap = isExpedition && carrierPaidAmd > clientPaidAmd;
+  const cashGap = hasCashGap ? Math.round((carrierPaidAmd - clientPaidAmd) * 100) / 100 : 0;
 
   const fmt = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
   const fmtDate = (d: string) => {
     try { return new Date(d).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
     catch { return d; }
+  };
+
+  const EXPENSE_TYPE_LABELS: Record<string, string> = {
+    fuel: 'Топливо', salary: 'Зарплата', per_diem: 'Суточные', toll: 'Платные дороги',
+    ferry: 'Паром', repair: 'Ремонт', parking: 'Стоянка', downtime: 'Простой',
+    insurance: 'Страховка', other: 'Прочее',
   };
 
   const SummaryRow = ({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: 'green' | 'red' | 'debt' | null }) => {
@@ -158,6 +177,31 @@ function TripFinance({ trip }: { trip: any }) {
           <span className={`text-sm font-mono font-medium px-3 py-1.5 rounded-lg inline-block min-w-[130px] text-right ${cls}`}>{value}</span>
           {sub && <p className="text-[10px] text-muted-foreground mt-0.5 text-right pr-3">{sub}</p>}
         </div>
+      </div>
+    );
+  };
+
+  const renderExpenseList = (items: any[]) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="space-y-1 mt-1">
+        {items.map((e: any, idx: number) => {
+          const label = EXPENSE_TYPE_LABELS[e.expenseType] || e.expenseType || 'Прочее';
+          const amt = Number(e.amount ?? 0);
+          const cur = e.currency || 'AMD';
+          const rate = Number(e.exchangeRate ?? 1);
+          const amd = Number(e.amountAmd ?? amt);
+          return (
+            <div key={idx} className="flex items-center justify-between text-xs px-2 py-1 bg-muted/30 rounded">
+              <span className="text-muted-foreground">{label}</span>
+              <span className="font-mono">
+                {cur !== 'AMD'
+                  ? `${fmt(amt)} ${CUR_SYMBOLS[cur] || cur} × ${rate} = ${fmt(amd)} ֏`
+                  : `${fmt(amd)} ֏`}
+              </span>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -194,6 +238,35 @@ function TripFinance({ trip }: { trip: any }) {
         <DollarSign className="w-4 h-4 text-primary" /> Финансы
       </h3>
 
+      {/* ═══ 3 карточки: Доход / Расход / Прибыль ═══ */}
+      <div className={`grid ${isExpedition ? 'grid-cols-3' : 'grid-cols-2'} gap-3`}>
+        <div className="text-center p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
+          <p className="text-[10px] text-muted-foreground uppercase mb-1">Доход</p>
+          <p className="text-sm font-bold font-mono text-blue-700 dark:text-blue-300">{fmt(totalClientAmd)} ֏</p>
+        </div>
+        {isExpedition && (
+          <div className="text-center p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg">
+            <p className="text-[10px] text-muted-foreground uppercase mb-1">Расход</p>
+            <p className="text-sm font-bold font-mono text-orange-700 dark:text-orange-300">{fmt(totalCarrierAmd)} ֏</p>
+          </div>
+        )}
+        <div className={`text-center p-3 rounded-lg ${profitAmd >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
+          <p className="text-[10px] text-muted-foreground uppercase mb-1">Прибыль</p>
+          <p className={`text-sm font-bold font-mono ${profitAmd >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{fmt(profitAmd)} ֏</p>
+        </div>
+      </div>
+
+      {/* ═══ Кассовый разрыв ═══ */}
+      {hasCashGap && (
+        <div className="flex items-start gap-2 p-3 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-300 dark:border-yellow-700 rounded-lg text-sm">
+          <span>⚠️</span>
+          <span className="text-yellow-800 dark:text-yellow-300">
+            <span className="font-semibold">Кассовый разрыв —</span>{' '}
+            Выплачено: {fmt(carrierPaidAmd)} ֏ · Получено: {fmt(clientPaidAmd)} ֏ · Разрыв: {fmt(cashGap)} ֏
+          </span>
+        </div>
+      )}
+
       <div className={`grid grid-cols-1 ${isExpedition ? 'md:grid-cols-2' : ''} gap-6`}>
         {/* ═══════════ КЛИЕНТ ═══════════ */}
         <div className="space-y-3">
@@ -207,9 +280,19 @@ function TripFinance({ trip }: { trip: any }) {
                 : `${fmt(clientRate)} ֏`}
               sub={clientIsMultiCur ? `курс ${clientExRate} → ${fmt(clientRateAmd)} ֏` : undefined}
             />
-            {clientIsMultiCur && (
-              <SummaryRow label="Итого" value={`${fmt(clientRateAmd)} ֏`} />
+            {clientExpenses.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Доп. расходы</p>
+                {renderExpenseList(clientExpenses)}
+                <div className="flex justify-between text-xs px-2 mt-1">
+                  <span className="text-muted-foreground font-medium">Итого расходов</span>
+                  <span className="font-mono font-medium">{fmt(clientExpensesAmd)} ֏</span>
+                </div>
+              </div>
             )}
+            <div className="pt-1 border-t border-dashed">
+              <SummaryRow label="Итого клиента" value={`${fmt(totalClientAmd)} ֏`} />
+            </div>
             <SummaryRow label="Оплачено" value={`${fmt(clientPaidAmd)} ֏`} highlight="green" />
             <div className="pt-1 border-t border-dashed">
               <SummaryRow
@@ -242,10 +325,20 @@ function TripFinance({ trip }: { trip: any }) {
                   : `${fmt(carrierRate)} ֏`}
                 sub={carrierIsMultiCur ? `курс ${carrierExRate} → ${fmt(carrierRateAmd)} ֏` : undefined}
               />
-              {carrierIsMultiCur && (
-                <SummaryRow label="Итого" value={`${fmt(carrierRateAmd)} ֏`} />
+              {carrierExpenses.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Доп. расходы</p>
+                  {renderExpenseList(carrierExpenses)}
+                  <div className="flex justify-between text-xs px-2 mt-1">
+                    <span className="text-muted-foreground font-medium">Итого расходов</span>
+                    <span className="font-mono font-medium">{fmt(carrierExpensesAmd)} ֏</span>
+                  </div>
+                </div>
               )}
-              <SummaryRow label="Оплачено" value={`${fmt(carrierPaidAmd)} ֏`} highlight="green" />
+              <div className="pt-1 border-t border-dashed">
+                <SummaryRow label="Итого перевозчика" value={`${fmt(totalCarrierAmd)} ֏`} />
+              </div>
+              <SummaryRow label="Выплачено" value={`${fmt(carrierPaidAmd)} ֏`} highlight="green" />
               <div className="pt-1 border-t border-dashed">
                 <SummaryRow
                   label="Остаток"
@@ -265,17 +358,6 @@ function TripFinance({ trip }: { trip: any }) {
           </div>
         )}
       </div>
-
-      {/* ═══ Прибыль ═══ */}
-      <div className="pt-3 border-t">
-        <div className={`flex items-center justify-between rounded-lg p-3 ${Number(trip?.profitAmd ?? 0) >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
-          <span className="text-sm font-medium text-muted-foreground">Прибыль</span>
-          <span className={`text-lg font-bold font-mono ${Number(trip?.profitAmd ?? 0) >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
-            {Number(trip?.profitAmd ?? 0).toLocaleString('ru-RU')} ֏
-          </span>
-        </div>
-      </div>
-
     </div>
   );
 }
@@ -503,24 +585,6 @@ export default function TripDetailPage() {
       {/* ===== ФИНАНСЫ ===== */}
       {trip && <TripFinance trip={trip} />}
 
-      {/* ===== СЕРИИ СЧЕТОВ ДЛЯ НАЛОГОВОЙ ===== */}
-      <div className="bg-card rounded-xl p-5 shadow-sm">
-        <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
-          <FileText className="w-4 h-4 text-primary" /> Серии счетов для налоговой отчётности
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground">Серия счёта клиента</p>
-            <p className="text-sm font-medium mt-0.5">{trip?.clientInvoiceSeries || <span className="text-muted-foreground italic">не заполнено</span>}</p>
-          </div>
-          {trip?.tripType === 'expedition' && (
-            <div>
-              <p className="text-xs text-muted-foreground">Серия счёта перевозчика</p>
-              <p className="text-sm font-medium mt-0.5">{trip?.carrierInvoiceSeries || <span className="text-muted-foreground italic">не заполнено</span>}</p>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* ===== ЗАМЕТКИ ===== */}
       {trip?.notes && (

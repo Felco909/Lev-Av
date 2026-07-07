@@ -1,9 +1,11 @@
-import {
+﻿import {
   Document, Packer, Paragraph, TextRun, AlignmentType,
   Table, TableRow, TableCell, WidthType, BorderStyle, TabStopType, TabStopPosition,
-  HeadingLevel,
+  HeadingLevel, ImageRun, VerticalAlign,
 } from 'docx';
 import ExcelJS from 'exceljs';
+import fs from 'fs';
+import path from 'path';
 
 export interface DocData {
   tripNumber: string;
@@ -19,6 +21,21 @@ export interface DocData {
   driver?: { fullName: string; phone?: string | null } | null;
   carrier?: { name: string; contactPerson?: string | null; phone?: string | null; email?: string | null; inn?: string | null } | null;
   expenses?: { expenseType: string; amount: number; description?: string | null }[];
+  // Fields for carrier request document
+  unloadDate?: string | null;
+  contractNumber?: string | null;
+  contractDate?: string | null;
+  requestNumber?: string | null;
+  customsDeparture?: string | null;
+  customsDestination?: string | null;
+  cargoName?: string | null;
+  cargoWeight?: number | null;
+  cargoValue?: number | null;
+  truckType?: string | null;
+  loadingAddress?: string | null;
+  unloadingAddress?: string | null;
+  trailerPlate?: string | null;
+  additionalTerms?: string | null;
 }
 
 export interface DocOverrides {
@@ -35,6 +52,7 @@ export interface DocOverrides {
   carrierContact?: string;
   carrierPhone?: string;
   carrierRate?: number;
+  freightText?: string;
   notes?: string;
   contractNumber?: string;
   contractDate?: string;
@@ -43,8 +61,8 @@ export interface DocOverrides {
   sumInWords?: string;
 }
 
-function fmtDate(d: string | Date): string {
-  try { return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(d)); }
+function fmtDate(d: string | Date, locale = 'ru-RU'): string {
+  try { return new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'long', year: 'numeric' }).format(new Date(d)); }
   catch { return '—'; }
 }
 function fmtCurrency(v: number): string {
@@ -180,50 +198,369 @@ export function actDocx(trip: DocData, ov?: DocOverrides): Document {
   });
 }
 
-export function carrierRequestDocx(trip: DocData, ov?: DocOverrides): Document {
-  const docNum = ov?.docNumber || `ЗВК-${trip.tripNumber}`;
-  const docDate = ov?.docDate ? fmtDate(ov.docDate) : todayStr();
-  const crName = ov?.carrierName || trip.carrier?.name || '—';
-  const crInn = ov?.carrierInn ?? (trip.carrier?.inn || '—');
-  const crContact = ov?.carrierContact ?? (trip.carrier?.contactPerson || '—');
-  const crPhone = ov?.carrierPhone ?? (trip.carrier?.phone || '—');
-  const rate = ov?.carrierRate ?? (trip.carrierRate || 0);
-  const notes = ov?.notes || 'Перевозчик обязуется предоставить транспорт в указанные сроки. Оплата производится по факту выполнения перевозки и предоставления полного пакета документов.';
+export interface OrderForCarrierRequest {
+  order_number: string;
+  order_date: string;           // "26.06.2026"  DD.MM.YYYY
+  contract_number?: string;
+  contract_date?: string;
+  carrier: {
+    company_name: string;
+    truck_plate?: string;
+    trailer_plate?: string;
+    truck_type?: string;
+  };
+  route: {
+    from_country: string;
+    to_country: string;
+    from_address: string;
+    to_address: string;
+    loading_date: string;
+    unloading_date: string;
+    customs_departure?: string;
+    customs_destination?: string;
+  };
+  cargo: {
+    name: string;
+    value?: string;
+    weight_tn: string;
+  };
+  additional_terms?: string;
+  price: number;
+  currency: 'RUB' | 'AMD' | 'USD' | 'EUR';
+  all_in?: boolean;
+  payment_days: number;
+}
 
-  return new Document({
+// ---------------------------------------------------------------------------
+// Carrier Request — bilingual RU + AM document
+// ---------------------------------------------------------------------------
+
+const CR_COMPANY_RU = {
+  name: 'ООО «Лев Энд Ав»',
+  address: '0046 РА, г. Ереван, ул. С. Таронци 3/18',
+  inn: 'ИНН: 02248043',
+  email: 'avet_avet83@mail.ru',
+  phone: 'тел.: +37499902007 (Саргис)',
+};
+const CR_COMPANY_AM = {
+  name: '«ԼԵՎ ԵՎ ԱՎ» ՍՊԸ',
+  address: 'Հասցե: ՀՀ, ք. Երևան, Ս. Տարոնցի 3/18, 0046',
+  inn: 'ՀՎՀՀ: 02248043',
+  email: 'Էլ. հասցե: avet_avet83@mail.ru',
+  phone: 'Հեռ.: +37499902007 (Սարգիս)',
+};
+
+const CR_LOGO_PATH = require('path').join(process.cwd(), 'public', 'levav-logo.png');
+const CR_LOGO_W = 70;
+const CR_LOGO_H = 70;
+
+function crVal(v: string | undefined | null): string {
+  return v != null && v !== '' ? v : '—';
+}
+
+function ruCalendarDaysPhrase(n: number): string {
+  const n100 = n % 100;
+  const n10 = n % 10;
+  if (n100 >= 11 && n100 <= 14) return `${n} календарных дней`;
+  if (n10 === 1) return `${n} календарный день`;
+  if (n10 >= 2 && n10 <= 4) return `${n} календарных дня`;
+  return `${n} календарных дней`;
+}
+
+interface CrLabel { ru: string; am: string }
+
+const CR_T = {
+  requestTitle: {
+    ru: (n: string, d: string) => `Заявка № ${n} от ${d}`,
+    am: (n: string, d: string) => `Հայտ № ${n}, ${d} թ.`,
+  },
+  // NOTE: not covered by the proofread reference text supplied for this fix —
+  // corrected for grammar only, still needs native-speaker sign-off.
+  toContract: {
+    ru: (n: string, d: string) => `к договору № ${n}${d ? ' от ' + d : ''}`,
+    am: (n: string, d: string) => `Հավելված № ${n} պայմանագրին${d ? ', ' + d + ' թ.' : ''}`,
+  },
+  toCarrier: {
+    ru: (name: string) => `Уважаемые господа, ${name}!`,
+    am: (name: string) => `Հարգելի՛ պարոն ${name},`,
+  },
+  intro: {
+    ru: 'Согласно предварительной договорённости, просим Вас обеспечить выполнение перевозки груза на следующих условиях:',
+    am: 'Համաձայն նախնական պայմանագրի՝ խնդրում ենք ապահովել բեռնափոխադրումը հետևյալ պայմաններով.',
+  },
+  route:     { ru: 'Маршрут',                               am: 'Երթուղի' },
+  loading:   { ru: 'Дата и место загрузки',                  am: 'Բեռնման ամսաթիվ և վայր' },
+  cusDep:    { ru: 'Таможня отправления',                    am: 'Մեկնման մաքսատուն' },
+  cusDest:   { ru: 'Таможня назначения',                     am: 'Նշանակման մաքսատուն' },
+  unloading: { ru: 'Дата и место выгрузки',                  am: 'Բեռնաթափման ամսաթիվ և վայր' },
+  cargo:     { ru: 'Груз (наименование, стоимость, вес)',    am: 'Բեռ (անվանում, արժեք, քաշ)' },
+  truckT:    { ru: 'Тип подвижного состава',                 am: 'Փոխադրամիջոցի տեսակ' },
+  truckN:    { ru: 'Номер авто',                             am: 'Ավտոմեքենայի համարանիշ' },
+  // NOTE: not covered by the proofread reference text — grammar-fixed only.
+  addl:      { ru: 'Дополнительные условия',                 am: 'Լրացուցիչ պայմաններ' },
+  condTitle: { ru: 'Условия транспортного заказа:',          am: 'Փոխադրման հայտի պայմաններ' },
+  freight:   { ru: 'Сумма фрахта',                          am: 'Փոխադրման գումար' },
+  payTerms:  { ru: 'Условия оплаты',                        am: 'Վճարման պայմաններ' },
+  payText: {
+    ru: (days: number) => `${ruCalendarDaysPhrase(days)} после получения нами копии счёта-фактуры, акта выполненных работ и CMR.`,
+    am: (days: number) => `${days} բանկային օրվա ընթացքում՝ CMR-ի, ակտի և հաշիվ-ապրանքագրի բնօրինակները ստանալուց հետո:`,
+  },
+  customer:   { ru: 'Заказчик:',   am: 'Պատվիրատու:' },
+  contractor: { ru: 'Исполнитель:', am: 'Կատարող:' },
+  position:   { ru: 'Должность:',  am: 'Պաշտոն՝' },
+  fio:        { ru: 'ФИО:',        am: 'Ա.Ա.Հ.՝' },
+  sig:        { ru: 'Подпись: ___________________', am: 'Ստորագրություն՝ ___________________' },
+  directorTitle: { ru: 'Директор', am: 'Տնօրեն' },
+  financeTitle: 'Ֆինանսական պայմաններ',
+  sigSectionTitle: 'Կողմերի վավերապայմաններ և ստորագրություններ',
+};
+
+const CR_CONDITIONS = [
+  'Перевозка осуществляется согласно Конвенции МДП и КДПГ, а также Договору и настоящей заявке. Принятие заявки подтверждает, что автопоезд: 1) находится в чистом состоянии; 2) технически исправен; 3) имеет действующее CMR страхование; 4) имеет все разрешения и визы.',
+  'Ставка строго конфиденциальна. Прямой выход на заказчика категорически воспрещён. Несоблюдение данного условия квалифицируется как нарушение договорных обязательств.',
+  'Использование субперевозчика, а также перегруз без согласования запрещены. Нарушение влечёт штраф 100 USD.',
+  'Водитель обязан следить за правильностью погрузки и креплением груза.',
+  'Штраф за перегруз на ось не оплачивается Заказчиком; нагрузку на ось контролирует Водитель.',
+  'Водитель обязан останавливаться на охраняемых стоянках.',
+  'В случае возникновения проблем любого рода — незамедлительно информировать Заказчика.',
+  'За сверхнормативный простой при наличии подтверждающей карты — 50 USD за каждые полные 24 часа на территории СНГ. Выходные не учитываются. За срыв загрузки — 100 USD.',
+  'В случае опоздания на погрузку/разгрузку более чем на 2 часа — штраф 50 USD за каждые начавшиеся сутки.',
+  'Исполнитель обязан выслать подтверждение с печатью и подписью. Если в течение 3 часов отказ не поступил — заявка считается принятой.',
+  'Номера автомобиля предоставляются не позднее 24 часов до загрузки.',
+  'Исполнитель обязан выслать копии документов (Счёт, Акт, CMR) в течение 15 дней с момента выгрузки. Оригиналы — в течение 20 дней.',
+  'Оригиналы направлять по адресу: 0046 РА, г. Ереван, ул. С. Таронци 3/18, ООО «Лев Энд Ав».',
+];
+
+const CR_CONDITIONS_AM = [
+  'Փոխադրումն իրականացվում է TIR և CMR կոնվենցիաների, Պայմանագրի և սույն Հայտի համաձայն: Հայտի ընդունման հաստատմամբ երաշխավորվում է, որ ավտոբեռնատարը՝\n' +
+    '   - գտնվում է մաքուր վիճակում,\n' +
+    '   - տեխնիկապես սարքին է,\n' +
+    '   - ունի գործող CMR ապահովագրություն,\n' +
+    '   - ունի բոլոր անհրաժեշտ թույլտվություններն ու վիզաները:',
+  'Սակագինը խստորեն գաղտնի է: Կատարողի կողմից ուղարկողի հետ առանձին կապ հաստատելն արգելվում է: Բեռնափոխադրման ուշացման դեպքում պատասխանատվությունը կրում է Կատարողը՝ վճարման պայմանագրի համաձայն:',
+  'Ենթակապալառու փոխադրողի ներգրավումը, ինչպես նաև առանց համաձայնեցման բեռի վերաբեռնումն արգելվում է: Խախտման դեպքում սահմանվում է տուգանք՝ 100 USD:',
+  'Վարորդը պարտավոր է հետևել բեռի բարձման կարգին և ամրացմանը:',
+  'Առանցքի վրա գերբեռնվածության համար Պատվիրատուի կողմից վճարում չի կատարվում: Վարորդը պարտավոր է վերահսկել առանցքների ծանրաբեռնվածությունը:',
+  'Վարորդը պարտավոր է կանգառներ կատարել միայն հսկվող/պահպանվող ավտոկանգառներում:',
+  'Ցանկացած խնդրի առաջացման դեպքում անմիջապես տեղեկացնել Պատվիրատուին:',
+  'Գերնորմատիվային պարապուրդի համար (պարապուրդի թերթիկի առկայության դեպքում), յուրաքանչյուր 24 ժամվա համար վճարվում է 50 USD՝ ԱՊՀ տարածքում: Շաբաթ և կիրակի օրերը չեն հաշվարկվում: Բեռնումից հրաժարվելու (չեղարկման) դեպքում տուգանքը կազմում է 100 USD:',
+  'Բեռնման/բեռնաթափման վայրեր 2 ժամից ավելի ուշանալու դեպքում սահմանվում է տուգանք՝ 50 USD՝ յուրաքանչյուր սկսված օրվա համար:',
+  'Կատարողը պարտավոր է ուղարկել հայտի հաստատումը՝ կնիքով և ստորագրությամբ: Եթե 3 ժամվա ընթացքում մերժում չի ստացվում, հայտը համարվում է ընդունված:',
+  'Ավտոմեքենայի համարանիշները տրամադրվում են բեռնումից ոչ ուշ, քան 24 ժամ առաջ:',
+  'Կատարողը պարտավոր է ուղարկել փաստաթղթերի պատճենները (Հաշիվ, Ակտ, CMR) բեռնաթափումից հետո 15 օրվա ընթացքում, իսկ բնօրինակները՝ 20 օրվա ընթացքում:',
+  'Փաստաթղթերի բնօրինակներն ուղարկել հետևյալ հասցեով՝ 0046, ՀՀ, ք. Երևան, Ս. Տարոնցի 3/18, «ԼԵՎ ԵՎ ԱՎ» ՍՊԸ:',
+];
+
+const CR_NB = { style: BorderStyle.NONE as any, size: 0, color: 'FFFFFF' };
+const CR_NBS = { top: CR_NB, bottom: CR_NB, left: CR_NB, right: CR_NB };
+const CR_THIN = { style: BorderStyle.SINGLE as any, size: 1, color: 'BBBBBB' };
+const CR_THIN_BS = { top: CR_THIN, bottom: CR_THIN, left: CR_THIN, right: CR_THIN };
+
+function crP(
+  text: string,
+  opts: { bold?: boolean; size?: number; align?: string } = {}
+): Paragraph {
+  return new Paragraph({
+    alignment: (opts.align ?? AlignmentType.LEFT) as any,
+    spacing: { after: 60 },
+    children: [new TextRun({ text, bold: opts.bold, size: opts.size ?? 20, font: 'Arial' })],
+  });
+}
+
+function crPLines(
+  text: string,
+  opts: { bold?: boolean; size?: number; align?: string } = {}
+): Paragraph {
+  const lines = text.split('\n');
+  return new Paragraph({
+    alignment: (opts.align ?? AlignmentType.LEFT) as any,
+    spacing: { after: 60 },
+    children: lines.map((line, i) => new TextRun({
+      text: line, bold: opts.bold, size: opts.size ?? 20, font: 'Arial', break: i > 0 ? 1 : undefined,
+    })),
+  });
+}
+
+function crCell(
+  children: Paragraph[],
+  opts: { width?: number; vAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign] } = {}
+): TableCell {
+  return new TableCell({
+    width: opts.width != null ? { size: opts.width, type: WidthType.PERCENTAGE } : undefined,
+    verticalAlign: (opts.vAlign ?? VerticalAlign.TOP) as any,
+    borders: CR_NBS,
+    children,
+  });
+}
+
+function crCompanyBlock(c: typeof CR_COMPANY_RU, align: string = AlignmentType.LEFT): Paragraph[] {
+  return [
+    crP(c.name,    { bold: true, size: 18, align }),
+    crP(c.address, { size: 16, align }),
+    crP(c.inn,     { size: 16, align }),
+    crP(c.email,   { size: 16, align }),
+    crP(c.phone,   { size: 16, align }),
+  ];
+}
+
+function crHeaderBlock(isAm: boolean): Paragraph[] {
+  let logoP: Paragraph;
+  try {
+    const logoData = require('fs').readFileSync(CR_LOGO_PATH);
+    logoP = new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 120 },
+      children: [
+        new ImageRun({ data: logoData, transformation: { width: CR_LOGO_W, height: CR_LOGO_H }, type: 'png' } as any),
+      ],
+    });
+  } catch {
+    logoP = crP('[LOGO]', { align: AlignmentType.CENTER, bold: true });
+  }
+
+  const companyBlock = isAm
+    ? crCompanyBlock(CR_COMPANY_AM, AlignmentType.RIGHT)
+    : crCompanyBlock(CR_COMPANY_RU);
+
+  return [logoP, ...companyBlock];
+}
+
+function crInfoRow(lbl: CrLabel, value: string, isAm: boolean): TableRow {
+  const label = isAm ? lbl.am : lbl.ru;
+  return new TableRow({
+    children: [
+      new TableCell({ width: { size: 40, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS, children: [crP(label, { bold: true, size: 17 })] }),
+      new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS, children: [crP(value, { size: 17 })] }),
+    ],
+  });
+}
+
+function crBuildInfoTable(order: OrderForCarrierRequest, isAm: boolean): Table {
+  const plates = [order.carrier.truck_plate, order.carrier.trailer_plate].filter(Boolean).join(' / ');
+  const weightSuffix = isAm ? ' տ.' : ' т.';
+  const rows = [
+    crInfoRow(CR_T.route,     `${order.route.from_country} — ${order.route.to_country}`.toUpperCase(), isAm),
+    crInfoRow(CR_T.loading,   `${order.route.loading_date}, ${order.route.from_address}`, isAm),
+    crInfoRow(CR_T.cusDep,    crVal(order.route.customs_departure), isAm),
+    crInfoRow(CR_T.cusDest,   crVal(order.route.customs_destination), isAm),
+    crInfoRow(CR_T.unloading, `${order.route.unloading_date}, ${order.route.to_address}`, isAm),
+    crInfoRow(CR_T.cargo,
+      `${order.cargo.name}${order.cargo.value ? ', ' + order.cargo.value : ''}, ${order.cargo.weight_tn}${weightSuffix}`, isAm),
+    crInfoRow(CR_T.truckT, crVal(order.carrier.truck_type), isAm),
+    crInfoRow(CR_T.truckN, crVal(plates || undefined), isAm),
+    ...(order.additional_terms
+      ? [crInfoRow(CR_T.addl, order.additional_terms, isAm)]
+      : []),
+  ];
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
+}
+
+function crConditions(isAm: boolean): Paragraph[] {
+  const title = isAm ? CR_T.condTitle.am : CR_T.condTitle.ru;
+  const list = isAm ? CR_CONDITIONS_AM : CR_CONDITIONS;
+  const out: Paragraph[] = [
+    crP(title, { bold: true, size: 20 }),
+    new Paragraph({ spacing: { after: 40 } }),
+  ];
+  list.forEach((text, i) => {
+    out.push(crPLines(`${i + 1}. ${text}`, { size: 17 }));
+  });
+  return out;
+}
+
+export async function carrierRequestDocx(
+  order: OrderForCarrierRequest,
+  options: { lang?: 'ru' | 'am' } = {}
+): Promise<Buffer> {
+  const isAm = options.lang === 'am';
+  const t = <R, A>(ru: R, am: A) => isAm ? am : ru;
+
+  const contractRef = order.contract_number
+    ? t(
+        CR_T.toContract.ru(order.contract_number, order.contract_date ?? ''),
+        CR_T.toContract.am(order.contract_number, order.contract_date ?? ''),
+      )
+    : '';
+
+  const freightLine = `${order.price.toLocaleString('ru-RU')} ${order.currency}${order.all_in ? ' (ALL IN)' : ''}`;
+  const payDays = order.payment_days ?? 10;
+
+  const financeTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({ children: [
+        new TableCell({ width: { size: 40, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS,
+          children: [crP(t(CR_T.freight.ru, CR_T.freight.am), { bold: true, size: 17 })] }),
+        new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS,
+          children: [crP(freightLine, { bold: true, size: 19 })] }),
+      ]}),
+      new TableRow({ children: [
+        new TableCell({ width: { size: 40, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS,
+          children: [crP(t(CR_T.payTerms.ru, CR_T.payTerms.am), { bold: true, size: 17 })] }),
+        new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, borders: CR_THIN_BS, children: [
+          crP(t(CR_T.payText.ru(payDays), CR_T.payText.am(payDays)), { size: 17 }),
+        ]}),
+      ]}),
+    ],
+  });
+
+  // Director name differs between RU and AM — not a typo
+  const directorName = isAm ? 'Ա. Զոհրաբյան' : 'А. Зограбян';
+  const companyName = isAm ? CR_COMPANY_AM.name : CR_COMPANY_RU.name;
+  const directorTitle = t(CR_T.directorTitle.ru, CR_T.directorTitle.am);
+
+  const sigTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [new TableRow({ children: [
+      crCell([
+        crP(t(CR_T.customer.ru, CR_T.customer.am), { bold: true }),
+        crP(companyName),
+        crP(`${t(CR_T.position.ru, CR_T.position.am)} ${directorTitle}`),
+        crP(`${t(CR_T.fio.ru, CR_T.fio.am)} ${directorName}`),
+        crP(t(CR_T.sig.ru, CR_T.sig.am)),
+      ], { width: 50 }),
+      crCell([
+        crP(t(CR_T.contractor.ru, CR_T.contractor.am), { bold: true }),
+        crP(order.carrier.company_name),
+        crP(isAm ? `${CR_T.position.am} ___________________` : CR_T.position.ru),
+        crP(isAm ? `${CR_T.fio.am} ___________________` : CR_T.fio.ru),
+        crP(t(CR_T.sig.ru, CR_T.sig.am)),
+      ], { width: 50 }),
+    ]})],
+  });
+
+  const children: (Paragraph | Table)[] = [
+    ...crHeaderBlock(isAm),
+    new Paragraph({ spacing: { after: 160 } }),
+    crP(
+      t(CR_T.requestTitle.ru(order.order_number, order.order_date),
+        CR_T.requestTitle.am(order.order_number, order.order_date)),
+      { bold: true, align: AlignmentType.CENTER, size: 26 },
+    ),
+    ...(contractRef ? [crP(contractRef, { align: AlignmentType.CENTER, size: 19 })] : []),
+    new Paragraph({ spacing: { after: 100 } }),
+    crP(t(CR_T.toCarrier.ru(order.carrier.company_name), CR_T.toCarrier.am(order.carrier.company_name)), { bold: true }),
+    new Paragraph({ spacing: { after: 80 } }),
+    crP(t(CR_T.intro.ru, CR_T.intro.am)),
+    new Paragraph({ spacing: { after: 100 } }),
+    crBuildInfoTable(order, isAm),
+    new Paragraph({ spacing: { after: 160 } }),
+    ...crConditions(isAm),
+    new Paragraph({ spacing: { after: 160 } }),
+    ...(isAm ? [crP(CR_T.financeTitle, { bold: true, size: 20 })] : []),
+    financeTable,
+    new Paragraph({ spacing: { after: 200 } }),
+    ...(isAm ? [crP(CR_T.sigSectionTitle, { bold: true, size: 20 })] : []),
+    sigTable,
+  ];
+
+  const doc = new Document({
     sections: [{
       properties: { page: { margin: { top: 720, bottom: 720, left: 1080, right: 720 } } },
-      children: [
-        hdr('ЗАЯВКА ПЕРЕВОЗЧИКУ'),
-        sub(`${docNum} от ${docDate}`),
-        emptyLine(),
-        txt('ПЕРЕВОЗЧИК', { bold: true }),
-        txt(`Наименование: ${crName}`),
-        txt(`ИНН: ${crInn}`),
-        txt(`Контакт: ${crContact}`),
-        txt(`Телефон: ${crPhone}`),
-        emptyLine(),
-        txt('МАРШРУТ', { bold: true }),
-        txt(`${trip.routeFrom} → ${trip.routeTo}`),
-        emptyLine(),
-        txt('УСЛОВИЯ ПЕРЕВОЗКИ', { bold: true }),
-        new Table({
-          rows: [
-            new TableRow({ children: [cell('Параметр', { bold: true, width: 50 }), cell('Значение', { bold: true, width: 50 })] }),
-            new TableRow({ children: [cell('Дата загрузки'), cell(fmtDate(trip.tripDate))] }),
-            new TableRow({ children: [cell('Маршрут'), cell(`${trip.routeFrom} → ${trip.routeTo}`)] }),
-            new TableRow({ children: [cell('Клиент (грузовладелец)'), cell(trip.client.name)] }),
-            new TableRow({ children: [cell('Ставка перевозчика'), cell(fmtCurrency(rate))] }),
-          ],
-        }),
-        emptyLine(),
-        txt(`Важно: ${notes}`),
-        emptyLine(), emptyLine(),
-        sigLine('Заказчик: __________________ / ФИО', ''),
-        sigLine(`Перевозчик: __________________ / ${crContact !== '—' ? crContact : 'ФИО'}`, ''),
-      ],
+      children,
     }],
   });
+  return Buffer.from(await Packer.toBuffer(doc));
 }
 
 // ====== EXCEL GENERATORS ======

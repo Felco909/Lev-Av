@@ -21,6 +21,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     if (body?.actPrefix !== undefined) data.actPrefix = body.actPrefix;
     if (body?.numberFormat !== undefined) data.numberFormat = body.numberFormat;
     if (body?.resetNumberingYearly !== undefined) data.resetNumberingYearly = body.resetNumberingYearly;
+    if (body?.paymentTermsDays !== undefined) data.paymentTermsDays = body.paymentTermsDays ? parseInt(body.paymentTermsDays) : null;
     const client = await prisma.client.update({
       where: { id: params?.id },
       data,

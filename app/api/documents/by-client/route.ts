@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getFileUrl } from '@/lib/s3';
+import { isLegacyS3StoragePath, buildTripAttachmentDownloadUrl } from '@/lib/attachment-service';
 
 export async function GET() {
   try {
@@ -40,10 +41,19 @@ export async function GET() {
             carrierRate: trip.carrierRate != null ? Number(trip.carrierRate) : null,
             profit: Number((trip as any).profitAmd ?? trip.profit ?? 0),
             attachments: await Promise.all(
-              trip.attachments.map(async (att) => ({
-                ...att,
-                downloadUrl: await getFileUrl(att.cloudStoragePath, att.isPublic),
-              }))
+              trip.attachments.map(async (att) => {
+                let downloadUrl: string;
+                if (isLegacyS3StoragePath(att.cloudStoragePath)) {
+                  try {
+                    downloadUrl = await getFileUrl(att.cloudStoragePath, att.isPublic);
+                  } catch {
+                    downloadUrl = buildTripAttachmentDownloadUrl(att.id);
+                  }
+                } else {
+                  downloadUrl = buildTripAttachmentDownloadUrl(att.id);
+                }
+                return { ...att, downloadUrl };
+              })
             ),
           }))
         ),

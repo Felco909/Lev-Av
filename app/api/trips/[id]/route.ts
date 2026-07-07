@@ -99,12 +99,11 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       profit = clientRate - expensesWithAmd.reduce((s: number, e: any) => s + e.amount, 0);
     }
 
-    let profitAmd: number;
-    if (body?.tripType === 'expedition') {
-      profitAmd = Math.round((clientRateAmd - (carrierRateAmd ?? 0) - totalExpensesAmd) * 100) / 100;
-    } else {
-      profitAmd = Math.round((clientRateAmd - totalExpensesAmd) * 100) / 100;
-    }
+    const clientExpensesAmd = expensesWithAmd.filter((e: any) => e.description !== '__carrier__').reduce((s: number, e: any) => s + e.amountAmd, 0);
+    const carrierExpensesAmd = expensesWithAmd.filter((e: any) => e.description === '__carrier__').reduce((s: number, e: any) => s + e.amountAmd, 0);
+    const totalClientAmd = Math.round((clientRateAmd + clientExpensesAmd) * 100) / 100;
+    const totalCarrierAmd = Math.round(((carrierRateAmd ?? 0) + carrierExpensesAmd) * 100) / 100;
+    const profitAmd = Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100;
     const origRate = Number(oldTrip?.originalRate ?? incomeRate);
     const origClientRateAmd = Math.round(clientRate * origRate * 100) / 100;
     const origProfitAmd = body?.tripType === 'expedition'
@@ -134,6 +133,15 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         clientInvoiceSeries: body?.clientInvoiceSeries !== undefined ? (body.clientInvoiceSeries || null) : undefined,
         carrierInvoiceSeries: body?.carrierInvoiceSeries !== undefined ? (body.carrierInvoiceSeries || null) : undefined,
         notes: body?.notes !== undefined ? (body.notes || null) : undefined,
+        customsDeparture: body?.customsDeparture !== undefined ? (body.customsDeparture || null) : undefined,
+        customsDestination: body?.customsDestination !== undefined ? (body.customsDestination || null) : undefined,
+        cargoName: body?.cargoName !== undefined ? (body.cargoName || null) : undefined,
+        cargoValue: body?.cargoValue != null ? new Decimal(Number(body.cargoValue)) : (body?.cargoValue === null ? null : undefined),
+        truckType: body?.truckType !== undefined ? (body.truckType || null) : undefined,
+        loadingAddress: body?.loadingAddress !== undefined ? (body.loadingAddress || null) : undefined,
+        unloadingAddress: body?.unloadingAddress !== undefined ? (body.unloadingAddress || null) : undefined,
+        trailerPlate: body?.trailerPlate !== undefined ? (body.trailerPlate || null) : undefined,
+        additionalTerms: body?.additionalTerms !== undefined ? (body.additionalTerms || null) : undefined,
         profit: new Decimal(profit),
         currency,
         exchangeRate: incomeRate,

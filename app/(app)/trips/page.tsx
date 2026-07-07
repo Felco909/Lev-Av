@@ -11,20 +11,28 @@ const PAGE_SIZE = 50;
 type SortBy = 'tripDate' | 'createdAt';
 type SortDir = 'asc' | 'desc';
 
-// Helper: map a trip status to a display group
-function getStatusGroupKey(status: string | null | undefined): 'new' | 'work' | 'done' | 'archived' {
-  if (status === 'new') return 'new';
-  if (status === 'in_progress' || status === 'unloaded') return 'work';
+type StatusGroupKey = 'new' | 'in_progress' | 'unloaded' | 'awaiting_payment' | 'sverka' | 'completed' | 'archived';
+
+function getStatusGroupKey(status: string | null | undefined): StatusGroupKey {
+  if (status === 'in_progress') return 'in_progress';
+  if (status === 'unloaded') return 'unloaded';
+  if (status === 'awaiting_payment') return 'awaiting_payment';
+  if (status === 'sverka') return 'sverka';
   if (status === 'archived') return 'archived';
-  return 'done'; // completed, paid, other
+  if (status === 'completed' || status === 'paid') return 'completed';
+  return 'new';
 }
 
-const GROUP_META: Record<'new' | 'work' | 'done' | 'archived', { label: string; color: string; dot: string }> = {
-  new: { label: '\u041D\u043E\u0432\u044B\u0435', color: 'text-blue-700 bg-blue-50 border-blue-200', dot: 'bg-blue-500' },
-  work: { label: '\u0412 \u0440\u0430\u0431\u043E\u0442\u0435', color: 'text-amber-700 bg-amber-50 border-amber-200', dot: 'bg-amber-500' },
-  done: { label: '\u0417\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u044B\u0435', color: 'text-green-700 bg-green-50 border-green-200', dot: 'bg-green-500' },
-  archived: { label: '\u0410\u0440\u0445\u0438\u0432', color: 'text-slate-500 bg-slate-50 border-slate-200', dot: 'bg-slate-400' },
+const GROUP_META: Record<StatusGroupKey, { label: string; color: string; dot: string }> = {
+  new:              { label: 'Новая',      color: 'text-blue-700 bg-blue-50 border-blue-200',   dot: 'bg-blue-500' },
+  in_progress:      { label: 'В пути',     color: 'text-amber-700 bg-amber-50 border-amber-200', dot: 'bg-amber-500' },
+  unloaded:         { label: 'Разгружен',  color: 'text-orange-700 bg-orange-50 border-orange-200', dot: 'bg-orange-500' },
+  awaiting_payment: { label: 'На оплату',  color: 'text-purple-700 bg-purple-50 border-purple-200', dot: 'bg-purple-500' },
+  sverka:           { label: 'Сверка',     color: 'text-teal-700 bg-teal-50 border-teal-200',       dot: 'bg-teal-500' },
+  completed:        { label: 'Завершённые', color: 'text-green-700 bg-green-50 border-green-200',  dot: 'bg-green-500' },
+  archived:         { label: 'Архив',      color: 'text-slate-500 bg-slate-50 border-slate-200', dot: 'bg-slate-400' },
 };
+
 
 export default function TripsPage() {
   const [trips, setTrips] = useState<any[]>([]);
@@ -136,7 +144,7 @@ export default function TripsPage() {
   // Group visible trips for grouped rendering (server already returns them in group + date order)
   const groups = useMemo(() => {
     if (!groupByStatus) return null;
-    const byKey: Record<'new' | 'work' | 'done' | 'archived', any[]> = { new: [], work: [], done: [], archived: [] };
+    const byKey: Record<StatusGroupKey, any[]> = { new: [], in_progress: [], unloaded: [], awaiting_payment: [], sverka: [], completed: [], archived: [] };
     for (const t of trips ?? []) {
       const key = getStatusGroupKey(t?.status);
       byKey[key].push(t);
@@ -264,7 +272,7 @@ export default function TripsPage() {
             <label className="text-xs text-muted-foreground mb-1 block">Статус</label>
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background">
               <option value="">Все</option>
-              {Object.entries(STATUS_MAP).map(([k, v]) => <option key={k} value={k}>{v?.label}</option>)}
+              {Object.entries(STATUS_MAP).filter(([k]) => k !== 'paid').map(([k, v]) => <option key={k} value={k}>{v?.label}</option>)}
             </select>
           </div>
           <div>
@@ -351,7 +359,7 @@ export default function TripsPage() {
             <div className="p-8 text-center text-muted-foreground">Заявки не найдены</div>
           ) : groupByStatus && groups ? (
             <div className="divide-y">
-              {(['new', 'work', 'done', 'archived'] as const).map((gKey) => {
+              {(['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] as const).map((gKey) => {
                 const items = groups[gKey];
                 if (!items || items.length === 0) return null;
                 const meta = GROUP_META[gKey];

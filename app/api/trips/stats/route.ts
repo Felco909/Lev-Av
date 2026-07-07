@@ -116,6 +116,69 @@ export async function GET(req: Request) {
       prisma.trip.aggregate({ where: { tripDate: { gte: prevMonthStart, lte: prevMonthEnd } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
     ]);
 
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    const [overdueRaw, cashGapRaw] = await Promise.all([
+      prisma.trip.findMany({
+        where: {
+          status: { notIn: ['new', 'in_progress', 'archived'] },
+          clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
+          OR: [
+            { paymentDueDate: { not: null } },
+            { unloadDate: { not: null } },
+          ],
+        },
+        select: {
+          id: true, tripNumber: true, paymentDueDate: true, unloadDate: true,
+          clientRateAmd: true, clientRate: true,
+          clientPaidAmountAmd: true, clientPaidAmount: true,
+          client: { select: { name: true, paymentTermsDays: true } },
+        },
+        take: 100,
+      }),
+      prisma.trip.findMany({
+        where: {
+          tripType: 'expedition',
+          status: { notIn: ['archived', 'new', 'in_progress'] },
+          carrierPaidAmountAmd: { gt: 0 },
+        },
+        select: {
+          id: true, tripNumber: true,
+          clientPaidAmountAmd: true, clientPaidAmount: true,
+          carrierPaidAmountAmd: true, carrierPaidAmount: true,
+        },
+        take: 20,
+      }),
+    ]);
+
+    const overdueClientPayments = overdueRaw
+      .map((t: any) => {
+        // Effective due date: stored paymentDueDate, else unloadDate + client.paymentTermsDays
+        let effectiveDue: Date | null = t.paymentDueDate ? new Date(t.paymentDueDate) : null;
+        if (!effectiveDue && t.unloadDate && Number(t.client?.paymentTermsDays) > 0) {
+          effectiveDue = new Date(t.unloadDate);
+          effectiveDue.setDate(effectiveDue.getDate() + Number(t.client.paymentTermsDays));
+        }
+        if (!effectiveDue) return null;
+        const dueMs = new Date(effectiveDue).setHours(0, 0, 0, 0);
+        if (dueMs >= todayMidnight.getTime()) return null;
+        const rate = Number(t.clientRateAmd ?? t.clientRate ?? 0);
+        const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
+        const remainingAmd = Math.round((rate - paid) * 100) / 100;
+        const daysOverdue = Math.floor((todayMidnight.getTime() - dueMs) / 86400000);
+        return { id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '', remainingAmd, daysOverdue };
+      })
+      .filter((t: any) => t !== null && t.remainingAmd > 0.005)
+      .sort((a: any, b: any) => b.daysOverdue - a.daysOverdue);
+
+    const cashGapTrips = cashGapRaw
+      .map((t: any) => {
+        const clientPaid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
+        const carrierPaid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
+        const gapAmd = Math.round((carrierPaid - clientPaid) * 100) / 100;
+        return { id: t.id, tripNumber: t.tripNumber, gapAmd };
+      })
+      .filter((t: any) => t.gapAmd > 0.005);
+
     return NextResponse.json({
       totalTrips: allTrips?._count ?? 0,
       totalProfit: Number(allTrips?._sum?.profitAmd ?? 0),
@@ -149,6 +212,8 @@ export async function GET(req: Request) {
           const daysLeft = Math.ceil((due.getTime() - today.getTime()) / 86400000);
           return { id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, clientRate: Number(t.clientRate ?? 0), clientName: t.client?.name, paymentDueDate: due.toISOString().split('T')[0], daysLeft };
         }),
+        overdueClientPayments,
+        cashGapTrips,
       },
       vehicleUtilization: {
         totalVehicles: totalVehicles ?? 0,

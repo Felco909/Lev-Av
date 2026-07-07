@@ -37,6 +37,10 @@
     ".build/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "LOCAL_DB_RUNTIME",
+    "DAILY_BACKUP",
+    "BACKUP_RESTORE_POINT",
+    "SYSTEM_BACKUP_INFO"
   ]
 }

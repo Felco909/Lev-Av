@@ -39,8 +39,6 @@ type TripPickRow = {
   carrier?: { name: string } | null;
 };
 
-type PdfLang = 'ru' | 'hy';
-
 const CURRENCIES = ['AMD', 'USD', 'EUR', 'RUB', 'GEL'] as const;
 
 function confidenceLabel(c: string) {
@@ -79,11 +77,11 @@ export default function AgentsPage() {
 
   const [tripOptions, setTripOptions] = useState<TripPickRow[]>([]);
   const [selectedTripId, setSelectedTripId] = useState('');
-  const [pdfLang, setPdfLang] = useState<PdfLang>('ru');
   const [freightAmount, setFreightAmount] = useState('');
   const [freightCurrency, setFreightCurrency] = useState('AMD');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [docLanguage, setDocLanguage] = useState<'ru' | 'am'>('ru');
 
   useEffect(() => {
     Promise.all([
@@ -243,7 +241,7 @@ export default function AgentsPage() {
     }
   };
 
-  const handleDownloadCarrierPdf = async () => {
+  const handleDownloadCarrierWord = async () => {
     const amount = freightAmount.trim();
     if (!amount) {
       appToast.error('Укажите сумму фрахта');
@@ -259,11 +257,11 @@ export default function AgentsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode: 'carrier_application_pdf',
-          lang: pdfLang,
+          mode: 'carrier_application_word',
           freightAmount: amount,
           freightCurrency,
           paymentTerms: paymentTerms.trim() || undefined,
+          language: docLanguage,
           tripId: selectedTripId || undefined,
           draft: selectedTripId
             ? undefined
@@ -278,24 +276,22 @@ export default function AgentsPage() {
                 clientRate,
                 currency,
                 cargoWeight: cargoWeight || null,
-                transportType: '',
-                additionalConditions: basisText,
                 carrierName: carriers.find((c) => c.id === carrierId)?.name,
               },
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error || 'Ошибка генерации PDF');
+        throw new Error((err as { error?: string }).error || 'Ошибка генерации документа');
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `zayavka_perevozchik_${extract?.tripNumber || selectedTripId || 'draft'}.pdf`;
+      a.download = `zayavka_perevozchik_${extract?.tripNumber || selectedTripId || 'draft'}.docx`;
       a.click();
       URL.revokeObjectURL(url);
-      appToast.success('PDF скачан');
+      appToast.success('Word-документ скачан');
     } catch (e: unknown) {
       appToast.error(e instanceof Error ? e.message : 'Ошибка');
     } finally {
@@ -330,26 +326,10 @@ export default function AgentsPage() {
           <div className="flex flex-wrap items-start gap-4">
             <img src="/levav-logo.png" alt="Lev&AV" className="h-16 w-auto object-contain shrink-0" />
             <div className="flex-1 min-w-[200px] space-y-2">
-              <p className="text-xs font-semibold">Договор-заявка перевозчику (PDF)</p>
+              <p className="text-xs font-semibold">Договор-заявка перевозчику (Word)</p>
               <p className="text-[11px] text-muted-foreground">
-                Данные из заявки TMS, сумма фрахта — вручную.
+                Данные из заявки TMS, сумма фрахта — вручную. Скачивается как .docx.
               </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPdfLang('ru')}
-                  className={`px-3 py-1.5 text-xs rounded-lg border ${pdfLang === 'ru' ? 'bg-primary text-white border-primary' : 'bg-background'}`}
-                >
-                  🇷🇺 Русский
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPdfLang('hy')}
-                  className={`px-3 py-1.5 text-xs rounded-lg border ${pdfLang === 'hy' ? 'bg-primary text-white border-primary' : 'bg-background'}`}
-                >
-                  🇦🇲 Армянский
-                </button>
-              </div>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -413,15 +393,33 @@ export default function AgentsPage() {
               />
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleDownloadCarrierPdf}
-            disabled={pdfLoading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-900 disabled:opacity-50"
-          >
-            {pdfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {pdfLoading ? 'Генерация...' : 'Скачать PDF'}
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex rounded-lg border overflow-hidden text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => setDocLanguage('ru')}
+                className={`px-3 py-1.5 transition-colors ${docLanguage === 'ru' ? 'bg-slate-800 text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
+                RU
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocLanguage('am')}
+                className={`px-3 py-1.5 border-l transition-colors ${docLanguage === 'am' ? 'bg-slate-800 text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
+                AM
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadCarrierWord}
+              disabled={pdfLoading}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-900 disabled:opacity-50"
+            >
+              {pdfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {pdfLoading ? 'Генерация...' : 'Скачать Word (.docx)'}
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">

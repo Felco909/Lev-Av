@@ -34,6 +34,7 @@ export async function POST(req: Request) {
         actPrefix: body?.actPrefix || '\u0410\u041A\u0422',
         numberFormat: body?.numberFormat || '{prefix}-{number}',
         resetNumberingYearly: body?.resetNumberingYearly ?? false,
+        paymentTermsDays: body?.paymentTermsDays ? parseInt(body.paymentTermsDays) : null,
       },
     });
     return NextResponse.json(client);

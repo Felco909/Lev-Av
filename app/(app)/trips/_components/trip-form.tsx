@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Save, Plus, Trash2, DollarSign, MapPin, Info, AlertTriangle, RefreshCw, ChevronDown, CheckCircle2, Lock, Unlock, FileUp, Paperclip, X, Wand2, Loader2, Archive, Download, FileText, Eye } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, DollarSign, MapPin, Info, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, CheckCircle2, Lock, Unlock, FileUp, Paperclip, X, Wand2, Loader2, Archive, Download, FileText, Eye } from 'lucide-react';
 import { openTripAttachment } from '@/lib/trip-attachment-open';
 import {
   detectTripAttachmentSection,
@@ -78,15 +78,24 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [clientInvoiceSeries, setClientInvoiceSeries] = useState('');
   const [carrierInvoiceSeries, setCarrierInvoiceSeries] = useState('');
   const [taxCode, setTaxCode] = useState('');
-  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [clientExpenses, setClientExpenses] = useState<Expense[]>([]);
+  const [carrierExpenses, setCarrierExpenses] = useState<Expense[]>([]);
   const [notes, setNotes] = useState('');
+  const [customsDeparture, setCustomsDeparture] = useState('');
+  const [customsDestination, setCustomsDestination] = useState('');
+  const [cargoName, setCargoName] = useState('');
+  const [cargoValue, setCargoValue] = useState<number | ''>('');
+  const [truckType, setTruckType] = useState('');
+  const [loadingAddress, setLoadingAddress] = useState('');
+  const [unloadingAddress, setUnloadingAddress] = useState('');
+  const [trailerPlate, setTrailerPlate] = useState('');
+  const [additionalTerms, setAdditionalTerms] = useState('');
   const [selectedRouteId, setSelectedRouteId] = useState('');
   const [currency, setCurrency] = useState('AMD');
   const [exchangeRate, setExchangeRate] = useState('1');
   const [carrierCurrency, setCarrierCurrency] = useState('AMD');
   const [carrierExchangeRate, setCarrierExchangeRate] = useState('1');
   const [dailyRates, setDailyRates] = useState<Record<string, number>>({});
-  const [expensesOpen, setExpensesOpen] = useState(false);
   const [completingTrip, setCompletingTrip] = useState(false);
   const [reopeningTrip, setReopeningTrip] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -361,15 +370,10 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           setTripDate(t?.tripDate ? new Date(t.tripDate).toISOString().split('T')[0] : '');
           setUnloadDate(t?.unloadDate ? new Date(t.unloadDate).toISOString().split('T')[0] : '');
         }
-        if ((t?.expenses ?? []).length > 0) setExpensesOpen(true);
-        setExpenses((t?.expenses ?? []).map((e: any) => ({
-          expenseType: e?.expenseType ?? 'other',
-          amount: Number(e?.amount ?? 0),
-          currency: e?.currency ?? 'AMD',
-          exchangeRate: Number(e?.exchangeRate ?? 1),
-          amountAmd: Number(e?.amountAmd ?? e?.amount ?? 0),
-          description: e?.description ?? '',
-        })));
+        const _rawExp = (t?.expenses ?? []);
+        const _toExp = (e: any) => ({ expenseType: e?.expenseType ?? 'other', amount: Number(e?.amount ?? 0), currency: e?.currency ?? 'AMD', exchangeRate: Number(e?.exchangeRate ?? 1), amountAmd: Number(e?.amountAmd ?? e?.amount ?? 0), description: '' });
+        setClientExpenses(_rawExp.filter((e: any) => e?.description !== '__carrier__').map(_toExp));
+        setCarrierExpenses(_rawExp.filter((e: any) => e?.description === '__carrier__').map(_toExp));
         setCurrency(t?.currency || 'AMD');
         setExchangeRate(String(t?.exchangeRate ?? 1));
         setCarrierCurrency(t?.carrierCurrency || t?.currency || 'AMD');
@@ -380,6 +384,15 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         setCarrierInvoiceSeries(t?.carrierInvoiceSeries || '');
         setTaxCode(t?.taxCode || '');
         setNotes(t?.notes || '');
+        setCustomsDeparture(t?.customsDeparture || '');
+        setCustomsDestination(t?.customsDestination || '');
+        setCargoName(t?.cargoName || '');
+        setCargoValue(t?.cargoValue != null ? Number(t.cargoValue) : '');
+        setTruckType(t?.truckType || '');
+        setLoadingAddress(t?.loadingAddress || '');
+        setUnloadingAddress(t?.unloadingAddress || '');
+        setTrailerPlate(t?.trailerPlate || '');
+        setAdditionalTerms(t?.additionalTerms || '');
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -413,7 +426,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (!payForm.amount || Number(payForm.amount) <= 0 || !tripId) return;
     // 1.2: Overpayment warning
     const isClient = showPayForm === 'client';
-    const totalRate = isClient ? clientRateAmd : carrierRateAmd;
+    const totalRate = isClient ? totalClientAmd : totalCarrierAmd;
     const currentPaid = isClient ? clientPaidAmd : carrierPaidAmd;
     const remaining = totalRate - currentPaid;
     if (remaining > 0 && payComputedAmd > remaining) {
@@ -430,7 +443,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           type: showPayForm,
           amount: Number(payForm.amount),
           currency: payForm.currency,
-          exchangeRate: Number(payForm.exchangeRate) || 1,
+          exchangeRate: parseRateInput(payForm.exchangeRate) || 1,
           paymentDate: payForm.paymentDate,
           description: payForm.description || null,
           method: payForm.method || 'bank_transfer',
@@ -447,7 +460,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     const payment = payments.find(p => p.id === id);
     if (!payment) return;
     const isClient = payment.type === 'client';
-    const totalRate = isClient ? clientRateAmd : carrierRateAmd;
+    const totalRate = isClient ? totalClientAmd : totalCarrierAmd;
     const currentPaid = isClient ? clientPaidAmd : carrierPaidAmd;
     const newPaid = currentPaid - (payment.amountAmd || 0);
     const newDebt = Math.max(0, totalRate - newPaid);
@@ -527,19 +540,15 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (unloadDate) applyPaymentDueFromUnload(unloadDate, nextClient);
   };
 
-  /** После загрузки заявки: предупреждение, если есть разгрузка, но у клиента не задан срок в днях (дату не трогаем). */
+  /** Предупреждение если у выбранного клиента не задан срок оплаты в днях. */
   useEffect(() => {
     if (loading || clients.length === 0) return;
-    if (!unloadDate || !clientId) {
-      if (!unloadDate) setUnloadPaymentHint('');
-      return;
-    }
-    if (paymentDueManualRef.current) return;
+    if (!clientId) { setUnloadPaymentHint(''); return; }
     const c = clients.find((x: any) => x.id === clientId);
     const d = c?.paymentTermsDays;
     if (d != null && Number(d) > 0) setUnloadPaymentHint('');
     else setUnloadPaymentHint(WARNING_CLIENT_PAYMENT_TERMS);
-  }, [loading, unloadDate, clientId, clients]);
+  }, [loading, clientId, clients]);
 
   // Last rate hint for client+route
   const [lastRateHint, setLastRateHint] = useState<{ rate: number; currency: string; date: string } | null>(null);
@@ -568,16 +577,16 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   }, [selectedClient, contactId]);
 
   // Calculate totals (all in AMD)
-  const totalExpensesAmd = useMemo(() => (expenses ?? []).reduce((s: number, e: Expense) => s + (e?.amountAmd ?? 0), 0), [expenses]);
+  const totalClientExpensesAmd = useMemo(() => clientExpenses.reduce((s: number, e: Expense) => s + (e?.amountAmd ?? 0), 0), [clientExpenses]);
+  const totalCarrierExpensesAmd = useMemo(() => carrierExpenses.reduce((s: number, e: Expense) => s + (e?.amountAmd ?? 0), 0), [carrierExpenses]);
 
   const effectiveRate = currency === 'AMD' ? 1 : (parseRateInput(exchangeRate) || 1);
   const effectiveCarrierRate = carrierCurrency === 'AMD' ? 1 : (parseRateInput(carrierExchangeRate) || 1);
   const clientRateAmd = Math.round(clientRate * effectiveRate * 100) / 100;
   const carrierRateAmd = Math.round(carrierRate * effectiveCarrierRate * 100) / 100;
-  const profitAmd = useMemo(() => {
-    if (tripType === 'expedition') return Math.round((clientRateAmd - carrierRateAmd - totalExpensesAmd) * 100) / 100;
-    return Math.round((clientRateAmd - totalExpensesAmd) * 100) / 100;
-  }, [tripType, clientRateAmd, carrierRateAmd, totalExpensesAmd]);
+  const totalClientAmd = useMemo(() => Math.round((clientRateAmd + totalClientExpensesAmd) * 100) / 100, [clientRateAmd, totalClientExpensesAmd]);
+  const totalCarrierAmd = useMemo(() => Math.round((carrierRateAmd + totalCarrierExpensesAmd) * 100) / 100, [carrierRateAmd, totalCarrierExpensesAmd]);
+  const profitAmd = useMemo(() => Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100, [totalClientAmd, totalCarrierAmd]);
 
   const handleCurrencyChange = (cur: string) => {
     setCurrency(cur);
@@ -601,36 +610,38 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     }
   };
 
-  const addExpense = () => setExpenses([...(expenses ?? []), { expenseType: 'fuel', amount: 0, currency: 'AMD', exchangeRate: 1, amountAmd: 0, description: '' }]);
-  const removeExpense = (idx: number) => setExpenses((expenses ?? []).filter((_: any, i: number) => i !== idx));
-  const updateExpense = (idx: number, field: string, value: any) => {
-    setExpenses((expenses ?? []).map((e: Expense, i: number) => {
+  const _makeExpHandler = (setter: React.Dispatch<React.SetStateAction<Expense[]>>) => ({
+    add: () => setter(prev => [...prev, { expenseType: 'fuel', amount: 0, currency: 'AMD', exchangeRate: 1, amountAmd: 0, description: '' }]),
+    remove: (idx: number) => setter(prev => prev.filter((_, i) => i !== idx)),
+    update: (idx: number, field: string, value: any) => setter(prev => prev.map((e: Expense, i: number) => {
       if (i !== idx) return e;
-      const updated = { ...(e ?? {}), [field]: value };
-      // Recalculate amountAmd when amount, currency, or exchangeRate changes
+      const u = { ...e, [field]: value };
       if (field === 'amount' || field === 'currency' || field === 'exchangeRate') {
-        const amt = Number(field === 'amount' ? value : updated.amount) || 0;
-        const cur = field === 'currency' ? value : updated.currency;
-        let rate = Number(field === 'exchangeRate' ? value : updated.exchangeRate) || 1;
-        if (field === 'currency') {
-          if (value === 'AMD') {
-            rate = 1;
-            updated.exchangeRate = 1;
-          }
-        }
-        updated.amountAmd = cur === 'AMD' ? amt : Math.round(amt * rate * 100) / 100;
+        const amt = Number(field === 'amount' ? value : u.amount) || 0;
+        const cur = field === 'currency' ? value : u.currency;
+        let rate = Number(field === 'exchangeRate' ? value : u.exchangeRate) || 1;
+        if (field === 'currency' && value === 'AMD') { rate = 1; u.exchangeRate = 1; }
+        u.amountAmd = cur === 'AMD' ? amt : Math.round(amt * rate * 100) / 100;
       }
-      return updated;
-    }));
-  };
+      return u;
+    })),
+  });
+  const _cliH = _makeExpHandler(setClientExpenses);
+  const _carH = _makeExpHandler(setCarrierExpenses);
+  const addClientExpense = () => _cliH.add();
+  const removeClientExpense = (idx: number) => _cliH.remove(idx);
+  const updateClientExpense = (idx: number, f: string, v: any) => _cliH.update(idx, f, v);
+  const addCarrierExpense = () => _carH.add();
+  const removeCarrierExpense = (idx: number) => _carH.remove(idx);
+  const updateCarrierExpense = (idx: number, f: string, v: any) => _carH.update(idx, f, v);
 
 
 
   const handleCompleteTrip = async () => {
     if (!tripId || completingTrip || actionLockRef.current.complete) return;
     // 2.6: Warn about unpaid balance
-    const clientDebt = clientRateAmd - clientPaidAmd;
-    const carrierDebt = carrierRateAmd - carrierPaidAmd;
+    const clientDebt = totalClientAmd - clientPaidAmd;
+    const carrierDebt = totalCarrierAmd - carrierPaidAmd;
     let warnMsg = 'Перевести заявку в статус «Оплачен / Завершён»? Автозакрытие долгов не выполняется.';
     if (clientDebt > 0 || carrierDebt > 0) {
       const parts: string[] = [];
@@ -664,7 +675,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
   const handleReopenTrip = async () => {
     if (!tripId || reopeningTrip || actionLockRef.current.reopen) return;
-    if (!confirm('Открыть заявку снова? Статус изменится на «На оплату».')) return;
+    if (!confirm('Открыть заявку снова? Статус изменится на «Сверка».')) return;
     actionLockRef.current.reopen = true;
     setReopeningTrip(true);
     try {
@@ -674,8 +685,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         appToast.error(err.error || 'Ошибка');
         return;
       }
-      setStatus('awaiting_payment');
-      appToast.success('Заявка снова в статусе «На оплату».');
+      setStatus('sverka');
+      appToast.success('Заявка снова в статусе «Сверка».');
     } catch { appToast.error('Ошибка'); }
     finally {
       actionLockRef.current.reopen = false;
@@ -819,7 +830,19 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         carrierRate: tripType === 'expedition' ? carrierRate : null,
         carrierCurrency: tripType === 'expedition' ? carrierCurrency : null,
         carrierExchangeRate: tripType === 'expedition' ? effectiveCarrierRate : null,
-        expenses: expenses ?? [],
+        customsDeparture: customsDeparture || null,
+        customsDestination: customsDestination || null,
+        cargoName: cargoName || null,
+        cargoValue: cargoValue ? Number(cargoValue) : null,
+        truckType: truckType || null,
+        loadingAddress: loadingAddress || null,
+        unloadingAddress: unloadingAddress || null,
+        trailerPlate: trailerPlate || null,
+        additionalTerms: additionalTerms || null,
+        expenses: [
+          ...clientExpenses.map((e: Expense) => ({ ...e, description: '' })),
+          ...carrierExpenses.map((e: Expense) => ({ ...e, description: '__carrier__' })),
+        ],
       };
 
       const url = isEdit ? `/api/trips/${tripId}` : '/api/trips';
@@ -883,47 +906,114 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         <h1 className="text-xl font-display font-bold tracking-tight">{isEdit ? 'Редактирование заявки' : copyFromId ? 'Копирование заявки' : 'Новая заявка'}</h1>
       </div>
 
-      {/* Completed / Archived banner */}
-      {isEdit && (isFinanciallyCompleted || isArchived) && (
-        <div className={`${status === 'archived' ? 'bg-slate-50 dark:bg-slate-950/30 border-slate-200 dark:border-slate-800' : 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'} border rounded-xl p-4 flex items-center justify-between gap-4`}>
-          <div className="flex items-center gap-3">
-            <Lock className={`w-5 h-5 ${status === 'archived' ? 'text-slate-600' : 'text-green-600'} shrink-0`} />
-            <div>
-              <p className={`text-sm font-semibold ${status === 'archived' ? 'text-slate-800 dark:text-slate-300' : 'text-green-800 dark:text-green-300'}`}>
-                {status === 'archived' ? 'Заявка в архиве' : 'Оплачен / завершён'}
-              </p>
-              <p className={`text-xs ${status === 'archived' ? 'text-slate-600 dark:text-slate-400' : 'text-green-600 dark:text-green-400'}`}>
-                {status === 'archived'
-                  ? 'Редактирование заблокировано. Можно вернуть из архива.'
-                  : 'Финансово закрыта. Налоговый код можно внести до ручной отправки в архив.'}
-              </p>
-              {isFinanciallyCompleted && !isArchived && (
-                <p className={`text-xs mt-1 font-medium ${taxCode.trim() ? 'text-emerald-700' : 'text-amber-700'}`}>
-                  {taxCodeIndicatorLabel(taxCode)}
-                </p>
+      {/* ═══ Статус ═══ */}
+      {isEdit && (
+        <div className="bg-card rounded-xl px-4 py-3 shadow-sm border mb-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap">
+              {(['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'] as const).map((key, idx) => {
+                const FLOW_LABELS: Record<string, string> = {
+                  new: 'Новая',
+                  in_progress: 'В пути',
+                  unloaded: 'Разгружен',
+                  awaiting_payment: 'На оплату',
+                  sverka: 'Сверка',
+                  completed: 'Завершён',
+                };
+                const FLOW_COLORS: Record<string, string> = {
+                  new: 'bg-blue-500',
+                  in_progress: 'bg-amber-500',
+                  unloaded: 'bg-orange-500',
+                  awaiting_payment: 'bg-purple-500',
+                  sverka: 'bg-teal-500',
+                  completed: 'bg-green-500',
+                };
+                const FLOW = ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'];
+                const canonSt = (status === 'paid' ? 'completed' : status) as string;
+                const currentIdx = FLOW.indexOf(isArchived ? '' : canonSt);
+                const active = !isArchived && canonSt === key;
+                const isAllowed = !isArchived && !active && Math.abs(currentIdx - idx) <= 1;
+                // Block sverka->completed if conditions unmet
+                const completionBlocks: string[] = [];
+                if (key === 'completed' && canonSt === 'sverka') {
+                  const cDebt = Math.round(totalClientAmd - clientPaidAmd);
+                  const crDebt = Math.round(totalCarrierAmd - carrierPaidAmd);
+                  if (cDebt > 0) completionBlocks.push(`❌ Клиент не полностью оплатил (остаток: ${cDebt.toLocaleString('ru-RU')} AMD)`);
+                  if (tripType === 'expedition' && crDebt > 0) completionBlocks.push(`❌ Перевозчик не получил полную оплату (остаток: ${crDebt.toLocaleString('ru-RU')} AMD)`);
+                  if (!taxCode.trim()) completionBlocks.push('❌ Налоговый код не заполнен');
+                }
+                const isBlocked = completionBlocks.length > 0;
+                return (
+                  <div key={key} className="flex items-center gap-1">
+                    {idx > 0 && <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0" />}
+                    <button
+                      type="button"
+                      onClick={() => { if (isAllowed && !isBlocked) setStatus(key); }}
+                      disabled={!isAllowed || isBlocked}
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        active
+                          ? `${FLOW_COLORS[key]} text-white ring-2 ring-offset-1 ring-primary/60`
+                          : isBlocked
+                          ? 'bg-red-100 text-red-400 cursor-not-allowed border border-red-200'
+                          : isAllowed
+                          ? 'bg-muted/50 text-muted-foreground hover:bg-muted border border-border/50'
+                          : 'text-muted-foreground/40 cursor-not-allowed'
+                      }`}
+                    >
+                      {FLOW_LABELS[key]}
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Conditions blocking Сверка→Завершён */}
+              {status === 'sverka' && !isArchived && (() => {
+                const cDebt = Math.round(totalClientAmd - clientPaidAmd);
+                const crDebt = Math.round(totalCarrierAmd - carrierPaidAmd);
+                const blocks: string[] = [];
+                if (cDebt > 0) blocks.push(`❌ Клиент не полностью оплатил (остаток: ${cDebt.toLocaleString('ru-RU')} AMD)`);
+                if (tripType === 'expedition' && crDebt > 0) blocks.push(`❌ Перевозчик не получил полную оплату (остаток: ${crDebt.toLocaleString('ru-RU')} AMD)`);
+                if (!taxCode.trim()) blocks.push('❌ Налоговый код не заполнен');
+                if (blocks.length === 0) return null;
+                return (
+                  <div className="w-full mt-2 p-2.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-[11px] font-semibold text-red-700 dark:text-red-300 mb-1">Для перехода в «Завершён» необходимо:</p>
+                    {blocks.map((b, i) => <p key={i} className="text-[11px] text-red-600 dark:text-red-400">{b}</p>)}
+                  </div>
+                );
+              })()}
+              {isArchived && (
+                <div className="flex items-center gap-1">
+                  <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500 text-white ring-2 ring-offset-1 ring-slate-400">Архив ✓</span>
+                </div>
               )}
             </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {status === 'archived' && (
-              <button type="button" onClick={handleArchiveToggle} disabled={archiving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-500 text-white text-sm font-medium rounded-lg hover:bg-slate-600 disabled:opacity-60 transition">
-                <Archive className="w-4 h-4" />
-                {archiving ? '...' : 'Вернуть из архива'}
-              </button>
-            )}
-            {isFinanciallyCompleted && !isArchived && (
-              <button type="button" onClick={handleArchiveToggle} disabled={archiving}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-600 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-60 transition">
-                <Archive className="w-4 h-4" />
-                {archiving ? '...' : 'Отправить в архив'}
-              </button>
-            )}
-            <button type="button" onClick={handleReopenTrip} disabled={reopeningTrip}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-60 transition">
-              <Unlock className="w-4 h-4" />
-              {reopeningTrip ? 'Открытие...' : 'Открыть заявку снова'}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {isFinanciallyCompleted && !isArchived && (
+                <button type="button" onClick={handleArchiveToggle} disabled={archiving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-700 disabled:opacity-60 transition">
+                  <Archive className="w-3.5 h-3.5" />
+                  {archiving ? '...' : 'В архив'}
+                </button>
+              )}
+              {isArchived && (
+                <button type="button" onClick={handleArchiveToggle} disabled={archiving}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-500 text-white text-xs font-medium rounded-lg hover:bg-slate-600 disabled:opacity-60 transition">
+                  <Archive className="w-3.5 h-3.5" />
+                  {archiving ? '...' : 'Из архива'}
+                </button>
+              )}
+              {(isFinanciallyCompleted || isArchived) && (
+                <button type="button" onClick={handleReopenTrip} disabled={reopeningTrip}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 disabled:opacity-60 transition">
+                  <Unlock className="w-3.5 h-3.5" />
+                  {reopeningTrip ? 'Открытие...' : 'Открыть снова'}
+                </button>
+              )}
+              {(isFinanciallyCompleted || status === 'sverka') && !isArchived && (
+                <span className={`text-xs font-medium ml-1 ${taxCode.trim() ? 'text-emerald-700' : 'text-amber-700'}`}>{taxCodeIndicatorLabel(taxCode)}</span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -974,44 +1064,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Расстояние (км)</label>
-              <input type="number" min={0} value={distance} onChange={(e) => setDistance(e.target.value ? Number(e.target.value) : '')} placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+              <input type="number" min={0} value={distance} onChange={(e) => setDistance(e.target.value ? Number(e.target.value) : '')} placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"  onWheel={(e) => e.currentTarget.blur()}/>
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Вес груза (т)</label>
-              <input type="number" min={0} step="0.1" value={cargoWeight} onChange={(e) => setCargoWeight(e.target.value ? Number(e.target.value) : '')} placeholder="20" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
-            </div>
-            <div className="col-span-2">
-              <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0442\u0443\u0441"}</label>
-              <div className="flex flex-wrap gap-2">
-                {STATUS_ORDER.map((key) => {
-                  const s = STATUS_MAP[key];
-                  if (!s) return null;
-                  const workflow = canonicalWorkflowTripStatus(status);
-                  const active = workflow === key;
-                  // 1.3: Only allow adjacent status steps (current ±1)
-                  const currentIdx = STATUS_ORDER.indexOf(workflow);
-                  const keyIdx = STATUS_ORDER.indexOf(key);
-                  const isAllowed = active || Math.abs(currentIdx - keyIdx) <= 1 || status === 'archived';
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => isAllowed && setStatus(key)}
-                      disabled={!isAllowed}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${active ? 'ring-2 ring-offset-1 ring-primary border-transparent text-white' : isAllowed ? 'bg-background text-muted-foreground border-border hover:border-primary/40' : 'bg-muted/30 text-muted-foreground/40 border-border/30 cursor-not-allowed'}`}
-                      style={active ? { backgroundColor: s.color } : undefined}
-                    >
-                      {s.label}
-                    </button>
-                  );
-                })}
-                {/* Archive status badge (read-only) */}
-                {status === 'archived' && (
-                  <span className="px-3 py-1.5 rounded-full text-xs font-medium bg-slate-200 text-slate-700 ring-2 ring-offset-1 ring-slate-400 border-transparent">
-                    Архив ✓
-                  </span>
-                )}
-              </div>
+              <input type="number" min={0} step="0.1" value={cargoWeight} onChange={(e) => setCargoWeight(e.target.value ? Number(e.target.value) : '')} placeholder="20" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"  onWheel={(e) => e.currentTarget.blur()}/>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
               <div>
@@ -1138,366 +1195,210 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               </div>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">{"\u041F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A"}</label>
-                  <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
-                    <option value="">{"\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A\u0430"}</option>
-                    {(carriers ?? []).map((c: any) => <option key={c?.id} value={c?.id}>{c?.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0432\u043A\u0430 \u043F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A\u0430"}, {CURRENCY_SYMBOLS[carrierCurrency] || carrierCurrency}</label>
-                  <input type="number" min={0} value={carrierRate} onChange={(e) => setCarrierRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">{"\u0412\u0430\u043B\u044E\u0442\u0430 \u0440\u0430\u0441\u0445\u043E\u0434\u0430"}</label>
-                  <select value={carrierCurrency} onChange={(e) => handleCarrierCurrencyChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
-                    {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
-                  </select>
-                </div>
-                {carrierCurrency !== 'AMD' && (
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">{"\u041A\u0443\u0440\u0441 \u0440\u0430\u0441\u0445\u043E\u0434\u0430 \u043A AMD"}</label>
-                    <div className="flex gap-1">
-                      <input type="text" inputMode="decimal" value={carrierExchangeRate} onChange={(e) => setCarrierExchangeRate(e.target.value)}
-                        className={`flex-1 ${RATE_INPUT_CLASS}`} />
-                      {dailyRates[carrierCurrency] > 0 && (
-                        <button type="button" onClick={applyCarrierDailyRate} title={`\u041A\u0443\u0440\u0441 \u0434\u043D\u044F: ${dailyRates[carrierCurrency]}`}
-                          className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
-                          <RefreshCw className="w-3 h-3" /> {dailyRates[carrierCurrency]}
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">1 {carrierCurrency} = {carrierExchangeRate} AMD</p>
-                    {dailyRates[carrierCurrency] > 0 && Math.abs(parseRateInput(carrierExchangeRate) - dailyRates[carrierCurrency]) / dailyRates[carrierCurrency] > 0.15 && (
-                      <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Курс отличается от дневного более чем на 15%</p>
-                    )}
-                  </div>
-                )}
-                {carrierCurrency !== 'AMD' && (
-                  <div className="flex flex-col justify-end">
-                    <span className="text-xs text-muted-foreground">{"\u0420\u0430\u0441\u0445\u043E\u0434 \u0432 AMD"}</span>
-                    <span className="text-lg font-mono font-semibold text-red-500">{carrierRateAmd.toLocaleString('ru-RU')} {"\u058F"}</span>
-                  </div>
-                )}
-              </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">{"\u041F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A"}</label>
+              <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                <option value="">{"\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A\u0430"}</option>
+                {(carriers ?? []).map((c: any) => <option key={c?.id} value={c?.id}>{c?.name}</option>)}
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-1">{"\u0421\u0442\u0430\u0432\u043A\u0430 \u0438 \u0432\u0430\u043B\u044E\u0442\u0430 \u043F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A\u0430 \u2014 \u0432 \u0431\u043B\u043E\u043A\u0435 \u00AB\u0424\u0438\u043D\u0430\u043D\u0441\u044B\u00BB \u043D\u0438\u0436\u0435"}</p>
             </div>
           )}
         </div>
 
-        {/* Expenses — collapsible */}
-        <div className="bg-card rounded-xl shadow-sm">
-          <button type="button" onClick={() => setExpensesOpen(!expensesOpen)}
-            className="w-full flex items-center justify-between p-5 text-left hover:bg-muted/30 transition rounded-xl">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              Расходы
-              {(expenses?.length ?? 0) > 0 && <span className="text-xs font-normal text-muted-foreground">({expenses.length}) — {totalExpensesAmd.toLocaleString('ru-RU')} ֏</span>}
-            </h3>
-            <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expensesOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {expensesOpen && <div className="px-5 pb-5 space-y-4">
-            <div className="flex items-center justify-end">
-              <button type="button" onClick={addExpense} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                <Plus className="w-3 h-3" /> Добавить
-              </button>
-            </div>
-            {(expenses?.length ?? 0) === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-4">{'\u041D\u0435\u0442 \u0440\u0430\u0441\u0445\u043E\u0434\u043E\u0432. \u041D\u0430\u0436\u043C\u0438\u0442\u0435 "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C" \u0434\u043B\u044F \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u044F.'}</p>
-            ) : (
-              <div className="space-y-3">
-                {(expenses ?? []).map((exp: Expense, idx: number) => (
-                  <div key={idx} className="p-3 bg-muted/50 rounded-lg space-y-2">
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <select value={exp?.expenseType ?? 'other'} onChange={(e) => updateExpense(idx, 'expenseType', e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background sm:w-36">
-                        {Object.entries(EXPENSE_TYPE_MAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                      <input type="number" min={0} value={exp?.amount ?? 0} onChange={(e) => updateExpense(idx, 'amount', Number(e.target.value))} placeholder={"\u0421\u0443\u043C\u043C\u0430"} className="border rounded-lg px-3 py-2 text-sm bg-background sm:w-32" />
-                      <select value={exp?.currency ?? 'AMD'} onChange={(e) => updateExpense(idx, 'currency', e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background w-24">
-                        {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
-                      </select>
-                      <input type="text" value={exp?.description ?? ''} onChange={(e) => updateExpense(idx, 'description', e.target.value)} placeholder={"\u041E\u043F\u0438\u0441\u0430\u043D\u0438\u0435"} className="flex-1 border rounded-lg px-3 py-2 text-sm bg-background" />
-                      <button type="button" onClick={() => removeExpense(idx)} className="p-2 hover:bg-red-50 rounded-lg transition self-center">
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
-                    {exp?.currency && exp.currency !== 'AMD' && (
-                      <div className="flex items-center gap-3 pl-1">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-muted-foreground">{"\u041A\u0443\u0440\u0441"}:</span>
-                          <input type="text" inputMode="decimal" value={exp?.exchangeRate ?? 1} onChange={(e) => updateExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className={`${RATE_INPUT_CLASS} !py-1 !px-2 !text-xs w-20`} />
-                          {dailyRates[exp.currency] > 0 && exp.exchangeRate !== dailyRates[exp.currency] && (
-                            <button type="button" onClick={() => updateExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline" title={`\u041A\u0443\u0440\u0441 \u0434\u043D\u044F: ${dailyRates[exp.currency]}`}>
-                              {dailyRates[exp.currency]}
-                            </button>
-                          )}
-                        </div>
-                        <span className="text-xs font-mono text-amber-600">{"\u2192"} {(exp?.amountAmd ?? 0).toLocaleString('ru-RU')} {"\u058F"}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {/* Totals row */}
-                <div className="flex items-center justify-between pt-2 border-t border-muted">
-                  <span className="text-xs font-semibold text-muted-foreground">{"\u0418\u0442\u043E\u0433\u043E \u0440\u0430\u0441\u0445\u043E\u0434\u043E\u0432"}</span>
-                  <span className="text-sm font-bold font-mono text-red-600">{totalExpensesAmd.toLocaleString('ru-RU')} {"\u058F"}</span>
-                </div>
-              </div>
-            )}
-          </div>}
-        </div>
+      </fieldset>
 
         {/* Finance Summary */}
         <div className="bg-card rounded-xl p-5 shadow-sm space-y-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4 text-primary" /> Финансы</h3>
+          <h3 className="text-sm font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4 text-primary" /> {"\u0424\u0438\u043d\u0430\u043d\u0441\u044b"}</h3>
 
-          {/* Currency & Rate */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Валюта</label>
-              <select value={currency} onChange={(e) => handleCurrencyChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
-                {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
-              </select>
+          {/* \u0421\u0442\u0440\u043e\u043a\u0430 \u043f\u0440\u0438\u0431\u044b\u043b\u0438 */}
+          {isEdit && (
+            <div className={`flex items-center justify-between rounded-lg p-3 ${profitAmd >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
+              <div className="flex items-center gap-3 text-xs flex-wrap">
+                <span className="text-muted-foreground">{"Клиент:"}</span>
+                <span className="font-mono font-semibold text-blue-700 dark:text-blue-300">{totalClientAmd.toLocaleString('ru-RU')} {"֏"}</span>
+                {tripType === 'expedition' && (<>
+                  <span className="text-muted-foreground">{"−"}</span>
+                  <span className="text-muted-foreground">{"Перевозчик:"}</span>
+                  <span className="font-mono font-semibold text-red-600">{totalCarrierAmd.toLocaleString('ru-RU')} {"֏"}</span>
+                </>)}
+                <span className="text-muted-foreground">{"="}</span>
+              </div>
+              <span className={`text-lg font-bold font-mono ${profitAmd >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
+                {profitAmd.toLocaleString('ru-RU')} {"\u058F"}
+              </span>
             </div>
-            {currency !== 'AMD' && (
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Курс к AMD</label>
-                <div className="flex gap-1">
-                  <input type="text" inputMode="decimal" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)}
-                    className={`flex-1 ${RATE_INPUT_CLASS}`} />
-                  {dailyRates[currency] > 0 && (
-                    <button type="button" onClick={applyDailyRate} title={`Курс дня: ${dailyRates[currency]}`}
-                      className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
-                      <RefreshCw className="w-3 h-3" /> {dailyRates[currency]}
-                    </button>
-                  )}
+          )}
+
+          {/* \u041a\u0430\u0441\u0441\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0440\u044b\u0432 */}
+          {isEdit && tripType === 'expedition' && carrierPaidAmd > clientPaidAmd && (
+            <div className="flex items-start gap-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-700 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-800 dark:text-amber-200 space-y-0.5">
+                <p className="font-semibold">{"\u041a\u0430\u0441\u0441\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0440\u044b\u0432 \u2014 \u043c\u044b \u0432\u043b\u043e\u0436\u0438\u043b\u0438 \u0441\u0432\u043e\u0438 \u0434\u0435\u043d\u044c\u0433\u0438"}</p>
+                <p>{"\u0412\u044b\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443: "}<span className="font-mono font-semibold">{carrierPaidAmd.toLocaleString('ru-RU')} {"\u058F"}</span>{" \u00b7 \u041f\u043e\u043b\u0443\u0447\u0435\u043d\u043e \u043e\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430: "}<span className="font-mono font-semibold">{clientPaidAmd.toLocaleString('ru-RU')} {"\u058F"}</span>{" \u00b7 \u0420\u0430\u0437\u0440\u044b\u0432: "}<span className="font-mono font-semibold text-amber-900 dark:text-amber-100">{(carrierPaidAmd - clientPaidAmd).toLocaleString('ru-RU')} {"\u058F"}</span></p>
+              </div>
+            </div>
+          )}
+
+          {/* \u0414\u0432\u0435 \u043a\u043e\u043b\u043e\u043d\u043a\u0438 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            {/* \u041a\u041b\u0418\u0415\u041d\u0422 */}
+            <div className="space-y-4">
+              <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide border-b border-blue-100 dark:border-blue-900 pb-2">{"\u041a\u043b\u0438\u0435\u043d\u0442"}</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">{"\u0412\u0430\u043b\u044e\u0442\u0430"}</label>
+                  <select value={currency} onChange={(e) => handleCurrencyChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
+                  </select>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">1 {currency} = {exchangeRate} AMD</p>
-                {dailyRates[currency] > 0 && Math.abs(parseRateInput(exchangeRate) - dailyRates[currency]) / dailyRates[currency] > 0.15 && (
-                  <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Курс отличается от дневного более чем на 15%</p>
+                {currency !== 'AMD' && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">{"\u041a\u0443\u0440\u0441 \u043a AMD"}</label>
+                    <div className="flex gap-1">
+                      <input type="text" inputMode="decimal" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} className={`flex-1 ${RATE_INPUT_CLASS}`} />
+                      {dailyRates[currency] > 0 && (
+                        <button type="button" onClick={applyDailyRate} title={`\u041a\u0443\u0440\u0441 \u0434\u043d\u044f: ${dailyRates[currency]}`} className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
+                          <RefreshCw className="w-3 h-3" /> {dailyRates[currency]}
+                        </button>
+                      )}
+                    </div>
+                    {dailyRates[currency] > 0 && Math.abs(parseRateInput(exchangeRate) - dailyRates[currency]) / dailyRates[currency] > 0.15 && (
+                      <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> {"\u041a\u0443\u0440\u0441 \u043e\u0442\u043b\u0438\u0447\u0430\u0435\u0442\u0441\u044f \u043e\u0442 \u0434\u043d\u0435\u0432\u043d\u043e\u0433\u043e \u0431\u043e\u043b\u0435\u0435 \u0447\u0435\u043c \u043d\u0430 15%"}</p>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-            {currency !== 'AMD' && (
-              <div className="flex flex-col justify-end">
-                <span className="text-xs text-muted-foreground">Ставка в AMD</span>
-                <span className="text-lg font-mono font-semibold text-primary">{clientRateAmd.toLocaleString('ru-RU')} ֏</span>
-              </div>
-            )}
-          </div>
 
-          {/* ═══ КЛИЕНТ ═══ */}
-          <div className="space-y-3">
-            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide">Клиент</p>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Ставка клиента, {CURRENCY_SYMBOLS[currency] || currency} *</label>
-              <input type="number" min={0} value={clientRate} onChange={(e) => setClientRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" required />
-              {currency !== 'AMD' && (
-                <p className="text-xs font-mono text-muted-foreground mt-1">{clientRateAmd.toLocaleString('ru-RU')} ֏</p>
-              )}
-            </div>
-            {lastRateHint && !isEdit && (
-              <button type="button" onClick={() => { setClientRate(lastRateHint.rate); if (lastRateHint.currency !== currency) handleCurrencyChange(lastRateHint.currency); }}
-                className="w-full text-left text-[11px] bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg px-2.5 py-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition">
-                <span className="text-blue-800 dark:text-blue-300">Последняя ставка: <strong>{lastRateHint.rate.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[lastRateHint.currency] || lastRateHint.currency}</strong> ({lastRateHint.date})</span>
-                <span className="text-blue-600 dark:text-blue-400 ml-1">← применить</span>
-              </button>
-            )}
-            {/* Client summary: Ставка / Оплачено / Остаток */}
-            {isEdit && (
-              <div className="grid grid-cols-3 gap-3 bg-blue-50/50 dark:bg-blue-950/10 rounded-lg p-3">
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground">Ставка</p>
-                  <p className="text-sm font-mono font-semibold">{clientRateAmd.toLocaleString('ru-RU')} ֏</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground">Оплачено</p>
-                  <p className="text-sm font-mono font-semibold text-green-600">{clientPaidAmd.toLocaleString('ru-RU')} ֏</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-muted-foreground">Остаток</p>
-                  <p className={`text-sm font-mono font-semibold ${clientRateAmd - clientPaidAmd > 0 ? 'text-red-600' : 'text-green-600'}`}>{(clientRateAmd - clientPaidAmd).toLocaleString('ru-RU')} ֏</p>
-                </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0432\u043a\u0430 \u043a\u043b\u0438\u0435\u043d\u0442\u0430"}, {CURRENCY_SYMBOLS[currency] || currency} *</label>
+                <input type="number" min={0} value={clientRate} onChange={(e) => setClientRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" required  onWheel={(e) => e.currentTarget.blur()}/>
+                {currency !== 'AMD' && (
+                  <p className="text-xs font-mono text-muted-foreground mt-1">{clientRateAmd.toLocaleString('ru-RU')} {"\u058F"}</p>
+                )}
               </div>
-            )}
-            {/* Client payment list + add */}
-            {isEdit && (
+
+              {lastRateHint && !isEdit && (
+                <button type="button" onClick={() => { setClientRate(lastRateHint.rate); if (lastRateHint.currency !== currency) handleCurrencyChange(lastRateHint.currency); }}
+                  className="w-full text-left text-[11px] bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg px-2.5 py-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition">
+                  <span className="text-blue-800 dark:text-blue-300">{"\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0441\u0442\u0430\u0432\u043a\u0430: "}<strong>{lastRateHint.rate.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[lastRateHint.currency] || lastRateHint.currency}</strong> ({lastRateHint.date})</span>
+                  <span className="text-blue-600 dark:text-blue-400 ml-1">{"\u2190 \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c"}</span>
+                </button>
+              )}
+
+              {/* Доп. расходы клиента */}
               <div className="space-y-2">
-                <div className="flex items-center justify-end gap-3">
-                  {clientRateAmd - clientPaidAmd > 0 && (
-                    <button type="button" onClick={() => {
-                      const rem = clientRateAmd - clientPaidAmd;
-                      const now = new Date();
-                      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                      setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: 'Полная оплата', method: 'bank_transfer' });
-                      setShowPayForm('client');
-                    }}
-                      className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Оплачено полностью
-                    </button>
-                  )}
-                  <button type="button" onClick={() => openPayForm('client')}
-                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> Добавить оплату
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">Доп. расходы</span>
+                  <button type="button" onClick={addClientExpense} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                    <Plus className="w-3 h-3" /> Добавить
                   </button>
                 </div>
-                {clientPayments.length > 0 && (
-                  <div className="space-y-1.5">
-                    {clientPayments.map(p => (
-                      <div key={p.id} className="group flex items-center justify-between bg-muted/30 rounded-lg px-3 py-1.5">
-                        <div className="flex items-center gap-2 text-xs flex-wrap min-w-0">
-                          <span className="text-muted-foreground shrink-0">{new Date(p.paymentDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
-                          <span className="font-mono font-semibold">{p.amount.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[p.currency] || p.currency}</span>
-                          {p.currency !== 'AMD' && (
-                            <span className="text-muted-foreground">× {Number(p.exchangeRate)} → <span className="font-semibold text-blue-600">{p.amountAmd.toLocaleString('ru-RU')} ֏</span></span>
+                {clientExpenses.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-2 bg-muted/20 rounded">Нет расходов</p>
+                ) : (
+                  <div className="space-y-2">
+                    {clientExpenses.map((exp: Expense, idx: number) => (
+                      <div key={idx} className="p-2 bg-muted/40 rounded-lg">
+                        <div className="flex gap-1.5 flex-wrap items-center">
+                          <select value={exp.expenseType} onChange={(e) => updateClientExpense(idx, 'expenseType', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background flex-1 min-w-[90px]">
+                            {Object.entries(EXPENSE_TYPE_MAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          </select>
+                          <input type="number" min={0} value={exp.amount} onChange={(e) => updateClientExpense(idx, 'amount', Number(e.target.value))} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                          <select value={exp.currency} onChange={(e) => updateClientExpense(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-[68px]">
+                            {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          {exp.currency !== 'AMD' && (
+                            <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateClientExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
                           )}
-                          {p.description && <span className="text-muted-foreground truncate">— {p.description}</span>}
+                          {exp.currency !== 'AMD' && dailyRates[exp.currency] > 0 && Number(exp.exchangeRate) !== dailyRates[exp.currency] && (
+                            <button type="button" onClick={() => updateClientExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline self-center px-1">{dailyRates[exp.currency]}</button>
+                          )}
+                          {exp.currency !== 'AMD' && (
+                            <span className="text-xs font-mono text-amber-600 self-center whitespace-nowrap">{exp.amountAmd.toLocaleString('ru-RU')} ֏</span>
+                          )}
+                          <button type="button" onClick={() => removeClientExpense(idx)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition ml-auto shrink-0" title="Удалить">
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </button>
                         </div>
-                        <button type="button" onClick={() => handleDeletePayment(p.id)}
-                          className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title="Удалить">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     ))}
-                  </div>
-                )}
-                {/* Add payment form — client */}
-                {showPayForm === 'client' && (
-                  <div className="bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-3 space-y-2 border border-dashed border-blue-300 dark:border-blue-700">
-                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">Новая оплата от клиента</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Сумма *</label>
-                        <input type="number" step="0.01" min="0" value={payForm.amount}
-                          onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
-                          className="w-full border rounded-md px-2 py-1.5 text-sm bg-background font-mono" placeholder="0" autoFocus />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Валюта</label>
-                        <select value={payForm.currency}
-                          onChange={e => { const cur = e.target.value; setPayForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'AMD' ? '1' : f.exchangeRate })); }}
-                          className="w-full border rounded-md px-2 py-1.5 text-sm bg-background">
-                          {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Курс</label>
-                        <input type="text" inputMode="decimal" value={payForm.exchangeRate}
-                          onChange={e => setPayForm(f => ({ ...f, exchangeRate: e.target.value }))}
-                          disabled={payForm.currency === 'AMD'}
-                          className={`w-full ${RATE_INPUT_CLASS} !rounded-md disabled:opacity-50`} />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">Дата *</label>
-                        <input type="date" value={payForm.paymentDate}
-                          onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
-                          className="w-full border rounded-md px-2 py-1.5 text-sm bg-background" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted-foreground">Комментарий</label>
-                      <input type="text" value={payForm.description}
-                        onChange={e => setPayForm(f => ({ ...f, description: e.target.value }))}
-                        className="w-full border rounded-md px-2 py-1.5 text-sm bg-background"
-                        placeholder="Примечание к оплате" />
-                    </div>
-                    {payForm.currency !== 'AMD' && Number(payForm.amount) > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        {Number(payForm.amount).toLocaleString('ru-RU')} {payForm.currency} × {payForm.exchangeRate} = <span className="font-mono font-semibold">{payComputedAmd.toLocaleString('ru-RU')} ֏</span>
-                      </p>
-                    )}
-                    <div className="flex gap-2">
-                      <button type="button" onClick={handleSavePayment} disabled={savingPay || !payForm.amount || Number(payForm.amount) <= 0}
-                        className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
-                        {savingPay ? 'Сохранение...' : 'Добавить'}
-                      </button>
-                      <button type="button" onClick={() => setShowPayForm(null)}
-                        className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">Отмена</button>
+                    <div className="flex items-center justify-between pt-1.5 border-t border-muted">
+                      <span className="text-xs text-muted-foreground">Итого расходы</span>
+                      <span className="text-sm font-bold font-mono text-red-600">{totalClientExpensesAmd.toLocaleString('ru-RU')} ֏</span>
                     </div>
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* ═══ ПЕРЕВОЗЧИК (только для экспедиции) ═══ */}
-          {tripType === 'expedition' && (
-            <div className="pt-4 border-t space-y-3">
-              <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 uppercase tracking-wide">Перевозчик</p>
-              {/* Carrier summary: Сумма / Оплачено / Остаток */}
-              {isEdit && (
-                <div className="grid grid-cols-3 gap-3 bg-orange-50/50 dark:bg-orange-950/10 rounded-lg p-3">
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Сумма</p>
-                    <p className="text-sm font-mono font-semibold">{carrierRateAmd.toLocaleString('ru-RU')} ֏</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Оплачено</p>
-                    <p className="text-sm font-mono font-semibold text-green-600">{carrierPaidAmd.toLocaleString('ru-RU')} ֏</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground">Остаток</p>
-                    <p className={`text-sm font-mono font-semibold ${carrierRateAmd - carrierPaidAmd > 0 ? 'text-red-600' : 'text-green-600'}`}>{(carrierRateAmd - carrierPaidAmd).toLocaleString('ru-RU')} ֏</p>
-                  </div>
+              {/* \u0418\u0422\u041e\u0413\u041e \u041a\u041b\u0418\u0415\u041d\u0422 */}
+              <div className="bg-blue-50/60 dark:bg-blue-950/15 rounded-lg p-3 border border-blue-100 dark:border-blue-900">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-blue-700 dark:text-blue-400">{"Итого (AMD)"}</span>
+                  <span className="text-base font-bold font-mono text-blue-700 dark:text-blue-300">{totalClientAmd.toLocaleString('ru-RU')} {"֏"}</span>
                 </div>
-              )}
-              {/* Carrier payment list + add */}
+                {isEdit && (
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div><span className="text-muted-foreground">{"Оплачено: "}</span><span className="font-mono font-semibold text-green-600">{clientPaidAmd.toLocaleString('ru-RU')} {"֏"}</span></div>
+                    <div><span className="text-muted-foreground">{"Остаток: "}</span><span className={`font-mono font-semibold ${totalClientAmd - clientPaidAmd > 0 ? 'text-red-600' : 'text-green-600'}`}>{(totalClientAmd - clientPaidAmd).toLocaleString('ru-RU')} {"֏"}</span></div>
+                  </div>
+                )}
+              </div>
+
+              {/* \u041e\u043f\u043b\u0430\u0442\u044b \u043a\u043b\u0438\u0435\u043d\u0442\u0430 */}
               {isEdit && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-end gap-3">
-                    {carrierRateAmd - carrierPaidAmd > 0 && (
+                    {totalClientAmd - clientPaidAmd > 0 && (
                       <button type="button" onClick={() => {
-                        const rem = carrierRateAmd - carrierPaidAmd;
+                        const rem = totalClientAmd - clientPaidAmd;
                         const now = new Date();
                         const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                        setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: 'Полная оплата', method: 'bank_transfer' });
-                        setShowPayForm('carrier');
-                      }}
-                        className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Оплачено полностью
+                        setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
+                        setShowPayForm('client');
+                      }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
                       </button>
                     )}
-                    <button type="button" onClick={() => openPayForm('carrier')}
-                      className="text-xs text-orange-600 hover:text-orange-800 dark:text-orange-400 flex items-center gap-1">
-                      <Plus className="w-3 h-3" /> Добавить оплату
+                    <button type="button" onClick={() => openPayForm('client')} className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-1">
+                      <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
                     </button>
                   </div>
-                  {carrierPayments.length > 0 && (
+                  {clientPayments.length > 0 && (
                     <div className="space-y-1.5">
-                      {carrierPayments.map(p => (
+                      {clientPayments.map(p => (
                         <div key={p.id} className="group flex items-center justify-between bg-muted/30 rounded-lg px-3 py-1.5">
                           <div className="flex items-center gap-2 text-xs flex-wrap min-w-0">
                             <span className="text-muted-foreground shrink-0">{new Date(p.paymentDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
                             <span className="font-mono font-semibold">{p.amount.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[p.currency] || p.currency}</span>
                             {p.currency !== 'AMD' && (
-                              <span className="text-muted-foreground">× {Number(p.exchangeRate)} → <span className="font-semibold text-orange-600">{p.amountAmd.toLocaleString('ru-RU')} ֏</span></span>
+                              <span className="text-muted-foreground">{"\u00d7 "}{Number(p.exchangeRate)}{" \u2192 "}<span className="font-semibold text-blue-600">{p.amountAmd.toLocaleString('ru-RU')} {"\u058F"}</span></span>
                             )}
-                            {p.description && <span className="text-muted-foreground truncate">— {p.description}</span>}
+                            {p.description && <span className="text-muted-foreground truncate">{"\u2014 "}{p.description}</span>}
                           </div>
-                          <button type="button" onClick={() => handleDeletePayment(p.id)}
-                            className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title="Удалить">
+                          <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
-                  {/* Add payment form — carrier */}
-                  {showPayForm === 'carrier' && (
-                    <div className="bg-orange-50/50 dark:bg-orange-950/20 rounded-lg p-3 space-y-2 border border-dashed border-orange-300 dark:border-orange-700">
-                      <p className="text-xs font-semibold text-orange-700 dark:text-orange-400">Новая оплата перевозчику</p>
+                  {showPayForm === 'client' && (
+                    <div className="bg-blue-50/50 dark:bg-blue-950/20 rounded-lg p-3 space-y-2 border border-dashed border-blue-300 dark:border-blue-700">
+                      <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">{"\u041d\u043e\u0432\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430 \u043e\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430"}</p>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Сумма *</label>
+                          <label className="text-[10px] text-muted-foreground">{"\u0421\u0443\u043c\u043c\u0430 *"}</label>
                           <input type="number" step="0.01" min="0" value={payForm.amount}
                             onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
-                            className="w-full border rounded-md px-2 py-1.5 text-sm bg-background font-mono" placeholder="0" autoFocus />
+                            className="w-full border rounded-md px-2 py-1.5 text-sm bg-background font-mono" placeholder="0" autoFocus  onWheel={(e) => e.currentTarget.blur()}/>
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Валюта</label>
+                          <label className="text-[10px] text-muted-foreground">{"\u0412\u0430\u043b\u044e\u0442\u0430"}</label>
                           <select value={payForm.currency}
                             onChange={e => { const cur = e.target.value; setPayForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'AMD' ? '1' : f.exchangeRate })); }}
                             className="w-full border rounded-md px-2 py-1.5 text-sm bg-background">
@@ -1505,55 +1406,238 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                           </select>
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Курс</label>
+                          <label className="text-[10px] text-muted-foreground">{"\u041a\u0443\u0440\u0441"}</label>
                           <input type="text" inputMode="decimal" value={payForm.exchangeRate}
                             onChange={e => setPayForm(f => ({ ...f, exchangeRate: e.target.value }))}
                             disabled={payForm.currency === 'AMD'}
                             className={`w-full ${RATE_INPUT_CLASS} !rounded-md disabled:opacity-50`} />
                         </div>
                         <div>
-                          <label className="text-[10px] text-muted-foreground">Дата *</label>
+                          <label className="text-[10px] text-muted-foreground">{"\u0414\u0430\u0442\u0430 *"}</label>
                           <input type="date" value={payForm.paymentDate}
                             onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
                             className="w-full border rounded-md px-2 py-1.5 text-sm bg-background" />
                         </div>
                       </div>
                       <div>
-                        <label className="text-[10px] text-muted-foreground">Комментарий</label>
+                        <label className="text-[10px] text-muted-foreground">{"\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439"}</label>
                         <input type="text" value={payForm.description}
                           onChange={e => setPayForm(f => ({ ...f, description: e.target.value }))}
                           className="w-full border rounded-md px-2 py-1.5 text-sm bg-background"
-                          placeholder="Примечание к оплате" />
+                          placeholder={"\u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435 \u043a \u043e\u043f\u043b\u0430\u0442\u0435"} />
                       </div>
                       {payForm.currency !== 'AMD' && Number(payForm.amount) > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          {Number(payForm.amount).toLocaleString('ru-RU')} {payForm.currency} × {payForm.exchangeRate} = <span className="font-mono font-semibold">{payComputedAmd.toLocaleString('ru-RU')} ֏</span>
+                          {Number(payForm.amount).toLocaleString('ru-RU')} {payForm.currency} {"\u00d7"} {payForm.exchangeRate} = <span className="font-mono font-semibold">{payComputedAmd.toLocaleString('ru-RU')} {"\u058F"}</span>
                         </p>
                       )}
                       <div className="flex gap-2">
                         <button type="button" onClick={handleSavePayment} disabled={savingPay || !payForm.amount || Number(payForm.amount) <= 0}
-                          className="px-3 py-1.5 text-xs font-medium bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50">
-                          {savingPay ? 'Сохранение...' : 'Добавить'}
+                          className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
+                          {savingPay ? '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...' : '\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c'}
                         </button>
                         <button type="button" onClick={() => setShowPayForm(null)}
-                          className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">Отмена</button>
+                          className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">{"\u041e\u0442\u043c\u0435\u043d\u0430"}</button>
                       </div>
                     </div>
                   )}
                 </div>
               )}
             </div>
-          )}
 
-          {/* ═══ Прибыль (краткая сводка) ═══ */}
-          {isEdit && (
-            <div className="pt-3 border-t">
-              <div className={`flex items-center justify-between rounded-lg p-3 ${profitAmd >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
-                <span className="text-xs font-medium text-muted-foreground">Прибыль</span>
-                <span className={`text-lg font-bold font-mono ${profitAmd >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>{profitAmd.toLocaleString('ru-RU')} ֏</span>
+            {/* \u041f\u0415\u0420\u0415\u0412\u041e\u0417\u0427\u0418\u041a (expedition only) */}
+            {tripType === 'expedition' && (
+              <div className="space-y-4">
+                <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 uppercase tracking-wide border-b border-orange-100 dark:border-orange-900 pb-2">{"\u041f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a"}</p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">{"\u0412\u0430\u043b\u044e\u0442\u0430"}</label>
+                    <select value={carrierCurrency} onChange={(e) => handleCarrierCurrencyChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                      {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
+                    </select>
+                  </div>
+                  {carrierCurrency !== 'AMD' && (
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">{"\u041a\u0443\u0440\u0441 \u043a AMD"}</label>
+                      <div className="flex gap-1">
+                        <input type="text" inputMode="decimal" value={carrierExchangeRate} onChange={(e) => setCarrierExchangeRate(e.target.value)} className={`flex-1 ${RATE_INPUT_CLASS}`} />
+                        {dailyRates[carrierCurrency] > 0 && (
+                          <button type="button" onClick={applyCarrierDailyRate} title={`\u041a\u0443\u0440\u0441 \u0434\u043d\u044f: ${dailyRates[carrierCurrency]}`} className="px-2 py-2 border rounded-lg text-xs hover:bg-muted transition flex items-center gap-1 whitespace-nowrap">
+                            <RefreshCw className="w-3 h-3" /> {dailyRates[carrierCurrency]}
+                          </button>
+                        )}
+                      </div>
+                      {dailyRates[carrierCurrency] > 0 && Math.abs(parseRateInput(carrierExchangeRate) - dailyRates[carrierCurrency]) / dailyRates[carrierCurrency] > 0.15 && (
+                        <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> {"\u041a\u0443\u0440\u0441 \u043e\u0442\u043b\u0438\u0447\u0430\u0435\u0442\u0441\u044f \u0431\u043e\u043b\u0435\u0435 \u0447\u0435\u043c \u043d\u0430 15%"}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0432\u043a\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430"}, {CURRENCY_SYMBOLS[carrierCurrency] || carrierCurrency}</label>
+                  <input type="number" min={0} value={carrierRate} onChange={(e) => setCarrierRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                  {carrierCurrency !== 'AMD' && (
+                    <p className="text-xs font-mono text-muted-foreground mt-1">{carrierRateAmd.toLocaleString('ru-RU')} {"\u058F"}</p>
+                  )}
+                </div>
+
+                {/* Доп. расходы перевозчика */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-muted-foreground">Доп. расходы</span>
+                    <button type="button" onClick={addCarrierExpense} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                      <Plus className="w-3 h-3" /> Добавить
+                    </button>
+                  </div>
+                  {carrierExpenses.length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-2 bg-muted/20 rounded">Нет расходов</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {carrierExpenses.map((exp: Expense, idx: number) => (
+                        <div key={idx} className="p-2 bg-muted/40 rounded-lg">
+                          <div className="flex gap-1.5 flex-wrap items-center">
+                            <select value={exp.expenseType} onChange={(e) => updateCarrierExpense(idx, 'expenseType', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background flex-1 min-w-[90px]">
+                              {Object.entries(EXPENSE_TYPE_MAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            </select>
+                            <input type="number" min={0} value={exp.amount} onChange={(e) => updateCarrierExpense(idx, 'amount', Number(e.target.value))} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                            <select value={exp.currency} onChange={(e) => updateCarrierExpense(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-[68px]">
+                              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            {exp.currency !== 'AMD' && (
+                              <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateCarrierExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
+                            )}
+                            {exp.currency !== 'AMD' && dailyRates[exp.currency] > 0 && Number(exp.exchangeRate) !== dailyRates[exp.currency] && (
+                              <button type="button" onClick={() => updateCarrierExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline self-center px-1">{dailyRates[exp.currency]}</button>
+                            )}
+                            {exp.currency !== 'AMD' && (
+                              <span className="text-xs font-mono text-amber-600 self-center whitespace-nowrap">{exp.amountAmd.toLocaleString('ru-RU')} ֏</span>
+                            )}
+                            <button type="button" onClick={() => removeCarrierExpense(idx)} className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition ml-auto shrink-0" title="Удалить">
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between pt-1.5 border-t border-muted">
+                        <span className="text-xs text-muted-foreground">Итого расходы</span>
+                        <span className="text-sm font-bold font-mono text-red-600">{totalCarrierExpensesAmd.toLocaleString('ru-RU')} ֏</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-orange-50/60 dark:bg-orange-950/15 rounded-lg p-3 border border-orange-100 dark:border-orange-900">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-orange-700 dark:text-orange-400">{"\u0418\u0442\u043e\u0433\u043e (AMD)"}</span>
+                    <span className="text-base font-bold font-mono text-orange-700 dark:text-orange-300">{totalCarrierAmd.toLocaleString('ru-RU')} {"\u058F"}</span>
+                  </div>
+                  {isEdit && (
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-muted-foreground">{"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e: "}</span><span className="font-mono font-semibold text-green-600">{carrierPaidAmd.toLocaleString('ru-RU')} {"\u058F"}</span></div>
+                      <div><span className="text-muted-foreground">{"\u041e\u0441\u0442\u0430\u0442\u043e\u043a: "}</span><span className={`font-mono font-semibold ${totalCarrierAmd - carrierPaidAmd > 0 ? 'text-red-600' : 'text-green-600'}`}>{(totalCarrierAmd - carrierPaidAmd).toLocaleString('ru-RU')} {"\u058F"}</span></div>
+                    </div>
+                  )}
+                </div>
+
+                {isEdit && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-end gap-3">
+                      {totalCarrierAmd - carrierPaidAmd > 0 && (
+                        <button type="button" onClick={() => {
+                          const rem = totalCarrierAmd - carrierPaidAmd;
+                          const now = new Date();
+                          const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                          setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
+                          setShowPayForm('carrier');
+                        }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => openPayForm('carrier')} className="text-xs text-orange-600 hover:text-orange-800 dark:text-orange-400 flex items-center gap-1">
+                        <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
+                      </button>
+                    </div>
+                    {carrierPayments.length > 0 && (
+                      <div className="space-y-1.5">
+                        {carrierPayments.map(p => (
+                          <div key={p.id} className="group flex items-center justify-between bg-muted/30 rounded-lg px-3 py-1.5">
+                            <div className="flex items-center gap-2 text-xs flex-wrap min-w-0">
+                              <span className="text-muted-foreground shrink-0">{new Date(p.paymentDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+                              <span className="font-mono font-semibold">{p.amount.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[p.currency] || p.currency}</span>
+                              {p.currency !== 'AMD' && (
+                                <span className="text-muted-foreground">{"\u00d7 "}{Number(p.exchangeRate)}{" \u2192 "}<span className="font-semibold text-orange-600">{p.amountAmd.toLocaleString('ru-RU')} {"\u058F"}</span></span>
+                              )}
+                              {p.description && <span className="text-muted-foreground truncate">{"\u2014 "}{p.description}</span>}
+                            </div>
+                            <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {showPayForm === 'carrier' && (
+                      <div className="bg-orange-50/50 dark:bg-orange-950/20 rounded-lg p-3 space-y-2 border border-dashed border-orange-300 dark:border-orange-700">
+                        <p className="text-xs font-semibold text-orange-700 dark:text-orange-400">{"\u041d\u043e\u0432\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443"}</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div>
+                            <label className="text-[10px] text-muted-foreground">{"\u0421\u0443\u043c\u043c\u0430 *"}</label>
+                            <input type="number" step="0.01" min="0" value={payForm.amount}
+                              onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))}
+                              className="w-full border rounded-md px-2 py-1.5 text-sm bg-background font-mono" placeholder="0" autoFocus  onWheel={(e) => e.currentTarget.blur()}/>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground">{"\u0412\u0430\u043b\u044e\u0442\u0430"}</label>
+                            <select value={payForm.currency}
+                              onChange={e => { const cur = e.target.value; setPayForm(f => ({ ...f, currency: cur, exchangeRate: cur === 'AMD' ? '1' : f.exchangeRate })); }}
+                              className="w-full border rounded-md px-2 py-1.5 text-sm bg-background">
+                              {CURRENCIES.map(c => <option key={c} value={c}>{c} {CURRENCY_SYMBOLS[c]}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground">{"\u041a\u0443\u0440\u0441"}</label>
+                            <input type="text" inputMode="decimal" value={payForm.exchangeRate}
+                              onChange={e => setPayForm(f => ({ ...f, exchangeRate: e.target.value }))}
+                              disabled={payForm.currency === 'AMD'}
+                              className={`w-full ${RATE_INPUT_CLASS} !rounded-md disabled:opacity-50`} />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground">{"\u0414\u0430\u0442\u0430 *"}</label>
+                            <input type="date" value={payForm.paymentDate}
+                              onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
+                              className="w-full border rounded-md px-2 py-1.5 text-sm bg-background" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground">{"\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439"}</label>
+                          <input type="text" value={payForm.description}
+                            onChange={e => setPayForm(f => ({ ...f, description: e.target.value }))}
+                            className="w-full border rounded-md px-2 py-1.5 text-sm bg-background"
+                            placeholder={"\u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435 \u043a \u043e\u043f\u043b\u0430\u0442\u0435"} />
+                        </div>
+                        {payForm.currency !== 'AMD' && Number(payForm.amount) > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            {Number(payForm.amount).toLocaleString('ru-RU')} {payForm.currency} {"\u00d7"} {payForm.exchangeRate} = <span className="font-mono font-semibold">{payComputedAmd.toLocaleString('ru-RU')} {"\u058F"}</span>
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <button type="button" onClick={handleSavePayment} disabled={savingPay || !payForm.amount || Number(payForm.amount) <= 0}
+                            className="px-3 py-1.5 text-xs font-medium bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50">
+                            {savingPay ? '\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435...' : '\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c'}
+                          </button>
+                          <button type="button" onClick={() => setShowPayForm(null)}
+                            className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground">{"\u041e\u0442\u043c\u0435\u043d\u0430"}</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
 
           {/* ═══ Документы ═══ */}
           <div className="pt-3 border-t border-dashed space-y-3">
@@ -1816,9 +1900,64 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none resize-none" />
           </div>
 
-        </div>
+          {/* ═══ Поля для заявки перевозчику ═══ */}
+          {tripType === 'expedition' && (
+            <div className="pt-3 border-t border-dashed space-y-3">
+              <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                <FileText className="w-3 h-3" /> Данные для заявки перевозчику
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Таможня отправления</label>
+                  <input type="text" value={customsDeparture} onChange={e => setCustomsDeparture(e.target.value)}
+                    placeholder="Гюмри / Меграздзор..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Таможня назначения</label>
+                  <input type="text" value={customsDestination} onChange={e => setCustomsDestination(e.target.value)}
+                    placeholder="Москва / Брест..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Наименование груза</label>
+                  <input type="text" value={cargoName} onChange={e => setCargoName(e.target.value)}
+                    placeholder="Товары народного потребления..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Стоимость груза (USD)</label>
+                  <input type="number" min="0" step="0.01" value={cargoValue} onChange={e => setCargoValue(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" onWheel={e => e.currentTarget.blur()} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Тип ТС / прицепа</label>
+                  <input type="text" value={truckType} onChange={e => setTruckType(e.target.value)}
+                    placeholder="Тент 13,6м / рефрижератор..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Гос. номер прицепа</label>
+                  <input type="text" value={trailerPlate} onChange={e => setTrailerPlate(e.target.value)}
+                    placeholder="AA 123 BB" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Адрес загрузки (дополнение)</label>
+                  <input type="text" value={loadingAddress} onChange={e => setLoadingAddress(e.target.value)}
+                    placeholder="ул. Ленина 5, склад №2..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Адрес выгрузки (дополнение)</label>
+                  <input type="text" value={unloadingAddress} onChange={e => setUnloadingAddress(e.target.value)}
+                    placeholder="ул. Фрунзе 10..." className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Дополнительные условия</label>
+                <textarea value={additionalTerms} onChange={e => setAdditionalTerms(e.target.value)}
+                  placeholder="Особые требования к перевозке..." rows={2}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none resize-none" />
+              </div>
+            </div>
+          )}
 
-      </fieldset>
+        </div>
 
       {/* ═══ Налоговый код (отдельно от серии счёта) ═══ */}
       {isEdit && (
@@ -1843,68 +1982,21 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         </div>
       )}
 
-      {/* ═══ Серии счетов (вне fieldset — всегда редактируемы) ═══ */}
-      {isEdit && (
-        <div className="bg-card border rounded-xl p-5 space-y-3">
-          <p className="text-sm font-semibold flex items-center gap-2">
-            <Archive className="w-4 h-4 text-primary" /> Серии счетов для налоговой отчётности
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Серия счёта клиента</label>
-              <input type="text" value={clientInvoiceSeries} onChange={(e) => setClientInvoiceSeries(e.target.value)}
-                placeholder="Например: ԱԲ-001"
-                className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
-            </div>
-            {tripType === 'expedition' && (
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Серия счёта перевозчика</label>
-                <input type="text" value={carrierInvoiceSeries} onChange={(e) => setCarrierInvoiceSeries(e.target.value)}
-                  placeholder="Например: ԱԲ-002"
-                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
-              </div>
-            )}
-          </div>
-          {savingSeries && (
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-              <Loader2 className="w-3 h-3 animate-spin" /> Сохранение...
-            </p>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          <button type="submit" disabled={saving}
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-60 transition">
+            <Save className="w-4 h-4" /> {saving ? 'Сохранение...' : 'Сохранить заявку'}
+          </button>
+          <Link href="/trips" className="px-6 py-2.5 border rounded-lg text-sm hover:bg-muted transition">Отмена</Link>
+          {isEdit && !isArchived && (
+            <button type="button" onClick={handleDeleteTrip} disabled={deleting || saving}
+              className="ml-auto inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-60 transition">
+              <Trash2 className="w-4 h-4" />
+              {deleting ? 'Удаление...' : 'Удалить заявку'}
+            </button>
           )}
         </div>
-      )}
-
-        {!formLocked ? (
-          <div className="flex items-center gap-3 flex-wrap">
-            <button type="submit" disabled={saving}
-              className="inline-flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-60 transition">
-              <Save className="w-4 h-4" /> {saving ? 'Сохранение...' : 'Сохранить'}
-            </button>
-            <Link href="/trips" className="px-6 py-2.5 border rounded-lg text-sm hover:bg-muted transition">Отмена</Link>
-            {isEdit && status !== 'new' && (
-              <button type="button" onClick={handleCompleteTrip} disabled={completingTrip || saving}
-                className="ml-auto inline-flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-60 transition">
-                <CheckCircle2 className="w-4 h-4" />
-                {completingTrip ? 'Завершение...' : 'Завершить заявку'}
-              </button>
-            )}
-            {isEdit && (
-              <button type="button" onClick={handleDeleteTrip} disabled={deleting || saving}
-                className={`${status === 'new' ? 'ml-auto' : ''} inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-60 transition`}>
-                <Trash2 className="w-4 h-4" />
-                {deleting ? 'Удаление...' : 'Удалить заявку'}
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <Link href="/trips" className="px-6 py-2.5 border rounded-lg text-sm hover:bg-muted transition">← К списку заявок</Link>
-            <button type="button" onClick={handleReopenTrip} disabled={reopeningTrip}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-60 transition">
-              <Unlock className="w-4 h-4" />
-              {reopeningTrip ? 'Открытие...' : 'Открыть заявку снова'}
-            </button>
-          </div>
-        )}
       </form>
 
     </div>

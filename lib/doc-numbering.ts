@@ -1,3 +1,4 @@
+import type { PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -159,4 +160,41 @@ export async function previewNextDocNumber(
   }
 
   return formatDocNumber(format, prefix, currentMax + 1, currentYear);
+}
+
+/** Extracts the trailing sequence number from a formatted document string, e.g. "ЛА-042" → 42. */
+function extractSeqNum(display: string | null | undefined): number | null {
+  if (!display) return null;
+  const m = display.match(/\d+/g);
+  if (!m || m.length === 0) return null;
+  const n = parseInt(m[m.length - 1], 10);
+  return isNaN(n) ? null : n;
+}
+
+/**
+ * Syncs client lastInvoiceNum / lastActNum from manually-entered document display strings.
+ * Only increases the counter — never decreases it — so auto-numbering cannot produce duplicates.
+ */
+export async function syncClientCountersFromDocDisplays(
+  db: PrismaClient,
+  clientId: string,
+  invoiceDisplay: string | null | undefined,
+  actDisplay: string | null | undefined,
+): Promise<void> {
+  const invNum = extractSeqNum(invoiceDisplay);
+  const actNum = extractSeqNum(actDisplay);
+  if (invNum === null && actNum === null) return;
+
+  const client = await db.client.findUnique({
+    where: { id: clientId },
+    select: { lastInvoiceNum: true, lastActNum: true },
+  });
+  if (!client) return;
+
+  const data: Record<string, number> = {};
+  if (invNum !== null && invNum > client.lastInvoiceNum) data.lastInvoiceNum = invNum;
+  if (actNum !== null && actNum > client.lastActNum) data.lastActNum = actNum;
+  if (Object.keys(data).length === 0) return;
+
+  await db.client.update({ where: { id: clientId }, data });
 }

@@ -13,7 +13,7 @@ export default function ClientsPage() {
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', invoicePrefix: '\u0421\u0427', actPrefix: '\u0410\u041A\u0422', numberFormat: '{prefix}-{number}', resetNumberingYearly: false });
+  const [form, setForm] = useState({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', invoicePrefix: '\u0421\u0427', actPrefix: '\u0410\u041A\u0422', numberFormat: '{prefix}-{number}', resetNumberingYearly: false, paymentTermsDays: '' });
   const [saving, setSaving] = useState(false);
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [uploadingTpl, setUploadingTpl] = useState<string | null>(null);
@@ -28,6 +28,9 @@ export default function ClientsPage() {
   const [contactForm, setContactForm] = useState({ id: '', name: '', phone: '', email: '' });
   const [showContactForm, setShowContactForm] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
+  const contractFileRef = useRef<HTMLInputElement>(null);
+  const [pendingContractClientId, setPendingContractClientId] = useState<string | null>(null);
+  const [contractUploading, setContractUploading] = useState<string | null>(null);
 
   const downloadRecon = async () => {
     if (!reconClient?.id) return;
@@ -76,10 +79,10 @@ export default function ClientsPage() {
   const openModal = (item?: any) => {
     if (item) {
       setEditItem(item);
-      setForm({ name: item?.name ?? '', contactPerson: item?.contactPerson ?? '', phone: item?.phone ?? '', email: item?.email ?? '', inn: item?.inn ?? '', address: item?.address ?? '', invoicePrefix: item?.invoicePrefix ?? '\u0421\u0427', actPrefix: item?.actPrefix ?? '\u0410\u041A\u0422', numberFormat: item?.numberFormat ?? '{prefix}-{number}', resetNumberingYearly: item?.resetNumberingYearly ?? false });
+      setForm({ name: item?.name ?? '', contactPerson: item?.contactPerson ?? '', phone: item?.phone ?? '', email: item?.email ?? '', inn: item?.inn ?? '', address: item?.address ?? '', invoicePrefix: item?.invoicePrefix ?? '\u0421\u0427', actPrefix: item?.actPrefix ?? '\u0410\u041A\u0422', numberFormat: item?.numberFormat ?? '{prefix}-{number}', resetNumberingYearly: item?.resetNumberingYearly ?? false, paymentTermsDays: item?.paymentTermsDays?.toString() ?? '' });
     } else {
       setEditItem(null);
-      setForm({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', invoicePrefix: '\u0421\u0427', actPrefix: '\u0410\u041A\u0422', numberFormat: '{prefix}-{number}', resetNumberingYearly: false });
+      setForm({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', invoicePrefix: '\u0421\u0427', actPrefix: '\u0410\u041A\u0422', numberFormat: '{prefix}-{number}', resetNumberingYearly: false, paymentTermsDays: '' });
     }
     setShowModal(true);
   };
@@ -90,7 +93,7 @@ export default function ClientsPage() {
     try {
       const url = editItem ? `/api/clients/${editItem.id}` : '/api/clients';
       const method = editItem ? 'PUT' : 'POST';
-      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, paymentTermsDays: form.paymentTermsDays !== '' ? parseInt(form.paymentTermsDays as string) : null }) });
       setShowModal(false);
       load();
     } catch {} finally { setSaving(false); }
@@ -194,9 +197,40 @@ export default function ClientsPage() {
     } catch {} finally { setUploadingTpl(null); }
   };
 
+  const triggerContractUpload = (clientId: string) => {
+    setPendingContractClientId(clientId);
+    contractFileRef.current?.click();
+  };
+
+  const handleContractFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingContractClientId) return;
+    const cid = pendingContractClientId;
+    setContractUploading(cid);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`/api/clients/${cid}/contract`, { method: 'POST', body: fd });
+      load();
+    } catch (err) { console.error(err); } finally {
+      setContractUploading(null);
+      setPendingContractClientId(null);
+      if (contractFileRef.current) contractFileRef.current.value = '';
+    }
+  };
+
+  const handleContractDelete = async (clientId: string) => {
+    if (!confirm('Удалить договор?')) return;
+    try {
+      await fetch(`/api/clients/${clientId}/contract`, { method: 'DELETE' });
+      load();
+    } catch {}
+  };
+
   return (
     <div className="space-y-4">
       <input type="file" ref={fileInputRef} className="hidden" accept=".docx,.doc,.pdf" onChange={handleFileChange} />
+      <input type="file" ref={contractFileRef} className="hidden" accept=".pdf,.doc,.docx" onChange={handleContractFileChange} />
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -242,6 +276,7 @@ export default function ClientsPage() {
                   {c?.email && <div className="flex items-center gap-2"><Mail className="w-3 h-3" />{c.email}</div>}
                   {c?.inn && <div className="flex items-center gap-2">ИНН: {c.inn}</div>}
                   {c?.address && <div className="flex items-center gap-2"><MapPin className="w-3 h-3" /><span className="truncate">{c.address}</span></div>}
+                  {c?.paymentTermsDays != null && <div className="flex items-center gap-2">Срок оплаты: <span className="font-medium">{c.paymentTermsDays} дн.</span></div>}
                 </div>
 
                 {/* Contacts section */}
@@ -339,6 +374,38 @@ export default function ClientsPage() {
                 {/* Template section */}
                 {isExpanded && (
                   <div className="mt-3 pt-3 border-t space-y-3">
+                    {/* Contract upload */}
+                    <div className="flex items-center justify-between gap-2 py-1.5 px-2 rounded-lg bg-muted/40">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className={`w-4 h-4 flex-shrink-0 ${c?.contractFile ? 'text-green-600' : 'text-muted-foreground'}`} />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium">Договор</p>
+                          {c?.contractFile ? (
+                            <a href={`/api/files?path=${encodeURIComponent(c.contractFile)}`} target="_blank" rel="noreferrer" className="text-[10px] text-green-600 truncate hover:underline block max-w-[180px]">
+                              {c.contractFileName || 'Скачать договор'}
+                            </a>
+                          ) : (
+                            <p className="text-[10px] text-muted-foreground">Не загружен</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {contractUploading === c?.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <>
+                            <button onClick={() => triggerContractUpload(c?.id)} className="p-1.5 hover:bg-muted rounded-md transition" title={c?.contractFile ? 'Заменить договор' : 'Загрузить договор'}>
+                              <Upload className="w-3.5 h-3.5 text-primary" />
+                            </button>
+                            {c?.contractFile && (
+                              <button onClick={() => handleContractDelete(c?.id)} className="p-1.5 hover:bg-red-50 rounded-md transition" title="Удалить договор">
+                                <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
                     <p className="text-[10px] text-muted-foreground">
                       Загрузите .docx шаблоны с переменными: {'{'}client_name{'}'}, {'{'}date{'}'}, {'{'}route_from{'}'}, {'{'}route_to{'}'}, {'{'}client_rate{'}'}, {'{'}vehicle_plate{'}'}, {'{'}driver_name{'}'}
                     </p>
@@ -415,6 +482,7 @@ export default function ClientsPage() {
                 <div><label className="text-xs text-muted-foreground">ИНН</label><input type="text" value={form.inn} onChange={(e) => setForm({...form, inn: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background" /></div>
               </div>
               <div><label className="text-xs text-muted-foreground">{"\u0410\u0434\u0440\u0435\u0441"}</label><input type="text" value={form.address} onChange={(e) => setForm({...form, address: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background" /></div>
+              <div><label className="text-xs text-muted-foreground">Срок оплаты после выгрузки (дней)</label><input type="number" min="0" value={form.paymentTermsDays} onChange={(e) => setForm({...form, paymentTermsDays: e.target.value})} placeholder="например 7" className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background" /></div>
 
               {/* Numbering Settings */}
               <div className="border-t pt-3 mt-1">

@@ -181,17 +181,21 @@ function GlobalSearch() {
 export default function AppShell({ children, user }: { children: React.ReactNode; user: any }) {
   const [open, setOpen] = useState(false);
   const [bellCount, setBellCount] = useState(0);
-  const [bellTrips, setBellTrips] = useState<{id:string;tripNumber:string;clientName?:string;daysLeft:number}[]>([]);
+  const [overduePayments, setOverduePayments] = useState<{id:string;tripNumber:string;clientName?:string;daysOverdue:number;remainingAmd:number}[]>([]);
+  const [overdueTotal, setOverdueTotal] = useState(0);
+  const [cashGaps, setCashGaps] = useState<{id:string;tripNumber:string;gapAmd:number}[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const pathname = usePathname() ?? '';
   const { state: syncState, lastOkAt } = useServerSync();
 
   useEffect(() => {
     fetch('/api/trips/stats').then(r => r.json()).then(d => {
-      const pts = d?.reminders?.paymentDueTrips ?? [];
-      const urgent = pts.filter((t: any) => t.daysLeft <= 3);
-      setBellCount(urgent.length);
-      setBellTrips(urgent.slice(0, 8));
+      const overdue: any[] = d?.reminders?.overdueClientPayments ?? [];
+      const gaps: any[] = d?.reminders?.cashGapTrips ?? [];
+      setOverdueTotal(overdue.length);
+      setOverduePayments(overdue.slice(0, 8));
+      setCashGaps(gaps.slice(0, 5));
+      setBellCount(overdue.length + gaps.length);
     }).catch(() => {});
   }, [pathname]);
 
@@ -221,24 +225,54 @@ export default function AppShell({ children, user }: { children: React.ReactNode
               )}
             </button>
             {bellOpen && (
-              <div className="absolute right-0 top-9 w-72 bg-slate-800 border border-white/10 rounded-xl shadow-xl z-50 p-3">
-                <p className="text-xs font-semibold text-slate-300 mb-2">Сроки оплаты</p>
-                {bellTrips.length === 0 ? (
-                  <p className="text-xs text-slate-500">Нет срочных напоминаний</p>
+              <div className="fixed left-4 top-[72px] w-[380px] max-w-[calc(100vw-32px)] max-h-[480px] overflow-y-auto bg-slate-800 border border-white/10 rounded-xl shadow-xl z-[200] p-3">
+                {overduePayments.length === 0 && cashGaps.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-1">Нет срочных уведомлений</p>
                 ) : (
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                    {bellTrips.map(t => (
-                      <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
-                        className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
-                        <div className="flex justify-between items-center">
-                          <span className="font-mono text-slate-200">{t.tripNumber}</span>
-                          <span className={`font-semibold ${t.daysLeft < 0 ? 'text-red-400' : t.daysLeft === 0 ? 'text-amber-400' : 'text-amber-300'}`}>
-                            {t.daysLeft < 0 ? `−${Math.abs(t.daysLeft)} дн.` : t.daysLeft === 0 ? 'сегодня!' : `${t.daysLeft} дн.`}
-                          </span>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {overduePayments.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">🔴 Просроченные оплаты</p>
+                        <div className="space-y-1">
+                          {overduePayments.map(t => (
+                            <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
+                              className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-300 truncate max-w-[150px]">{t.clientName || t.tripNumber}</span>
+                                <span className="font-semibold text-red-400 shrink-0 ml-2">−{t.daysOverdue} дн.</span>
+                              </div>
+                              <div className="flex justify-between mt-0.5">
+                                <span className="font-mono text-slate-500">{t.tripNumber}</span>
+                                <span className="font-mono text-slate-300">{Math.round(t.remainingAmd).toLocaleString('ru-RU')} ֏</span>
+                              </div>
+                            </Link>
+                          ))}
+                          {overdueTotal > overduePayments.length && (
+                            <Link href="/debts" onClick={() => setBellOpen(false)}
+                              className="block text-[10px] text-red-400 text-center py-1 hover:underline">
+                              и ещё {overdueTotal - overduePayments.length} просроченных →
+                            </Link>
+                          )}
                         </div>
-                        {t.clientName && <span className="text-slate-400">{t.clientName}</span>}
-                      </Link>
-                    ))}
+                      </div>
+                    )}
+                    {cashGaps.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟠 Кассовые разрывы</p>
+                        <div className="space-y-1">
+                          {cashGaps.map(t => (
+                            <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
+                              className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                              <div className="flex justify-between items-center">
+                                <span className="font-mono text-slate-300">{t.tripNumber}</span>
+                                <span className="font-mono text-amber-400">{Math.round(t.gapAmd).toLocaleString('ru-RU')} ֏</span>
+                              </div>
+                              <span className="text-slate-500 text-[10px]">выплачено перевозчику, клиент не платил</span>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <Link href="/dashboard" onClick={() => setBellOpen(false)} className="block text-center text-xs text-primary mt-2 hover:underline">Все напоминания →</Link>

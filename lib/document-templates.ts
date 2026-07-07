@@ -132,11 +132,10 @@ const sampleStyles = `<style>
   .company-header { margin-bottom: 16px; }
   .company-header .name { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
   .company-header .detail { font-size: 11px; margin-bottom: 1px; }
-  .bank-section { border: 1px solid #000; margin-bottom: 20px; padding: 0; }
-  .bank-title { text-align: center; font-weight: bold; font-size: 13px; border-bottom: 1px solid #000; padding: 4px 8px; background: #f5f5f5; }
-  .bank-body { padding: 6px 10px; font-size: 11px; line-height: 1.5; }
-  .bank-body .row { margin-bottom: 1px; }
-  .bank-body .label { font-weight: bold; }
+  table.bank-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+  table.bank-table td { border: 1px solid #000; padding: 4px 8px; }
+  table.bank-table td.bank-title { text-align: center; font-weight: bold; font-size: 13px; background: #f5f5f5; }
+  table.bank-table td.bank-body { line-height: 1.5; }
   .doc-title { text-align: center; margin: 20px 0 16px; font-size: 13px; }
   .client-block { margin-bottom: 16px; font-size: 12px; line-height: 1.5; }
   .client-block .cl-name { font-weight: bold; }
@@ -147,10 +146,12 @@ const sampleStyles = `<style>
   table.items td.money { text-align: right; white-space: nowrap; }
   .total-text { margin-top: 16px; font-size: 12px; font-style: italic; }
   .signature-block { margin-top: 40px; }
-  .sig-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 30px; }
-  .sig-item { width: 45%; }
+  table.sig-table { width: 100%; margin-top: 30px; border: none; }
+  table.sig-table td { border: none; padding: 0; vertical-align: bottom; width: 50%; }
   .sig-label { font-size: 11px; color: #444; margin-bottom: 4px; }
-  .sig-line { border-bottom: 1px solid #000; padding-bottom: 2px; font-size: 12px; min-height: 20px; display: flex; justify-content: space-between; }
+  table.sig-line { width: 100%; border-collapse: collapse; }
+  table.sig-line td { border: none; border-bottom: 1px solid #000; padding-bottom: 2px; font-size: 12px; }
+  table.sig-line td.sig-name { text-align: right; }
   .mp { font-size: 10px; color: #888; margin-top: 2px; }
   /* Act specific */
   .act-header { text-align: center; margin-bottom: 16px; font-size: 13px; }
@@ -158,8 +159,8 @@ const sampleStyles = `<style>
   .parties { margin-bottom: 16px; font-size: 12px; line-height: 1.6; }
   .parties .party { margin-bottom: 8px; }
   .parties .party-label { font-weight: bold; }
-  .act-footer-sigs { display: flex; justify-content: space-between; margin-top: 30px; }
-  .act-sig { width: 45%; text-align: center; }
+  table.act-sig-table { width: 100%; margin-top: 30px; border: none; }
+  table.act-sig-table td { border: none; padding: 0 10px; vertical-align: top; width: 50%; text-align: center; }
   .act-sig .role { font-weight: bold; font-size: 12px; margin-bottom: 4px; }
   .act-sig .company-label { font-size: 11px; margin-bottom: 20px; }
   .act-sig .sig-underline { border-bottom: 1px solid #000; margin-top: 30px; padding-bottom: 2px; font-size: 11px; }
@@ -213,10 +214,10 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
     ${coAddr ? `<div class="detail">\u0410\u0434\u0440\u0435\u0441: ${coAddr}</div>` : ''}
   </div>
 
-  ${bankDetails ? `<div class="bank-section">
-    <div class="bank-title">\u0411\u0430\u043D\u043A\u043E\u0432\u0441\u043A\u0438\u0435 \u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B</div>
-    <div class="bank-body">${bankDetails.replace(/\n/g, '<br/>')}</div>
-  </div>` : ''}
+  ${bankDetails ? `<table class="bank-table" width="100%" border="1" cellpadding="6" cellspacing="0">
+    <tr><td class="bank-title" bgcolor="#f5f5f5">\u0411\u0430\u043D\u043A\u043E\u0432\u0441\u043A\u0438\u0435 \u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B</td></tr>
+    <tr><td class="bank-body">${bankDetails.replace(/\n/g, '<br/>')}</td></tr>
+  </table>` : ''}
 
   <div class="doc-title"><strong>${titleLine}</strong></div>
   ${basisText ? `<div style="text-align:center; font-size:12px; margin-bottom:14px; font-style:italic;">${basisText}</div>` : ''}
@@ -227,15 +228,15 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
     ${clientInn ? `<div>\u0418\u041D\u041D/\u041A\u041F\u041F: ${clientInn}</div>` : ''}
   </div>
 
-  <table class="items">
+  <table class="items" width="100%" border="1" cellpadding="4" cellspacing="0">
     <thead>
       <tr>
-        <th style="width:30px">\u2116</th>
-        <th>\u041D\u0430\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0442\u043E\u0432\u0430\u0440\u0430</th>
-        <th style="width:60px">\u0415\u0434\u0438\u043D\u0438\u0446\u0430 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F</th>
-        <th style="width:70px">\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E</th>
-        <th style="width:80px">\u0426\u0435\u043D\u0430</th>
-        <th style="width:100px">\u0421\u0443\u043C\u043C\u0430</th>
+        <th style="width:30px" bgcolor="#f5f5f5">\u2116</th>
+        <th bgcolor="#f5f5f5">\u041D\u0430\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0442\u043E\u0432\u0430\u0440\u0430</th>
+        <th style="width:60px" bgcolor="#f5f5f5">\u0415\u0434\u0438\u043D\u0438\u0446\u0430 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F</th>
+        <th style="width:70px" bgcolor="#f5f5f5">\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E</th>
+        <th style="width:80px" bgcolor="#f5f5f5">\u0426\u0435\u043D\u0430</th>
+        <th style="width:100px" bgcolor="#f5f5f5">\u0421\u0443\u043C\u043C\u0430</th>
       </tr>
     </thead>
     <tbody>
@@ -270,13 +271,13 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
   ${notes ? `<div style="margin-top:12px; font-size:11px; color:#333;">${notes}</div>` : ''}
 
   <div class="signature-block">
-    <div class="sig-row">
-      <div class="sig-item">
+    <table class="sig-table" width="100%">
+      <tr><td>
         <div class="sig-label">\u0414\u0438\u0440\u0435\u043A\u0442\u043E\u0440:</div>
-        <div class="sig-line"><span>__________________</span><span>${coDirector || ''}</span></div>
+        <table class="sig-line" width="50%"><tr><td>__________________</td><td class="sig-name">${coDirector || ''}</td></tr></table>
         <div class="mp">\u041C.\u041F.</div>
-      </div>
-    </div>
+      </td></tr>
+    </table>
   </div>
 
 </body></html>`;
@@ -337,14 +338,14 @@ export function generateActHtml(trip: TripData, ov?: DocOverrides): string {
     </div>
   </div>
 
-  <table class="items">
+  <table class="items" width="100%" border="1" cellpadding="4" cellspacing="0">
     <thead>
       <tr>
-        <th style="width:30px">\u2116</th>
-        <th>\u041D\u0430\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0440\u0430\u0431\u043E\u0442, \u0443\u0441\u043B\u0443\u0433,<br/>\u0438\u043C\u0443\u0449\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0433\u043E \u043F\u0440\u0430\u0432\u0430</th>
-        <th style="width:60px">\u0415\u0434\u0438\u043D\u0438\u0446\u0430 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F</th>
-        <th style="width:70px">\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E<br/>(\u043E\u0431\u044A\u0435\u043C)</th>
-        <th style="width:100px">\u0421\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C \u0443\u0441\u043B\u0443\u0433</th>
+        <th style="width:30px" bgcolor="#f5f5f5">\u2116</th>
+        <th bgcolor="#f5f5f5">\u041D\u0430\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u043D\u0438\u0435 \u0440\u0430\u0431\u043E\u0442, \u0443\u0441\u043B\u0443\u0433,<br/>\u0438\u043C\u0443\u0449\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0433\u043E \u043F\u0440\u0430\u0432\u0430</th>
+        <th style="width:60px" bgcolor="#f5f5f5">\u0415\u0434\u0438\u043D\u0438\u0446\u0430 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F</th>
+        <th style="width:70px" bgcolor="#f5f5f5">\u041A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E<br/>(\u043E\u0431\u044A\u0435\u043C)</th>
+        <th style="width:100px" bgcolor="#f5f5f5">\u0421\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C \u0443\u0441\u043B\u0443\u0433</th>
       </tr>
     </thead>
     <tbody>
@@ -375,20 +376,22 @@ export function generateActHtml(trip: TripData, ov?: DocOverrides): string {
     ${sumInWords}
   </div>
 
-  <div class="act-footer-sigs">
-    <div class="act-sig">
-      <div class="role">\u0417\u0430\u043A\u0430\u0437\u0447\u0438\u043A</div>
-      <div class="company-label">${clientName}</div>
-      <div class="sig-underline">__________________ / __________________</div>
-      <div class="mp">\u041C.\u041F.</div>
-    </div>
-    <div class="act-sig">
-      <div class="role">\u041F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A</div>
-      <div class="company-label">${coName}</div>
-      <div class="sig-underline">__________________ / ${coDirector || '__________________'}</div>
-      <div class="mp">\u041C.\u041F.</div>
-    </div>
-  </div>
+  <table class="act-sig-table" width="100%">
+    <tr>
+      <td class="act-sig">
+        <div class="role">\u0417\u0430\u043A\u0430\u0437\u0447\u0438\u043A</div>
+        <div class="company-label">${clientName}</div>
+        <div class="sig-underline">__________________ / __________________</div>
+        <div class="mp">\u041C.\u041F.</div>
+      </td>
+      <td class="act-sig">
+        <div class="role">\u041F\u0435\u0440\u0435\u0432\u043E\u0437\u0447\u0438\u043A</div>
+        <div class="company-label">${coName}</div>
+        <div class="sig-underline">__________________ / ${coDirector || '__________________'}</div>
+        <div class="mp">\u041C.\u041F.</div>
+      </td>
+    </tr>
+  </table>
 
 </body></html>`;
 }

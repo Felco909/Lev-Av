@@ -195,8 +195,11 @@ export async function GET(req: Request) {
 
     // --- Payment stats ---
     // "completed" = deal closed & paid; "paid" = payment received but not yet closed
-    const paidTrips = rows.filter(r => r.status === 'paid' || r.status === 'completed');
+    const paidTrips = rows.filter(r => r.status === 'paid' || r.status === 'completed' || r.status === 'archived');
     const paidTotal = paidTrips.reduce((s, r) => s + (r.clientRateAmd || r.clientRate), 0);
+    // "Сверка" = сверка в процессе — отдельная группа
+    const sverkaTrips = rows.filter(r => r.status === 'sverka');
+    const sverkaTotal = sverkaTrips.reduce((s, r) => s + (r.clientRateAmd || r.clientRate), 0);
 
     // --- Problems ---
     const lossTrips = rows.filter(r => (r.profitAmd || r.profit) < 0).sort((a, b) => (a.profitAmd || a.profit) - (b.profitAmd || b.profit));
@@ -237,6 +240,8 @@ export async function GET(req: Request) {
       vehicleStats,
       totalActiveVehicles,
       idleVehicles,
+      sverkaTotal,
+      sverkaCount: sverkaTrips.length,
       topClients,
       payment: {
         paidCount: paidTrips.length,

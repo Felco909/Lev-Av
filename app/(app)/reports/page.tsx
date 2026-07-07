@@ -154,6 +154,10 @@ export default function ReportsPage() {
   const profitTotalExpense = profitRows.reduce((s: number, r: any) => s + calcTripExpense(r), 0);
   const profitTotalProfit = profitTotalRevenue - profitTotalExpense;
 
+  // Sverka group
+  const sverkaRows = useMemo(() => (profitData?.rows || []).filter((r: any) => r.status === 'sverka'), [profitData?.rows]);
+  const sverkaRevenue = sverkaRows.reduce((s: number, r: any) => s + Number(r.clientRateAmd || r.clientRate || 0), 0);
+
   // Cash gap rows
   const cashGapRows = useMemo(() => {
     if (!profitData?.rows) return [];
@@ -441,6 +445,18 @@ export default function ReportsPage() {
               </p>
             </div>
           </div>
+
+          {/* Sverka group card */}
+          {sverkaRows.length > 0 && (
+            <div className="bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-xl px-4 py-3 flex items-center gap-4">
+              <span className="inline-block w-2 h-2 rounded-full bg-teal-500 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-teal-700 dark:text-teal-300">Сверка — {sverkaRows.length} заявк</p>
+                <p className="text-xs text-teal-600 dark:text-teal-400 font-mono">{fmtAmd(sverkaRevenue)}</p>
+              </div>
+              <p className="text-[11px] text-teal-500 dark:text-teal-400 ml-auto">Ожидают завершения</p>
+            </div>
+          )}
 
           {/* Table */}
           {profitLoading ? (

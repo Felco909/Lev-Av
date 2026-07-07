@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { getFileUrl, deleteFile } from '@/lib/s3';
+import { enrichTripAttachmentDownload, deleteStoredFile } from '@/lib/attachment-service';
 
 // GET attachments for a trip
 export async function GET(
@@ -21,10 +21,7 @@ export async function GET(
 
     // Generate download URLs
     const withUrls = await Promise.all(
-      attachments.map(async (a) => ({
-        ...a,
-        downloadUrl: await getFileUrl(a.cloudStoragePath, a.isPublic),
-      }))
+      attachments.map((a) => enrichTripAttachmentDownload(a))
     );
 
     return NextResponse.json(withUrls);
@@ -83,7 +80,7 @@ export async function DELETE(request: Request) {
     const attachment = await prisma.tripAttachment.findUnique({ where: { id: attachmentId } });
     if (!attachment) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
 
-    try { await deleteFile(attachment.cloudStoragePath); } catch (e) { /* ignore S3 error */ }
+    await deleteStoredFile(attachment.cloudStoragePath);
     await prisma.tripAttachment.delete({ where: { id: attachmentId } });
 
     return NextResponse.json({ success: true });
