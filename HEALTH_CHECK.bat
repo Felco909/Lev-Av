@@ -4,7 +4,7 @@ setlocal EnableExtensions
 title LevAV LLC TMS Health Check
 set "PROJECT_DIR=%~dp0"
 set "PG_BIN=%PROJECT_DIR%LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin"
-set "PG_DATA=%PROJECT_DIR%LOCAL_DB_RUNTIME\pgdata_localprod_utf8"
+set "PG_DATA=C:\LevAV_DB\pgdata_localprod_utf8"
 set "PG_PORT=5434"
 set "NO_PAUSE=0"
 if /I "%~1"=="--no-pause" set "NO_PAUSE=1"

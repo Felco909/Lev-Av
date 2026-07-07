@@ -8,7 +8,7 @@ title LevAV LLC TMS Production Start
 set "PROJECT_DIR=%~dp0"
 set "RUNTIME_DIR=%PROJECT_DIR%.runtime"
 set "PG_BIN=%PROJECT_DIR%LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin"
-set "PG_DATA=%PROJECT_DIR%LOCAL_DB_RUNTIME\pgdata_localprod_utf8"
+set "PG_DATA=C:\LevAV_DB\pgdata_localprod_utf8"
 set "PG_LOG=%PROJECT_DIR%LOCAL_DB_RUNTIME\pg_local_utf8.log"
 set "PG_PORT=5434"
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%" >nul 2>&1
