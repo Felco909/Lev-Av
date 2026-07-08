@@ -214,6 +214,12 @@ export function validateMetricsAgainstContract(
 ): FinanceValidationWarning[] {
   const warnings: FinanceValidationWarning[] = [];
 
+  // trip.clientRateAmd уже включает clientExtraAmd (см. getTripSplitExpenseTotalsAmd /
+  // конвенцию вызывающей стороны), а trip.expensesAmd — это carrierExtraAmd, поэтому
+  // carrier-due нужно досчитывать здесь же (иначе expected по carrier расходится с
+  // тем, что реально считает computeTripFinanceMetrics/computeCarrierDueAmd).
+  const carrierDueAmd = roundMoney((Number(trip.carrierRateAmd) || 0) + (Number(trip.expensesAmd) || 0));
+
   const expectedClientDebt = computeDebtAmd(trip.clientRateAmd, metrics.clientPaidAmd);
   if (roundMoney(metrics.clientDebtAmd) !== roundMoney(expectedClientDebt)) {
     warnings.push({
@@ -227,7 +233,7 @@ export function validateMetricsAgainstContract(
     });
   }
 
-  const expectedCarrierDebt = computeDebtAmd(trip.carrierRateAmd, metrics.carrierPaidAmd);
+  const expectedCarrierDebt = computeDebtAmd(carrierDueAmd, metrics.carrierPaidAmd);
   if (roundMoney(metrics.carrierDebtAmd) !== roundMoney(expectedCarrierDebt)) {
     warnings.push({
       tripId: trip.tripId,
@@ -253,7 +259,7 @@ export function validateMetricsAgainstContract(
     });
   }
 
-  const expectedCarrierStatus = computePaymentStatus(trip.carrierRateAmd, metrics.carrierPaidAmd);
+  const expectedCarrierStatus = computePaymentStatus(carrierDueAmd, metrics.carrierPaidAmd);
   if (metrics.carrierPaymentStatus !== expectedCarrierStatus) {
     warnings.push({
       tripId: trip.tripId,
