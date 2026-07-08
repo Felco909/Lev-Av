@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { getFileUrl } from '@/lib/s3';
+import { resolveAttachmentDownloadUrl } from '@/lib/attachment-service';
 
 export async function GET(req: Request) {
   try {
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
       ...item,
       attachments: await Promise.all(item.attachments.map(async (att) => ({
         ...att,
-        url: await getFileUrl(att.cloudStoragePath, att.isPublic).catch(() => ''),
+        url: (await resolveAttachmentDownloadUrl(att.cloudStoragePath)).downloadUrl ?? '',
       }))),
     })));
 

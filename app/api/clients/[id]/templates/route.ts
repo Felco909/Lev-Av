@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { deleteFile } from '@/lib/s3';
+import { deleteStoredFile } from '@/lib/attachment-service';
 
 // GET client templates info
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
@@ -47,7 +47,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Delete old file if replacing
     const oldPath = templateType === 'invoice' ? client.invoiceTemplatePath : client.actTemplatePath;
     if (oldPath) {
-      try { await deleteFile(oldPath); } catch { /* ignore */ }
+      try { await deleteStoredFile(oldPath); } catch { /* ignore */ }
     }
 
     const data = templateType === 'invoice'
@@ -78,7 +78,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
 
     const oldPath = templateType === 'invoice' ? client.invoiceTemplatePath : client.actTemplatePath;
     if (oldPath) {
-      try { await deleteFile(oldPath); } catch { /* ignore */ }
+      try { await deleteStoredFile(oldPath); } catch { /* ignore */ }
     }
 
     const data = templateType === 'invoice'

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { getFileUrl, deleteFile } from '@/lib/s3';
+import { resolveAttachmentDownloadUrl, deleteStoredFile } from '@/lib/attachment-service';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -17,7 +17,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const withUrls = await Promise.all(
       attachments.map(async (a) => ({
         ...a,
-        url: await getFileUrl(a.cloudStoragePath, a.isPublic),
+        url: (await resolveAttachmentDownloadUrl(a.cloudStoragePath)).downloadUrl ?? '',
       }))
     );
     return NextResponse.json(withUrls);
@@ -53,7 +53,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     if (!attId) return NextResponse.json({ error: '\u0423\u043a\u0430\u0436\u0438\u0442\u0435 attachmentId' }, { status: 400 });
     const att = await prisma.partAttachment.findUnique({ where: { id: attId } });
     if (att) {
-      try { await deleteFile(att.cloudStoragePath); } catch {}
+      try { await deleteStoredFile(att.cloudStoragePath); } catch {}
       await prisma.partAttachment.delete({ where: { id: attId } });
     }
     return NextResponse.json({ ok: true });

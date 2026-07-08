@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { deleteFile } from '@/lib/s3';
+import { deleteStoredFile } from '@/lib/attachment-service';
 
 // GET all templates
 export async function GET() {
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     // Delete old file if replacing
     const existing = await prisma.documentTemplate.findUnique({ where: { documentType } });
     if (existing) {
-      try { await deleteFile(existing.cloudStoragePath); } catch (e) { /* ignore */ }
+      try { await deleteStoredFile(existing.cloudStoragePath); } catch (e) { /* ignore */ }
     }
 
     const template = await prisma.documentTemplate.upsert({
@@ -64,7 +64,7 @@ export async function DELETE(request: Request) {
     const existing = await prisma.documentTemplate.findUnique({ where: { documentType } });
     if (!existing) return NextResponse.json({ error: 'Шаблон не найден' }, { status: 404 });
 
-    try { await deleteFile(existing.cloudStoragePath); } catch (e) { /* ignore */ }
+    try { await deleteStoredFile(existing.cloudStoragePath); } catch (e) { /* ignore */ }
     await prisma.documentTemplate.delete({ where: { documentType } });
 
     return NextResponse.json({ success: true });
