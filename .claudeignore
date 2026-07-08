@@ -1,0 +1,8 @@
+node_modules/
+.next/
+dist/
+*.log
+*.dump
+*.sql.gz
+.git/
+public/uploads/
