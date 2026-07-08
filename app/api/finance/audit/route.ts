@@ -49,7 +49,10 @@ export async function GET(req: Request) {
     const trips = await prisma.trip.findMany({
       where,
       include: {
-        expenses: { select: { amountAmd: true, amount: true } },
+        // description обязателен — по нему getTripSplitExpenseTotalsAmd
+        // определяет сторону расхода (маркер __carrier__), без него все
+        // расходы молча считались клиентскими.
+        expenses: { select: { amountAmd: true, amount: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
       ...(limit ? { take: limit } : {}),

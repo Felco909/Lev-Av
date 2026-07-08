@@ -46,7 +46,9 @@ export async function GET(req: Request) {
         paymentDueDate: true,
         carrierPaymentDate: true,
         client: { select: { name: true } },
-        expenses: { select: { amountAmd: true, amount: true } },
+        // description обязателен — по нему getTripSplitExpenseTotalsAmd определяет
+        // сторону расхода (маркер __carrier__), без него все расходы считались клиентскими.
+        expenses: { select: { amountAmd: true, amount: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
     });

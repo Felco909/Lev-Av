@@ -58,7 +58,9 @@ async function loadRows(where: any) {
       carrierRate: true,
       clientExpenses: true,
       carrierExpenses: true,
-      expenses: { select: { amountAmd: true, amount: true } },
+      // description обязателен — по нему getTripSplitExpenseTotalsAmd определяет
+      // сторону расхода (маркер __carrier__), без него все расходы считались клиентскими.
+      expenses: { select: { amountAmd: true, amount: true, description: true } },
     },
   });
 
