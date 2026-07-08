@@ -7,7 +7,7 @@ import { computeAggregateMetrics, computeTripFinanceMetrics, getTripSplitExpense
 import { FINANCE_CONTRACT_VERSION, PAYMENT_SOURCE_OF_TRUTH, VALIDATION_SCOPE_FIELDS } from '@/lib/finance/finance-contract';
 import { roundMoney } from '@/lib/finance/formulas';
 import { getValidationGateConfig, shouldSample } from '@/lib/finance/validation-gate';
-import type { FinancePaymentInput, FinanceTripInput } from '@/lib/finance/types';
+import type { FinancePaymentInput, FinanceTripInput, PaymentStatus } from '@/lib/finance/types';
 
 type NumericDiff = {
   oldValue: number;
@@ -111,7 +111,21 @@ export async function GET(req: Request) {
         for (let i = 0; i < tripInputs.length; i++) {
           if (!shouldSample(gate.sampleRate)) continue;
           sampledTrips++;
-          const warnings = validateMetricsAgainstContract(tripInputs[i], canonicalRows[i]);
+          // ВАЖНО: сравниваем с реально СОХРАНЁННЫМИ в БД значениями (t), а не с
+          // canonicalRows[i] — тот же canonicalRows[i] пересчитан теми же формулами,
+          // что и "expected" внутри validateMetricsAgainstContract, поэтому сравнение
+          // canonical-с-canonical было тавтологией и не могло найти ни одного
+          // реального расхождения (см. CLAUDE.md / отчёт п.1.2).
+          const t = trips[i] as any;
+          const storedMetrics = {
+            ...canonicalRows[i],
+            clientPaidAmd: Number(t.clientPaidAmountAmd ?? 0),
+            carrierPaidAmd: Number(t.carrierPaidAmountAmd ?? 0),
+            clientPaymentStatus: (t.clientPaymentStatus ?? 'not_paid') as PaymentStatus,
+            carrierPaymentStatus: (t.carrierPaymentStatus ?? 'not_paid') as PaymentStatus,
+            profitAmd: Number(t.profitAmd ?? t.profit ?? 0),
+          };
+          const warnings = validateMetricsAgainstContract(tripInputs[i], storedMetrics);
           if (warnings.length > 0) localWarnings.push(...warnings);
         }
         const warningsByField: Record<string, number> = {};

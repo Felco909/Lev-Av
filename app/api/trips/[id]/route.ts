@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory, diffFields } from '@/lib/trip-history';
 import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
+import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 
 function serializeTrip(trip: any) {
   return {
@@ -184,6 +185,20 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       }
     }
 
+    logTripWriteDrift({
+      tripId: trip.id,
+      tripNumber: trip.tripNumber,
+      tripType: trip.tripType,
+      clientRateAmd: Number(trip.clientRateAmd ?? 0),
+      carrierRateAmd: trip.carrierRateAmd != null ? Number(trip.carrierRateAmd) : null,
+      expenses: trip.expenses ?? [],
+      clientPaidAmountAmd: Number(trip.clientPaidAmountAmd ?? 0),
+      carrierPaidAmountAmd: Number(trip.carrierPaidAmountAmd ?? 0),
+      savedProfitAmd: Number(trip.profitAmd ?? 0),
+      savedClientPaymentStatus: String(trip.clientPaymentStatus ?? 'not_paid'),
+      savedCarrierPaymentStatus: String(trip.carrierPaymentStatus ?? 'not_paid'),
+    }, 'trips:PUT');
+
     return NextResponse.json(serializeTrip(trip));
   } catch (e: any) {
     console.error(e);
@@ -303,6 +318,20 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         { field: 'status', oldValue: oldTrip.status, newValue: body.status },
       ]);
     }
+
+    logTripWriteDrift({
+      tripId: trip.id,
+      tripNumber: trip.tripNumber,
+      tripType: trip.tripType,
+      clientRateAmd: Number(trip.clientRateAmd ?? 0),
+      carrierRateAmd: trip.carrierRateAmd != null ? Number(trip.carrierRateAmd) : null,
+      expenses: trip.expenses ?? [],
+      clientPaidAmountAmd: Number(trip.clientPaidAmountAmd ?? 0),
+      carrierPaidAmountAmd: Number(trip.carrierPaidAmountAmd ?? 0),
+      savedProfitAmd: Number(trip.profitAmd ?? 0),
+      savedClientPaymentStatus: String(trip.clientPaymentStatus ?? 'not_paid'),
+      savedCarrierPaymentStatus: String(trip.carrierPaymentStatus ?? 'not_paid'),
+    }, 'trips:PATCH');
 
     return NextResponse.json(serializeTrip(trip));
   } catch (e: any) {

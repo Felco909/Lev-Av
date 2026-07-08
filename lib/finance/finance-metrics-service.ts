@@ -1,12 +1,16 @@
 import {
+  computeCarrierDueAmd,
   computeCashGapAmd,
+  computeClientDueAmd,
   computeDebtAmd,
   computeExpeditionProfitAmd,
   computeOverdueFlag,
   computeOwnTransportProfitAmd,
   computePaymentStatus,
+  computeTripProfitAmd,
   roundMoney,
   splitExpensesAmd,
+  type ExpenseLike,
 } from '@/lib/finance/formulas';
 import { CANONICAL_FORMULAS, CANONICAL_PAYMENT_STATUSES, FINANCE_CONTRACT_VERSION } from '@/lib/finance/finance-contract';
 import type {
@@ -317,4 +321,59 @@ export function validateMetricsAgainstContract(
   }
 
   return warnings;
+}
+
+export interface TripWriteSnapshot {
+  tripId: string;
+  tripNumber?: string | null;
+  tripType: string;
+  clientRateAmd: number;
+  carrierRateAmd: number | null;
+  expenses: readonly ExpenseLike[] | null | undefined;
+  clientPaidAmountAmd: number;
+  carrierPaidAmountAmd: number;
+  savedProfitAmd: number;
+  savedClientPaymentStatus: string;
+  savedCarrierPaymentStatus: string;
+}
+
+/**
+ * Best-effort, non-blocking regression tripwire (см. CLAUDE.md / отчёт п.3.4).
+ * Вызывается сразу после сохранения заявки: пересчитывает profit/статусы оплаты
+ * независимо, по тем же исходным данным, через единые формулы, и логирует
+ * расхождение — если just-written значения уже разошлись с тем, что даёт
+ * формула. Никогда не бросает исключение и не пишет в БД.
+ */
+export function logTripWriteDrift(trip: TripWriteSnapshot, context: string): void {
+  try {
+    const isExpedition = trip.tripType === 'expedition';
+    const expectedProfitAmd = computeTripProfitAmd({
+      clientRateAmd: trip.clientRateAmd,
+      carrierRateAmd: isExpedition ? trip.carrierRateAmd : null,
+      expenses: trip.expenses,
+    });
+    const clientDueAmd = computeClientDueAmd(trip.clientRateAmd, trip.expenses);
+    const expectedClientStatus = computePaymentStatus(clientDueAmd, trip.clientPaidAmountAmd);
+
+    const mismatches: string[] = [];
+    if (roundMoney(trip.savedProfitAmd) !== roundMoney(expectedProfitAmd)) {
+      mismatches.push(`profitAmd: saved=${roundMoney(trip.savedProfitAmd)} expected=${roundMoney(expectedProfitAmd)}`);
+    }
+    if (trip.savedClientPaymentStatus !== expectedClientStatus) {
+      mismatches.push(`clientPaymentStatus: saved=${trip.savedClientPaymentStatus} expected=${expectedClientStatus}`);
+    }
+    if (isExpedition) {
+      const carrierDueAmd = computeCarrierDueAmd(trip.carrierRateAmd, trip.expenses);
+      const expectedCarrierStatus = computePaymentStatus(carrierDueAmd, trip.carrierPaidAmountAmd);
+      if (trip.savedCarrierPaymentStatus !== expectedCarrierStatus) {
+        mismatches.push(`carrierPaymentStatus: saved=${trip.savedCarrierPaymentStatus} expected=${expectedCarrierStatus}`);
+      }
+    }
+
+    if (mismatches.length > 0) {
+      console.warn(`[finance-write-gate][${context}] trip ${trip.tripNumber ?? trip.tripId} drift on save:`, mismatches);
+    }
+  } catch (e) {
+    console.warn(`[finance-write-gate][${context}] check failed`, e);
+  }
 }

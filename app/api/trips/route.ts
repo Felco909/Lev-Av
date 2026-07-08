@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory } from '@/lib/trip-history';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
+import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 
 export async function GET(req: Request) {
   try {
@@ -299,6 +300,21 @@ export async function POST(req: Request) {
 
     // Record history
     await recordTripHistory(trip.id, 'created', (session as any)?.user?.id ?? null, (session as any)?.user?.name ?? 'Система');
+
+    logTripWriteDrift({
+      tripId: trip.id,
+      tripNumber: trip.tripNumber,
+      tripType: trip.tripType,
+      clientRateAmd: Number(trip.clientRateAmd ?? 0),
+      carrierRateAmd: trip.carrierRateAmd != null ? Number(trip.carrierRateAmd) : null,
+      expenses: trip.expenses ?? [],
+      clientPaidAmountAmd: Number(trip.clientPaidAmountAmd ?? 0),
+      carrierPaidAmountAmd: Number(trip.carrierPaidAmountAmd ?? 0),
+      savedProfitAmd: Number(trip.profitAmd ?? 0),
+      savedClientPaymentStatus: String(trip.clientPaymentStatus ?? 'not_paid'),
+      savedCarrierPaymentStatus: String(trip.carrierPaymentStatus ?? 'not_paid'),
+    }, 'trips:POST');
+
     return NextResponse.json({
       ...trip,
       clientRate: Number(trip?.clientRate ?? 0),
