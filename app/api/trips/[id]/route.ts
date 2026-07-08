@@ -130,6 +130,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         basisText: body?.basisText !== undefined ? (body.basisText || null) : undefined,
         clientInvoiceSeries: body?.clientInvoiceSeries !== undefined ? (body.clientInvoiceSeries || null) : undefined,
         carrierInvoiceSeries: body?.carrierInvoiceSeries !== undefined ? (body.carrierInvoiceSeries || null) : undefined,
+        taxCode: body?.taxCode !== undefined ? (body.taxCode || null) : undefined,
         notes: body?.notes !== undefined ? (body.notes || null) : undefined,
         customsDeparture: body?.customsDeparture !== undefined ? (body.customsDeparture || null) : undefined,
         customsDestination: body?.customsDestination !== undefined ? (body.customsDestination || null) : undefined,
@@ -213,6 +214,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
     if (body.carrierInvoiceSeries !== undefined) {
       data.carrierInvoiceSeries = body.carrierInvoiceSeries || null;
+    }
+    if (body.taxCode !== undefined) {
+      data.taxCode = body.taxCode || null;
     }
 
     // --- Inline financial field editing ---
