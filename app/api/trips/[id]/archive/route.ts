@@ -21,10 +21,6 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     const validation = validateTripArchiveTransition({
       status: trip.status,
       taxCode: trip.taxCode,
-      invoiceDocNumber: trip.invoiceDocNumber,
-      actDocNumber: trip.actDocNumber,
-      invoiceDocDate: trip.invoiceDocDate,
-      actDocDate: trip.actDocDate,
     });
     if (!validation.ok) {
       return NextResponse.json({ error: validation.message, missing: validation.missing }, { status: 422 });

@@ -726,7 +726,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       return;
     }
 
-    if (!confirm('Отправить заявку в архив? Требуется статус «Оплачен / Завершён», заполненный налоговый код и номера счёта и акта — иначе архивация будет отклонена.')) return;
+    if (!confirm('Отправить заявку в архив? Требуется статус «Оплачен / Завершён» и заполненный налоговый код — иначе архивация будет отклонена.')) return;
     actionLockRef.current.archive = true;
     setArchiving(true);
     try {

@@ -3,10 +3,6 @@ import { canonicalWorkflowTripStatus } from '@/lib/utils';
 export type TripArchiveCheckInput = {
   status: string | null | undefined;
   taxCode?: string | null;
-  invoiceDocNumber?: string | null;
-  actDocNumber?: string | null;
-  invoiceDocDate?: Date | string | null;
-  actDocDate?: Date | string | null;
 };
 
 export type TripArchiveValidation =
@@ -22,7 +18,7 @@ export function isArchivedStatus(status: string | null | undefined): boolean {
   return String(status ?? '').trim().toLowerCase() === 'archived';
 }
 
-/** Архивация требует статуса «Оплачен / Завершён», заполненного налогового кода и номеров счёта/акта. */
+/** Архивация требует статуса «Оплачен / Завершён» и заполненного налогового кода. */
 export function validateTripArchiveTransition(trip: TripArchiveCheckInput): TripArchiveValidation {
   if (!isFinanciallyCompletedStatus(trip.status)) {
     return {
@@ -32,15 +28,11 @@ export function validateTripArchiveTransition(trip: TripArchiveCheckInput): Trip
     };
   }
 
-  const missing: string[] = [];
-  if (!String(trip.taxCode ?? '').trim()) missing.push('Налоговый код');
-  if (!String(trip.invoiceDocNumber ?? '').trim()) missing.push('Номер счёта');
-  if (!String(trip.actDocNumber ?? '').trim()) missing.push('Номер акта');
-  if (missing.length > 0) {
+  if (!String(trip.taxCode ?? '').trim()) {
     return {
       ok: false,
-      message: `Нельзя отправить в архив — не заполнено: ${missing.join(', ')}.`,
-      missing,
+      message: 'Нельзя отправить в архив — не заполнено: Налоговый код.',
+      missing: ['Налоговый код'],
     };
   }
   return { ok: true };
