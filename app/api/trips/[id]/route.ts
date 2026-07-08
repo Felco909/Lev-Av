@@ -5,7 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory, diffFields } from '@/lib/trip-history';
-import { computeTripProfitAmd } from '@/lib/finance/formulas';
+import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 
 function serializeTrip(trip: any) {
   return {
@@ -230,13 +230,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       data.clientPaidAmount = new Decimal(paid);
       data.clientPaidAmountAmd = new Decimal(paid); // stored as AMD
     }
-    // Auto-calculate client payment status
+    // Auto-calculate client payment status — сумма к оплате включает
+    // перевыставляемые клиентские расходы (см. computeTripProfitAmd/CLAUDE.md).
     if (body.clientRate !== undefined || body.clientPaidAmount !== undefined) {
-      const cRate = body.clientRate !== undefined ? Number(body.clientRate) || 0 : Number(oldTrip?.clientRate ?? 0);
-      const cPaid = body.clientPaidAmount !== undefined ? Number(body.clientPaidAmount) || 0 : Number(oldTrip?.clientPaidAmount ?? 0);
-      if (cPaid <= 0) data.clientPaymentStatus = 'not_paid';
-      else if (cPaid >= cRate) data.clientPaymentStatus = 'paid';
-      else data.clientPaymentStatus = 'partially_paid';
+      const crAmd = data.clientRateAmd != null ? Number(data.clientRateAmd) : Number(oldTrip?.clientRateAmd ?? 0);
+      const cPaidAmd = data.clientPaidAmountAmd != null ? Number(data.clientPaidAmountAmd) : Number(oldTrip?.clientPaidAmountAmd ?? 0);
+      const clientDueAmd = computeClientDueAmd(crAmd, oldTrip?.expenses ?? []);
+      data.clientPaymentStatus = computePaymentStatus(clientDueAmd, cPaidAmd);
     }
     if (body.clientPaymentStatus !== undefined) data.clientPaymentStatus = body.clientPaymentStatus;
 
@@ -256,13 +256,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       data.carrierPaidAmount = new Decimal(paid);
       data.carrierPaidAmountAmd = new Decimal(paid);
     }
-    // Auto-calculate carrier payment status
+    // Auto-calculate carrier payment status — сумма к оплате включает
+    // расходы перевозчика (маркер __carrier__, см. CLAUDE.md).
     if (body.carrierRate !== undefined || body.carrierPaidAmount !== undefined) {
-      const cRate = body.carrierRate !== undefined ? Number(body.carrierRate) || 0 : Number(oldTrip?.carrierRate ?? 0);
-      const cPaid = body.carrierPaidAmount !== undefined ? Number(body.carrierPaidAmount) || 0 : Number(oldTrip?.carrierPaidAmount ?? 0);
-      if (cPaid <= 0) data.carrierPaymentStatus = 'not_paid';
-      else if (cPaid >= cRate) data.carrierPaymentStatus = 'paid';
-      else data.carrierPaymentStatus = 'partially_paid';
+      const caAmd = data.carrierRateAmd != null ? Number(data.carrierRateAmd) : Number(oldTrip?.carrierRateAmd ?? 0);
+      const cPaidAmd = data.carrierPaidAmountAmd != null ? Number(data.carrierPaidAmountAmd) : Number(oldTrip?.carrierPaidAmountAmd ?? 0);
+      const carrierDueAmd = computeCarrierDueAmd(caAmd, oldTrip?.expenses ?? []);
+      data.carrierPaymentStatus = computePaymentStatus(carrierDueAmd, cPaidAmd);
     }
     if (body.carrierPaymentStatus !== undefined && body.carrierRate === undefined && body.carrierPaidAmount === undefined) {
       data.carrierPaymentStatus = body.carrierPaymentStatus;

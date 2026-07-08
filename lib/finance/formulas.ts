@@ -74,6 +74,24 @@ export function computeTripProfitAmd(params: {
   return round2(totalClientAmd - totalCarrierAmd);
 }
 
+/**
+ * Сколько клиент реально должен заплатить по заявке — ставка плюс
+ * перевыставляемые клиентские расходы (см. computeTripProfitAmd).
+ * Используется для долга/статуса оплаты (recalcTripPayments в
+ * app/api/payments/route.ts, инлайн-редактирование в trips/[id]/route.ts) —
+ * должно совпадать с тем, что фактически прибавляется к прибыли.
+ */
+export function computeClientDueAmd(clientRateAmd: number, expenses: readonly ExpenseLike[] | null | undefined): number {
+  const { clientExpensesAmd } = splitExpensesAmd(expenses);
+  return round2((Number(clientRateAmd) || 0) + clientExpensesAmd);
+}
+
+/** То же самое для стороны перевозчика (см. computeClientDueAmd). */
+export function computeCarrierDueAmd(carrierRateAmd: number | null | undefined, expenses: readonly ExpenseLike[] | null | undefined): number {
+  const { carrierExpensesAmd } = splitExpensesAmd(expenses);
+  return round2((Number(carrierRateAmd) || 0) + carrierExpensesAmd);
+}
+
 export function computeCashGapAmd(clientPaidAmd: number, carrierPaidAmd: number): number {
   return round2(Math.max(0, (Number(carrierPaidAmd) || 0) - (Number(clientPaidAmd) || 0)));
 }

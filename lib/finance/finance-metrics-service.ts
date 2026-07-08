@@ -47,10 +47,16 @@ export function computeTripFinanceMetrics(trip: FinanceTripInput, payments: Fina
   const clientPaidAmd = sumPaymentsAmd(payments, trip.tripId, 'client');
   const carrierPaidAmd = sumPaymentsAmd(payments, trip.tripId, 'carrier');
 
+  // trip.clientRateAmd уже включает clientExtraAmd (см. вызывающие роуты —
+  // daily-reports/director-finance/finance-audit складывают его до вызова).
+  // trip.expensesAmd для этой функции — carrierExtraAmd, поэтому долг/статус
+  // перевозчика тоже должен его учитывать, иначе не совпадёт с profitAmd,
+  // где carrierExtraAmd уже вычитается.
+  const carrierDueAmd = roundMoney((Number(trip.carrierRateAmd) || 0) + (Number(trip.expensesAmd) || 0));
   const clientDebtAmd = computeDebtAmd(trip.clientRateAmd, clientPaidAmd);
-  const carrierDebtAmd = computeDebtAmd(trip.carrierRateAmd, carrierPaidAmd);
+  const carrierDebtAmd = computeDebtAmd(carrierDueAmd, carrierPaidAmd);
   const clientPaymentStatus = computePaymentStatus(trip.clientRateAmd, clientPaidAmd);
-  const carrierPaymentStatus = computePaymentStatus(trip.carrierRateAmd, carrierPaidAmd);
+  const carrierPaymentStatus = computePaymentStatus(carrierDueAmd, carrierPaidAmd);
 
   const profitAmd =
     trip.tripType === 'expedition'

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { Decimal } from '@prisma/client/runtime/library';
+import { computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 
 /** Recalculate paid totals & payment status for a trip (both client and carrier) */
 async function recalcTripPayments(tripId: string) {
@@ -20,18 +21,16 @@ async function recalcTripPayments(tripId: string) {
 
   const trip = await prisma.trip.findUnique({
     where: { id: tripId },
-    select: { clientRateAmd: true, clientRate: true, carrierRateAmd: true, carrierRate: true },
+    select: { clientRateAmd: true, clientRate: true, carrierRateAmd: true, carrierRate: true, expenses: true },
   });
 
-  const clientDue = Number(trip?.clientRateAmd ?? trip?.clientRate ?? 0);
-  let clientStatus = 'not_paid';
-  if (clientPaidAmd > 0 && clientPaidAmd < clientDue) clientStatus = 'partially_paid';
-  else if (clientPaidAmd > 0 && clientPaidAmd >= clientDue) clientStatus = 'paid';
+  // Клиент должен ставку + перевыставляемые клиентские расходы (см. CLAUDE.md,
+  // та же логика, что и в computeTripProfitAmd) — раньше расходы тут не учитывались.
+  const clientDue = computeClientDueAmd(Number(trip?.clientRateAmd ?? trip?.clientRate ?? 0), trip?.expenses ?? []);
+  const clientStatus = computePaymentStatus(clientDue, clientPaidAmd);
 
-  const carrierDue = Number(trip?.carrierRateAmd ?? trip?.carrierRate ?? 0);
-  let carrierStatus = 'not_paid';
-  if (carrierPaidAmd > 0 && carrierPaidAmd < carrierDue) carrierStatus = 'partially_paid';
-  else if (carrierPaidAmd > 0 && carrierPaidAmd >= carrierDue) carrierStatus = 'paid';
+  const carrierDue = computeCarrierDueAmd(trip?.carrierRateAmd != null ? Number(trip.carrierRateAmd) : (trip?.carrierRate != null ? Number(trip.carrierRate) : 0), trip?.expenses ?? []);
+  const carrierStatus = computePaymentStatus(carrierDue, carrierPaidAmd);
 
   await prisma.trip.update({
     where: { id: tripId },
