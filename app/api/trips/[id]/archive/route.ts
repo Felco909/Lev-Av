@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { isArchivedStatus } from '@/lib/trip-archive-rules';
+import { isArchivedStatus, validateTripArchiveTransition } from '@/lib/trip-archive-rules';
 
 /** Ручная отправка заявки в архив (без автоархива). */
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
@@ -16,6 +16,18 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     if (!trip) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
     if (isArchivedStatus(trip.status)) {
       return NextResponse.json({ error: 'Заявка уже в архиве' }, { status: 400 });
+    }
+
+    const validation = validateTripArchiveTransition({
+      status: trip.status,
+      taxCode: trip.taxCode,
+      invoiceDocNumber: trip.invoiceDocNumber,
+      actDocNumber: trip.actDocNumber,
+      invoiceDocDate: trip.invoiceDocDate,
+      actDocDate: trip.actDocDate,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.message, missing: validation.missing }, { status: 422 });
     }
 
     const updated = await prisma.trip.update({

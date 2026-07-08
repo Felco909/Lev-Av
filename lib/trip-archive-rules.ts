@@ -22,7 +22,18 @@ export function isArchivedStatus(status: string | null | undefined): boolean {
   return String(status ?? '').trim().toLowerCase() === 'archived';
 }
 
-/** Архивация без обязательных полей — только смена статуса; налоговый код сохраняется в записи заявки. */
-export function validateTripArchiveTransition(_trip: TripArchiveCheckInput): TripArchiveValidation {
+/** Архивация требует заполненного налогового кода и сгенерированных номеров счёта/акта. */
+export function validateTripArchiveTransition(trip: TripArchiveCheckInput): TripArchiveValidation {
+  const missing: string[] = [];
+  if (!String(trip.taxCode ?? '').trim()) missing.push('Налоговый код');
+  if (!String(trip.invoiceDocNumber ?? '').trim()) missing.push('Номер счёта');
+  if (!String(trip.actDocNumber ?? '').trim()) missing.push('Номер акта');
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message: `Нельзя отправить в архив — не заполнено: ${missing.join(', ')}.`,
+      missing,
+    };
+  }
   return { ok: true };
 }
