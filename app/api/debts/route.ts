@@ -35,7 +35,7 @@ export async function GET() {
     // Client debts: trips where client owes us
     const clientUnpaid = await prisma.trip.findMany({
       where: {
-        status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'] },
+        status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
         clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
       },
       include: {
@@ -108,7 +108,7 @@ export async function GET() {
     const carrierUnpaid = await prisma.trip.findMany({
       where: {
         tripType: 'expedition',
-        status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'] },
+        status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
         carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
       },
       include: {
