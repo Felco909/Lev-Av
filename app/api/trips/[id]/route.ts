@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory, diffFields } from '@/lib/trip-history';
+import { computeTripProfitAmd } from '@/lib/finance/formulas';
 
 function serializeTrip(trip: any) {
   return {
@@ -91,23 +92,20 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       const amtAmd = eCur === 'AMD' ? amt : Math.round(amt * eRate * 100) / 100;
       return { ...e, amount: amt, currency: eCur, exchangeRate: eRate, amountAmd: amtAmd };
     });
-    const totalExpensesAmd = expensesWithAmd.reduce((s: number, e: any) => s + e.amountAmd, 0);
+    // Единая формула прибыли (lib/finance/formulas.ts) — одна и та же для
+    // own_transport и expedition, расходы разбираются по маркеру __carrier__.
+    const profitAmd = computeTripProfitAmd({
+      clientRateAmd,
+      carrierRateAmd: body?.tripType === 'expedition' ? carrierRateAmd : null,
+      expenses: expensesWithAmd,
+    });
+    // profit — та же величина в валюте клиента (обратный пересчёт по курсу).
+    profit = Math.round((profitAmd / incomeRate) * 100) / 100;
 
-    if (body?.tripType === 'expedition') {
-      profit = clientRate - Number(body?.carrierRate ?? 0);
-    } else {
-      profit = clientRate - expensesWithAmd.reduce((s: number, e: any) => s + e.amount, 0);
-    }
-
-    const clientExpensesAmd = expensesWithAmd.filter((e: any) => e.description !== '__carrier__').reduce((s: number, e: any) => s + e.amountAmd, 0);
-    const carrierExpensesAmd = expensesWithAmd.filter((e: any) => e.description === '__carrier__').reduce((s: number, e: any) => s + e.amountAmd, 0);
-    const totalClientAmd = Math.round((clientRateAmd + clientExpensesAmd) * 100) / 100;
-    const totalCarrierAmd = Math.round(((carrierRateAmd ?? 0) + carrierExpensesAmd) * 100) / 100;
-    const profitAmd = Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100;
     const origRate = Number(oldTrip?.originalRate ?? incomeRate);
     const origClientRateAmd = Math.round(clientRate * origRate * 100) / 100;
     const origProfitAmd = body?.tripType === 'expedition'
-      ? Math.round((origClientRateAmd - (carrierRateAmd ?? 0)) * 100) / 100
+      ? computeTripProfitAmd({ clientRateAmd: origClientRateAmd, carrierRateAmd, expenses: expensesWithAmd })
       : profitAmd;
     const exchangeDiff = Math.round((profitAmd - origProfitAmd) * 100) / 100;
 
@@ -199,8 +197,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
 
-    // Get old trip for history
-    const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id } });
+    // Get old trip for history (include expenses — profit recalculation below needs them)
+    const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
 
     const data: any = {};
     if (body.status) data.status = body.status;
@@ -272,19 +270,21 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (body.carrierPaymentDate !== undefined) data.carrierPaymentDate = body.carrierPaymentDate ? new Date(body.carrierPaymentDate) : null;
     if (body.carrierPaymentNote !== undefined) data.carrierPaymentNote = body.carrierPaymentNote || null;
 
-    // Recalculate profit if rate changed
+    // Recalculate profit if rate changed — единая формула (lib/finance/formulas.ts),
+    // с учётом расходов заявки (раньше здесь расходы терялись, а own_transport
+    // вообще не пересчитывался).
     if (body.clientRate !== undefined || body.carrierRate !== undefined) {
-      const clientRateVal = body.clientRate !== undefined ? Number(body.clientRate) || 0 : Number(oldTrip?.clientRate ?? 0);
-      const carrierRateVal = body.carrierRate !== undefined ? (body.carrierRate != null ? Number(body.carrierRate) : 0) : Number(oldTrip?.carrierRate ?? 0);
       const isExp = oldTrip?.tripType === 'expedition';
-      if (isExp) {
-        data.profit = new Decimal(Math.round((clientRateVal - carrierRateVal) * 100) / 100);
-      }
       const crAmd = data.clientRateAmd != null ? Number(data.clientRateAmd) : Number(oldTrip?.clientRateAmd ?? 0);
       const caAmd = data.carrierRateAmd != null ? Number(data.carrierRateAmd) : Number(oldTrip?.carrierRateAmd ?? 0);
-      if (isExp) {
-        data.profitAmd = new Decimal(Math.round((crAmd - caAmd) * 100) / 100);
-      }
+      const incomeRateForProfit = Number(oldTrip?.exchangeRate ?? 1) || 1;
+      const profitAmd = computeTripProfitAmd({
+        clientRateAmd: crAmd,
+        carrierRateAmd: isExp ? caAmd : null,
+        expenses: oldTrip?.expenses ?? [],
+      });
+      data.profitAmd = new Decimal(profitAmd);
+      data.profit = new Decimal(Math.round((profitAmd / incomeRateForProfit) * 100) / 100);
     }
 
     const trip = await prisma.trip.update({

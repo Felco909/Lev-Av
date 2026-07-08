@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Pencil, MapPin, Package, Truck, Building2, DollarSign, FileText, Loader2, Paperclip, Download, X, ChevronRight, ClipboardList, Copy, Fuel, Wrench, Info, Lock } from 'lucide-react';
 import { formatCurrency, formatCurrencyRaw, formatDate, STATUS_MAP, STATUS_ORDER, TRIP_TYPE_MAP } from '@/lib/utils';
 import { generateSumInWordsLine } from '@/lib/number-to-words';
+import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import Breadcrumbs from '@/components/nav/breadcrumbs';
 import SmartBackButton from '@/components/nav/smart-back';
 
@@ -128,7 +129,12 @@ function TripFinance({ trip }: { trip: any }) {
   const carrierExpensesAmd = carrierExpenses.reduce((s: number, e: any) => s + Number(e?.amountAmd ?? e?.amount ?? 0), 0);
   const totalClientAmd = Math.round((clientRateAmd + clientExpensesAmd) * 100) / 100;
   const totalCarrierAmd = isExpedition ? Math.round((carrierRateAmd + carrierExpensesAmd) * 100) / 100 : 0;
-  const profitAmd = Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100;
+  // Единая формула прибыли (lib/finance/formulas.ts) — та же, что использует бэкенд.
+  const profitAmd = computeTripProfitAmd({
+    clientRateAmd,
+    carrierRateAmd: isExpedition ? carrierRateAmd : null,
+    expenses: allExpenses,
+  });
 
   // Load payments
   const loadPayments = useCallback(async () => {

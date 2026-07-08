@@ -25,6 +25,55 @@ export function computeOwnTransportProfitAmd(clientRateAmd: number, ownExpensesA
   return round2((Number(clientRateAmd) || 0) - (Number(ownExpensesAmd) || 0));
 }
 
+/**
+ * Расход, привязанный к заявке — минимальная форма, нужная для разбора по стороне.
+ * amountAmd принимает number/string/Prisma Decimal (структурно, без импорта типа
+ * из @prisma/client, чтобы этот модуль оставался безопасным для клиентского бандла).
+ */
+export interface ExpenseLike {
+  amountAmd: number | string | null | undefined | { toString(): string };
+  description?: string | null;
+}
+
+/**
+ * Маркер "перевозчицкой" стороны расхода в свободном текстовом поле description.
+ * См. CLAUDE.md — известная особенность модели Expense (нет отдельного поля "сторона").
+ */
+export const CARRIER_EXPENSE_MARKER = '__carrier__';
+
+/** Единое место разбора расходов заявки на клиентскую/перевозчицкую сторону. */
+export function splitExpensesAmd(expenses: readonly ExpenseLike[] | null | undefined): {
+  clientExpensesAmd: number;
+  carrierExpensesAmd: number;
+} {
+  let clientExpensesAmd = 0;
+  let carrierExpensesAmd = 0;
+  for (const e of expenses ?? []) {
+    const amt = Number(e?.amountAmd) || 0;
+    if (e?.description === CARRIER_EXPENSE_MARKER) carrierExpensesAmd += amt;
+    else clientExpensesAmd += amt;
+  }
+  return { clientExpensesAmd: round2(clientExpensesAmd), carrierExpensesAmd: round2(carrierExpensesAmd) };
+}
+
+/**
+ * Единая формула прибыли по заявке (см. CLAUDE.md — "Финансовая логика").
+ * Одна и та же для own_transport и expedition: для own_transport carrierRateAmd
+ * и carrierExpensesAmd естественно равны 0, т.к. нет перевозчика.
+ * Доп. расходы (клиентские и перевозчицкие) — перевыставляемые, поэтому клиентские
+ * прибавляются к клиентской части, а не вычитаются.
+ */
+export function computeTripProfitAmd(params: {
+  clientRateAmd: number;
+  carrierRateAmd?: number | null;
+  expenses: readonly ExpenseLike[] | null | undefined;
+}): number {
+  const { clientExpensesAmd, carrierExpensesAmd } = splitExpensesAmd(params.expenses);
+  const totalClientAmd = round2((Number(params.clientRateAmd) || 0) + clientExpensesAmd);
+  const totalCarrierAmd = round2((Number(params.carrierRateAmd) || 0) + carrierExpensesAmd);
+  return round2(totalClientAmd - totalCarrierAmd);
+}
+
 export function computeCashGapAmd(clientPaidAmd: number, carrierPaidAmd: number): number {
   return round2(Math.max(0, (Number(carrierPaidAmd) || 0) - (Number(clientPaidAmd) || 0)));
 }

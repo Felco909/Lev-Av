@@ -6,6 +6,7 @@ import {
   computeOwnTransportProfitAmd,
   computePaymentStatus,
   roundMoney,
+  splitExpensesAmd,
 } from '@/lib/finance/formulas';
 import { CANONICAL_FORMULAS, CANONICAL_PAYMENT_STATUSES, FINANCE_CONTRACT_VERSION } from '@/lib/finance/finance-contract';
 import type {
@@ -15,47 +16,22 @@ import type {
   TripFinanceMetrics,
 } from '@/lib/finance/types';
 
-function parseExpenseLineAmd(line: any): number {
-  if (line == null || typeof line !== 'object') return 0;
-  const byTotal = Number((line as any).total_amd ?? (line as any).totalAmd);
-  if (Number.isFinite(byTotal) && byTotal !== 0) return byTotal;
-  const amount = Number((line as any).amount ?? 0);
-  const currency = String((line as any).currency ?? 'AMD').toUpperCase();
-  const rate = currency === 'AMD'
-    ? 1
-    : Number((line as any).exchange_rate ?? (line as any).exchangeRate ?? 1) || 1;
-  return roundMoney(amount * rate);
-}
-
-function sumExpenseLinesAmd(lines: unknown): number {
-  if (!Array.isArray(lines)) return 0;
-  return roundMoney(lines.reduce((acc, line) => acc + parseExpenseLineAmd(line), 0));
-}
-
 export function getTripSplitExpenseTotalsAmd(trip: any): {
   clientExtraAmd: number;
   carrierExtraAmd: number;
 } {
-  const clientExtraAmd = sumExpenseLinesAmd(
-    trip?.client_expenses ?? trip?.clientExpenses ?? [],
-  );
-  const hasCarrierSplit = Array.isArray(trip?.carrier_expenses) || Array.isArray(trip?.carrierExpenses);
-  const carrierSplitAmd = sumExpenseLinesAmd(
-    trip?.carrier_expenses ?? trip?.carrierExpenses ?? [],
-  );
-  const legacyExpensesAmd = roundMoney(
-    Array.isArray(trip?.expenses)
-      ? trip.expenses.reduce(
-          (acc: number, e: any) => acc + Number(e?.amountAmd ?? e?.amount ?? 0),
-          0,
-        )
-      : 0,
+  // trip.expenses — реальная связь Prisma; сторона расхода определяется маркером
+  // description === '__carrier__' (см. splitExpensesAmd / CLAUDE.md). Поля
+  // trip.client_expenses / trip.carrier_expenses на записи из БД не существуют —
+  // раньше это делало clientExtraAmd всегда нулём, а все расходы (включая клиентские)
+  // попадали в "перевозчицкую" сумму и вычитались из прибыли.
+  const { clientExpensesAmd, carrierExpensesAmd } = splitExpensesAmd(
+    Array.isArray(trip?.expenses) ? trip.expenses : [],
   );
 
   return {
-    clientExtraAmd,
-    // Backward compatibility: if split carrier expenses are absent, use legacy expenses table.
-    carrierExtraAmd: hasCarrierSplit ? carrierSplitAmd : legacyExpensesAmd,
+    clientExtraAmd: clientExpensesAmd,
+    carrierExtraAmd: carrierExpensesAmd,
   };
 }
 

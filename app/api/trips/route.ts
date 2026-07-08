@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory } from '@/lib/trip-history';
+import { computeTripProfitAmd } from '@/lib/finance/formulas';
 
 export async function GET(req: Request) {
   try {
@@ -225,20 +226,15 @@ export async function POST(req: Request) {
       const amtAmd = eCur === 'AMD' ? amt : Math.round(amt * eRate * 100) / 100;
       return { ...e, amount: amt, currency: eCur, exchangeRate: eRate, amountAmd: amtAmd };
     });
-    const totalExpensesAmd = expensesWithAmd.reduce((s: number, e: any) => s + e.amountAmd, 0);
-
-    if (body?.tripType === 'expedition') {
-      profit = clientRate - Number(body?.carrierRate ?? 0);
-    } else {
-      profit = clientRate - expensesWithAmd.reduce((s: number, e: any) => s + e.amount, 0);
-    }
-
-    let profitAmd: number;
-    if (body?.tripType === 'expedition') {
-      profitAmd = Math.round((clientRateAmd - (carrierRateAmd ?? 0) - totalExpensesAmd) * 100) / 100;
-    } else {
-      profitAmd = Math.round((clientRateAmd - totalExpensesAmd) * 100) / 100;
-    }
+    // Единая формула прибыли (lib/finance/formulas.ts) — одна и та же для
+    // own_transport и expedition, расходы разбираются по маркеру __carrier__.
+    const profitAmd = computeTripProfitAmd({
+      clientRateAmd,
+      carrierRateAmd: body?.tripType === 'expedition' ? carrierRateAmd : null,
+      expenses: expensesWithAmd,
+    });
+    // profit — та же величина в валюте клиента (обратный пересчёт по курсу).
+    profit = Math.round((profitAmd / incomeRate) * 100) / 100;
 
     const trip = await prisma.trip.create({
       data: {

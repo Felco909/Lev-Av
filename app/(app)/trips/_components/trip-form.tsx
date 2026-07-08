@@ -15,6 +15,7 @@ import {
   tripSectionToStorageCategory,
 } from '@/lib/trip-attachment-service';
 import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER, canonicalWorkflowTripStatus, RATE_INPUT_CLASS, parseRateInput } from '@/lib/utils';
+import { computeTripProfitAmd, CARRIER_EXPENSE_MARKER } from '@/lib/finance/formulas';
 import { taxCodeIndicatorLabel } from '@/lib/trip-tax-code';
 import { appToast } from '@/lib/app-toast';
 import { addCalendarDaysFromDateOnly, WARNING_CLIENT_PAYMENT_TERMS } from '@/lib/trip-unload-flow';
@@ -586,7 +587,15 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const carrierRateAmd = Math.round(carrierRate * effectiveCarrierRate * 100) / 100;
   const totalClientAmd = useMemo(() => Math.round((clientRateAmd + totalClientExpensesAmd) * 100) / 100, [clientRateAmd, totalClientExpensesAmd]);
   const totalCarrierAmd = useMemo(() => Math.round((carrierRateAmd + totalCarrierExpensesAmd) * 100) / 100, [carrierRateAmd, totalCarrierExpensesAmd]);
-  const profitAmd = useMemo(() => Math.round((totalClientAmd - totalCarrierAmd) * 100) / 100, [totalClientAmd, totalCarrierAmd]);
+  // Единая формула прибыли (lib/finance/formulas.ts) — та же, что использует бэкенд.
+  const profitAmd = useMemo(() => computeTripProfitAmd({
+    clientRateAmd,
+    carrierRateAmd,
+    expenses: [
+      { amountAmd: totalClientExpensesAmd, description: '' },
+      { amountAmd: totalCarrierExpensesAmd, description: CARRIER_EXPENSE_MARKER },
+    ],
+  }), [clientRateAmd, carrierRateAmd, totalClientExpensesAmd, totalCarrierExpensesAmd]);
 
   const handleCurrencyChange = (cur: string) => {
     setCurrency(cur);
