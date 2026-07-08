@@ -22,8 +22,16 @@ export function isArchivedStatus(status: string | null | undefined): boolean {
   return String(status ?? '').trim().toLowerCase() === 'archived';
 }
 
-/** Архивация требует заполненного налогового кода и сгенерированных номеров счёта/акта. */
+/** Архивация требует статуса «Оплачен / Завершён», заполненного налогового кода и номеров счёта/акта. */
 export function validateTripArchiveTransition(trip: TripArchiveCheckInput): TripArchiveValidation {
+  if (!isFinanciallyCompletedStatus(trip.status)) {
+    return {
+      ok: false,
+      message: 'Архивировать можно только заявку в статусе «Оплачен / Завершён».',
+      missing: ['Статус'],
+    };
+  }
+
   const missing: string[] = [];
   if (!String(trip.taxCode ?? '').trim()) missing.push('Налоговый код');
   if (!String(trip.invoiceDocNumber ?? '').trim()) missing.push('Номер счёта');
