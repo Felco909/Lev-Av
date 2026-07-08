@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { computeClientDueAmd, computeCarrierDueAmd } from '@/lib/finance/formulas';
 
 export async function GET() {
   try {
@@ -47,8 +48,7 @@ export async function GET() {
 
     const clientDebts = clientUnpaid.map(t => {
       const clientRateAmd = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
-      const clientExpAmd = ((t as any).expenses ?? []).filter((e: any) => e.description !== '__carrier__').reduce((s: number, e: any) => s + Number(e.amountAmd ?? e.amount ?? 0), 0);
-      const rateAmd = Math.round((clientRateAmd + clientExpAmd) * 100) / 100;
+      const rateAmd = computeClientDueAmd(clientRateAmd, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
       const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
       const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays);
@@ -76,8 +76,7 @@ export async function GET() {
     const groupedMap = new Map<string, any>();
     for (const t of clientUnpaid) {
       const _clientRate = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
-      const _clientExp = ((t as any).expenses ?? []).filter((e: any) => e.description !== '__carrier__').reduce((s: number, e: any) => s + Number(e.amountAmd ?? e.amount ?? 0), 0);
-      const rateAmd = Math.round((_clientRate + _clientExp) * 100) / 100;
+      const rateAmd = computeClientDueAmd(_clientRate, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
       const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
       if (remaining <= 0) continue;
@@ -121,8 +120,7 @@ export async function GET() {
 
     const carrierDebts = carrierUnpaid.map(t => {
       const carrierBaseAmd = Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0);
-      const carrierExpAmd = ((t as any).expenses ?? []).filter((e: any) => e.description === '__carrier__').reduce((s: number, e: any) => s + Number(e.amountAmd ?? e.amount ?? 0), 0);
-      const rateAmd = Math.round((carrierBaseAmd + carrierExpAmd) * 100) / 100;
+      const rateAmd = computeCarrierDueAmd(carrierBaseAmd, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
       const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
       const dueState = calcDueState((t as any).carrierPaymentDate);

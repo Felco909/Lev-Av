@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { computeClientDueAmd, computeCarrierDueAmd, splitExpensesAmd } from '@/lib/finance/formulas';
 
 export async function GET(req: Request) {
   try {
@@ -37,12 +38,14 @@ export async function GET(req: Request) {
         clientPaidAmountAmd: true, clientPaidAmount: true,
         clientId: true,
         client: { select: { name: true } },
+        expenses: { select: { amountAmd: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
     });
 
     const clientDebts = clientDebtTrips.map(t => {
-      const rate = Number(t.clientRateAmd ?? t.clientRate ?? 0);
+      // Сумма к оплате = ставка + перевыставляемые клиентские расходы (см. CLAUDE.md).
+      const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses);
       const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
       return {
         id: t.id, tripNumber: t.tripNumber,
@@ -81,12 +84,13 @@ export async function GET(req: Request) {
         id: true, tripNumber: true, carrierRateAmd: true, carrierRate: true,
         carrierPaidAmountAmd: true, carrierPaidAmount: true,
         carrier: { select: { name: true } },
+        expenses: { select: { amountAmd: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
     });
 
     const carrierDebts = carrierDebtTrips.map(t => {
-      const rate = Number(t.carrierRateAmd ?? t.carrierRate ?? 0);
+      const rate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses);
       const paid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
       return {
         id: t.id, tripNumber: t.tripNumber, carrierName: t.carrier?.name ?? '',
@@ -105,16 +109,18 @@ export async function GET(req: Request) {
         carrierRateAmd: true, carrierRate: true,
         profitAmd: true, profit: true,
         client: { select: { name: true } },
-        expenses: { select: { amountAmd: true, amount: true } },
+        expenses: { select: { amountAmd: true, description: true } },
       },
       orderBy: { profitAmd: 'desc' },
     });
 
     const profitRows = allTrips.map(t => {
-      const income = Number(t.clientRateAmd ?? t.clientRate ?? 0);
+      // Клиентские расходы — доход (перевыставляются), перевозчицкие — расход.
+      // Для own_transport вообще нет расходной части (см. computeTripProfitAmd/CLAUDE.md).
+      const { clientExpensesAmd, carrierExpensesAmd } = splitExpensesAmd(t.expenses);
+      const income = Number(t.clientRateAmd ?? t.clientRate ?? 0) + clientExpensesAmd;
       const carrierCost = Number(t.carrierRateAmd ?? t.carrierRate ?? 0);
-      const expensesCost = (t.expenses ?? []).reduce((s, e) => s + Number(e.amountAmd ?? e.amount ?? 0), 0);
-      const expense = t.tripType === 'expedition' ? carrierCost + expensesCost : expensesCost;
+      const expense = t.tripType === 'expedition' ? carrierCost + carrierExpensesAmd : 0;
       const profitVal = Number(t.profitAmd ?? t.profit ?? 0);
       return {
         id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '',
@@ -177,10 +183,10 @@ export async function GET(req: Request) {
       // Previous client debts
       const prevClientDebtTrips = await prisma.trip.findMany({
         where: { ...prevWhere, clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
-        select: { clientRateAmd: true, clientRate: true, clientPaidAmountAmd: true, clientPaidAmount: true },
+        select: { clientRateAmd: true, clientRate: true, clientPaidAmountAmd: true, clientPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
       });
       const prevTotalClientDebt = prevClientDebtTrips.reduce((s, t) => {
-        const r = Number(t.clientRateAmd ?? t.clientRate ?? 0) - Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
+        const r = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses) - Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
         return s + (r > 0 ? r : 0);
       }, 0);
 
@@ -189,10 +195,10 @@ export async function GET(req: Request) {
       if (tripType === 'own_transport') prevCarrierWhere.tripType = 'own_transport';
       const prevCarrierDebtTrips = await prisma.trip.findMany({
         where: prevCarrierWhere,
-        select: { carrierRateAmd: true, carrierRate: true, carrierPaidAmountAmd: true, carrierPaidAmount: true },
+        select: { carrierRateAmd: true, carrierRate: true, carrierPaidAmountAmd: true, carrierPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
       });
       const prevTotalCarrierDebt = prevCarrierDebtTrips.reduce((s, t) => {
-        const r = Number(t.carrierRateAmd ?? t.carrierRate ?? 0) - Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
+        const r = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses) - Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
         return s + (r > 0 ? r : 0);
       }, 0);
 
@@ -235,6 +241,7 @@ export async function GET(req: Request) {
           clientRateAmd: true, clientRate: true,
           clientPaidAmountAmd: true, clientPaidAmount: true,
           client: { select: { name: true } },
+          expenses: { select: { amountAmd: true, description: true } },
         },
         orderBy: { paymentDueDate: 'asc' },
       }),
@@ -249,6 +256,7 @@ export async function GET(req: Request) {
           carrierRateAmd: true, carrierRate: true,
           carrierPaidAmountAmd: true, carrierPaidAmount: true,
           carrier: { select: { name: true } },
+          expenses: { select: { amountAmd: true, description: true } },
         },
         orderBy: { carrierPaymentDate: 'asc' },
       }),
@@ -257,7 +265,7 @@ export async function GET(req: Request) {
     const clientOverdueArr: any[] = [];
     const clientDueArr: any[] = [];
     for (const t of clientPaymentTrips) {
-      const rate = Number(t.clientRateAmd ?? t.clientRate ?? 0);
+      const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses);
       const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
       const remaining = rate - paid;
       if (remaining <= 0) continue;
@@ -275,7 +283,7 @@ export async function GET(req: Request) {
     const carrierOverdueArr: any[] = [];
     const carrierDueArr: any[] = [];
     for (const t of carrierPaymentTrips) {
-      const rate = Number(t.carrierRateAmd ?? t.carrierRate ?? 0);
+      const rate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses);
       const paid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
       const remaining = rate - paid;
       if (remaining <= 0) continue;
