@@ -5,6 +5,9 @@ export type RoleGuardResult =
   | { ok: false; status: 401 | 403; error: string };
 
 export const CRITICAL_PAYMENTS_ROLES = ['admin', 'owner', 'director', 'accountant'] as const;
+/** Кто может создавать новые учётные записи (закрытие публичной саморегистрации). */
+export const USER_MANAGEMENT_ROLES = ['admin', 'owner'] as const;
+export const KNOWN_USER_ROLES = ['admin', 'owner', 'director', 'accountant', 'dispatcher'] as const;
 /**
  * Роли, которым разрешено менять денормализованные поля оплат прямо на заявке
  * (clientPaidAmount*, carrierPaidAmount*, *PaymentStatus), минуя журнал проводок.
