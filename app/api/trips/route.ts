@@ -7,6 +7,7 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory } from '@/lib/trip-history';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
+import { assertInitialTripWorkflowStatus } from '@/lib/trip-workflow-guards';
 
 export async function GET(req: Request) {
   try {
@@ -179,6 +180,11 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
+
+    const initialStatusCheck = assertInitialTripWorkflowStatus(body?.status);
+    if (!initialStatusCheck.ok) {
+      return NextResponse.json({ error: initialStatusCheck.message }, { status: 400 });
+    }
 
     // Generate trip number — find max existing number to avoid duplicates
     const year = new Date().getFullYear();

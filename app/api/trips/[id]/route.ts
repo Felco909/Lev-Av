@@ -8,6 +8,7 @@ import { recordTripHistory, diffFields } from '@/lib/trip-history';
 import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
+import { assertDirectWorkflowStatusChange } from '@/lib/trip-workflow-guards';
 
 function serializeTrip(trip: any) {
   return {
@@ -78,6 +79,13 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     // Get old trip for diff
     const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id } });
+
+    // ПРИМЕЧАНИЕ: строгую проверку соседнего шага воркфлоу (assertDirectWorkflowStatusChange)
+    // сюда намеренно НЕ добавляем — форма (trip-form.tsx) позволяет локально прокликать
+    // несколько шагов подряд перед одним Save, и тогда body.status может законно отличаться
+    // от oldTrip.status больше чем на 1 шаг. Строгая проверка стоит в PATCH, где смена
+    // статуса — всегда одно явное действие (например «Завершить»), а не результат
+    // накопленных локальных кликов.
 
     // Delete old expenses and recalculate
     await prisma.expense.deleteMany({ where: { tripId: params?.id } });
@@ -233,6 +241,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     // Get old trip for history (include expenses — profit recalculation below needs them)
     const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
+
+    // Запрет «перепрыгивания» через шаги воркфлоу — та же проверка, что в PUT.
+    if (body.status) {
+      const workflowCheck = assertDirectWorkflowStatusChange(oldTrip?.status, body.status);
+      if (!workflowCheck.ok) {
+        return NextResponse.json({ error: workflowCheck.message }, { status: 400 });
+      }
+    }
 
     const data: any = {};
     if (body.status) data.status = body.status;
