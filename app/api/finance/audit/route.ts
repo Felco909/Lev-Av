@@ -173,27 +173,32 @@ export async function GET(req: Request) {
       console.warn('[finance-audit][internal-validation] skipped due to error', validationError);
     }
 
-    // AS-IS old totals (mirrors existing APIs)
+    // AS-IS old totals (mirrors existing APIs) — due-суммы берутся из tripInputs
+    // (уже включают перевыставляемые расходы, см. getTripSplitExpenseTotalsAmd),
+    // а не голая ставка: раньше здесь стояла до-1.1 формула без учёта расходов,
+    // из-за чего этот блок вечно показывал «конфликт» даже когда /api/debts и
+    // /api/dashboard давно считают правильно и совпадают с каноном 1-в-1.
+    const pairedTrips = trips.map((t, i) => ({ trip: t, input: tripInputs[i] }));
     const oldTripProfitTotal = roundMoney(
       trips.reduce((s, t) => s + Number((t as any).profitAmd ?? t.profit ?? 0), 0)
     );
     const oldClientDebtTotal = roundMoney(
-      trips
-        .filter((t) => ['not_paid', 'partially_paid'].includes((t as any).clientPaymentStatus ?? 'not_paid'))
-        .reduce((s, t) => {
-          const rate = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
+      pairedTrips
+        .filter(({ trip: t }) => ['not_paid', 'partially_paid'].includes((t as any).clientPaymentStatus ?? 'not_paid'))
+        .reduce((s, { trip: t, input }) => {
+          const due = Number(input.clientRateAmd ?? 0);
           const paid = Number((t as any).clientPaidAmountAmd ?? 0);
-          return s + Math.max(0, rate - paid);
+          return s + Math.max(0, due - paid);
         }, 0)
     );
     const oldCarrierDebtTotal = roundMoney(
-      trips
-        .filter((t) => t.tripType === 'expedition')
-        .filter((t) => ['not_paid', 'partially_paid'].includes((t as any).carrierPaymentStatus ?? 'not_paid'))
-        .reduce((s, t) => {
-          const rate = Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0);
+      pairedTrips
+        .filter(({ trip: t }) => t.tripType === 'expedition')
+        .filter(({ trip: t }) => ['not_paid', 'partially_paid'].includes((t as any).carrierPaymentStatus ?? 'not_paid'))
+        .reduce((s, { trip: t, input }) => {
+          const due = roundMoney((Number(input.carrierRateAmd) || 0) + (Number(input.expensesAmd) || 0));
           const paid = Number((t as any).carrierPaidAmountAmd ?? 0);
-          return s + Math.max(0, rate - paid);
+          return s + Math.max(0, due - paid);
         }, 0)
     );
     const oldCashGapTotal = roundMoney(
