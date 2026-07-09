@@ -6,44 +6,14 @@ export default withAuth({
 
 export const config = {
   matcher: [
-    '/dashboard/:path*',
-    '/trips/:path*',
-    '/clients/:path*',
-    '/vehicles/:path*',
-    '/drivers/:path*',
-    '/carriers/:path*',
-    '/analytics/:path*',
-    '/fuel/:path*',
-    '/maintenance/:path*',
-    '/expiry/:path*',
-    '/driver-analytics/:path*',
-    '/reports/:path*',
-    '/statistics/:path*',
-    '/calendar/:path*',
-    '/debts/:path*',
-    '/documents/:path*',
-    '/routes/:path*',
-    '/settings/:path*',
-    '/api/trips/:path*',
-    '/api/clients/:path*',
-    '/api/vehicles/:path*',
-    '/api/drivers/:path*',
-    '/api/carriers/:path*',
-    '/api/fuel/:path*',
-    '/api/maintenance/:path*',
-    '/api/document-expiry/:path*',
-    '/api/tire-sets/:path*',
-    '/api/driver-analytics/:path*',
-    '/api/reports/:path*',
-    '/api/statistics/:path*',
-    '/api/calendar/:path*',
-    '/api/debts/:path*',
-    '/api/documents/:path*',
-    '/api/route-templates/:path*',
-    '/api/settings/:path*',
-    '/api/templates/:path*',
-    '/api/upload/:path*',
-    '/api/vehicles/:path*',
-    '/api/exchange-rates/:path*',
+    // Все страницы приложения, кроме /login — раньше был ручной allowlist,
+    // который со временем разошёлся с реальной структурой app/(app) (не хватало
+    // agents, daily-reports, day-tasks и др.). Новые страницы теперь защищены
+    // автоматически, без необходимости вписывать их сюда вручную.
+    '/((?!login|api|_next/static|_next/image|favicon.ico).*)',
+    // Все API-роуты, кроме NextAuth-машинерии (иначе сам логин сломается) и
+    // /api/signup (уже проверяет роль внутри себя — исключён, чтобы при полном
+    // отсутствии сессии он по-прежнему отдавал чистый JSON 401, а не редирект).
+    '/api/((?!auth|signup).*)',
   ],
 };
