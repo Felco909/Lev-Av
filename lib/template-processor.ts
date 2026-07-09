@@ -1,7 +1,22 @@
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { prisma } from '@/lib/prisma';
-import { getFileBuffer } from '@/lib/s3';
+import { isLocalStoragePath, readStoredAttachmentFile } from '@/lib/attachment-service';
+import { getFileBuffer as getLegacyS3FileBuffer } from '@/lib/s3';
+
+/**
+ * Читает шаблон и по локальному, и по легаси-S3 пути (см. CLAUDE.md — миграция
+ * хранилища). Раньше здесь был только getFileBuffer из lib/s3 — загруженные
+ * через /api/templates и /api/clients/[id]/templates шаблоны успешно
+ * сохранялись локально, но никогда не могли быть прочитаны обратно при
+ * генерации документа (S3-credentials не существует).
+ */
+async function getTemplateBuffer(cloudStoragePath: string): Promise<Buffer> {
+  if (isLocalStoragePath(cloudStoragePath)) {
+    return readStoredAttachmentFile(cloudStoragePath);
+  }
+  return getLegacyS3FileBuffer(cloudStoragePath);
+}
 
 /**
  * Check if a custom template exists for the given document type.
@@ -13,7 +28,7 @@ export async function getCustomTemplate(documentType: string): Promise<Buffer | 
       where: { documentType },
     });
     if (!template) return null;
-    const buffer = await getFileBuffer(template.cloudStoragePath);
+    const buffer = await getTemplateBuffer(template.cloudStoragePath);
     return buffer;
   } catch (error) {
     console.error(`Error fetching template ${documentType}:`, error);
@@ -34,7 +49,7 @@ export async function getClientTemplate(clientId: string | null | undefined, doc
         const path = pathField ? (client as any)[pathField] : null;
         if (path) {
           try {
-            const buffer = await getFileBuffer(path);
+            const buffer = await getTemplateBuffer(path);
             return buffer;
           } catch (e) {
             console.error(`Error fetching client template ${documentType} for client ${clientId}:`, e);
