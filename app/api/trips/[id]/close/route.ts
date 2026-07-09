@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { Decimal } from '@prisma/client/runtime/library';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   try {
@@ -39,6 +40,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     const body = await request.json().catch(() => ({}));
     const closeDebts = body?.closeDebts === true;
+
+    // closeDebts напрямую проставляет clientPaidAmount*/carrierPaidAmount*/статусы
+    // "оплачено" в обход журнала платежей — та же защита, что и на прямой правке
+    // этих полей (см. lib/auth/role-guard.ts). Обычное завершение без closeDebts
+    // (просто смена статуса) этой проверкой не затрагивается.
+    if (closeDebts) {
+      const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'автозакрытие долгов при завершении заявки');
+      if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
 
     if (closeDebts) {
       // Auto-close all debts: create balancing payments for remaining amounts

@@ -7,6 +7,7 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { recordTripHistory, diffFields } from '@/lib/trip-history';
 import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
+import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 
 function serializeTrip(trip: any) {
   return {
@@ -63,6 +64,16 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
+
+    // Денормализованные поля оплаты (clientPaidAmount*/carrierPaidAmount*/статусы) —
+    // только admin/owner/director/accountant (см. CLAUDE.md, lib/auth/role-guard.ts).
+    // Ставки/расходы/статус маршрута — обычная работа, этой проверкой не затрагиваются.
+    const touchedPaymentFields = getTouchedDenormalizedPaymentFields(body);
+    if (touchedPaymentFields.length > 0) {
+      const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'изменение оплаты по заявке');
+      if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
     const clientRate = Number(body?.clientRate ?? 0);
 
     // Get old trip for diff
@@ -212,6 +223,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
+
+    // Денормализованные поля оплаты — только admin/owner/director/accountant.
+    const touchedPaymentFields = getTouchedDenormalizedPaymentFields(body);
+    if (touchedPaymentFields.length > 0) {
+      const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'изменение оплаты по заявке');
+      if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
 
     // Get old trip for history (include expenses — profit recalculation below needs them)
     const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
