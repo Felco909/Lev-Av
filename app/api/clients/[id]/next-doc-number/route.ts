@@ -4,7 +4,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { previewNextDocNumber } from '@/lib/doc-numbering';
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041D\u0435 \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u043E\u0432\u0430\u043D' }, { status: 401 });

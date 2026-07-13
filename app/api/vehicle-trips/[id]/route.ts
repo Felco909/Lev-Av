@@ -6,7 +6,8 @@ import { prisma } from '@/lib/prisma';
 export const dynamic = 'force-dynamic';
 
 /** GET /api/vehicle-trips/[id] — full detail + linked trips + expenses + profit calc */
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 

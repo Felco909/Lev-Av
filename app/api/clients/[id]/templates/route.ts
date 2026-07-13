@@ -6,7 +6,8 @@ import { authOptions } from '@/lib/auth-options';
 import { deleteStoredFile } from '@/lib/attachment-service';
 
 // GET client templates info
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041D\u0435 \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u043E\u0432\u0430\u043D' }, { status: 401 });
@@ -29,7 +30,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 // POST — save template for client
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041D\u0435 \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u043E\u0432\u0430\u043D' }, { status: 401 });
@@ -63,7 +65,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 }
 
 // DELETE — remove a template from client
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041D\u0435 \u0430\u0432\u0442\u043E\u0440\u0438\u0437\u043E\u0432\u0430\u043D' }, { status: 401 });

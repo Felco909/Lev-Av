@@ -8,8 +8,8 @@ import { enrichTripAttachmentDownload, deleteStoredFile } from '@/lib/attachment
 // GET attachments for a trip
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
-) {
+  { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -34,8 +34,8 @@ export async function GET(
 // POST — save attachment record after file upload
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
-) {
+  { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });

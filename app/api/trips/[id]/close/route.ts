@@ -6,7 +6,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -130,7 +131,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
 }
 
 /** Reopen a completed trip — set status back to 'unloaded' */
-export async function PUT(request: Request, { params }: { params: { id: string } }) {
+export async function PUT(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });

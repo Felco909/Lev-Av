@@ -44,7 +44,8 @@ function serializeTrip(trip: any) {
   };
 }
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -60,7 +61,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
 }
 
-export async function PUT(req: Request, { params }: { params: { id: string } }) {
+export async function PUT(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -226,7 +228,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 }
 
 // PATCH — update only specific fields (status, inline finance, etc.)
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -374,7 +377,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });

@@ -5,7 +5,8 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 
 /** Предупреждения о дубликатах номеров у того же клиента (не блокирует сохранение). */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
