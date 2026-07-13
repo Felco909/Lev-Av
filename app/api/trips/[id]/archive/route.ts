@@ -7,7 +7,8 @@ import { prisma } from '@/lib/prisma';
 import { isArchivedStatus, validateTripArchiveTransition } from '@/lib/trip-archive-rules';
 
 /** Ручная отправка заявки в архив (без автоархива). */
-export async function POST(_req: Request, { params }: { params: { id: string } }) {
+export async function POST(_req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
@@ -39,7 +40,8 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
 }
 
 /** Вернуть заявку из архива в «Оплачен / Завершён». */
-export async function PUT(_req: Request, { params }: { params: { id: string } }) {
+export async function PUT(_req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });

@@ -5,7 +5,8 @@ import { authOptions } from '@/lib/auth-options';
 import { previewNextDocNumber } from '@/lib/doc-numbering';
 
 /** Превью следующей пары номеров счёт+акт без инкремента. */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+    const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
