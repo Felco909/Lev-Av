@@ -1148,7 +1148,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                   <span className="font-semibold">{selectedContact.name}</span>
                   {selectedContact.phone && (
                     <a href={`tel:${selectedContact.phone}`} className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-                      \u260E {selectedContact.phone}
+                      ☎ {selectedContact.phone}
                     </a>
                   )}
                   {selectedContact.email && (
@@ -1168,11 +1168,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           <div className="flex gap-3">
             <button type="button" onClick={() => setTripType('own_transport')}
               className={`flex-1 py-3 px-4 rounded-lg border-2 text-sm font-medium transition ${tripType === 'own_transport' ? 'border-primary bg-primary/5 text-primary' : 'border-muted hover:border-primary/30'}`}>
-              \ud83d\ude9a Собственные машины
+              🚚 Собственные машины
             </button>
             <button type="button" onClick={() => setTripType('expedition')}
               className={`flex-1 py-3 px-4 rounded-lg border-2 text-sm font-medium transition ${tripType === 'expedition' ? 'border-primary bg-primary/5 text-primary' : 'border-muted hover:border-primary/30'}`}>
-              \ud83c\udfe2 Экспедиция
+              🏢 Экспедиция
             </button>
           </div>
 

@@ -1060,7 +1060,7 @@ export default function MaintenancePage() {
                           <span>{p.vehicle.brand} {p.vehicle.model} ({p.vehicle.plateNumber})</span>
                           {p.supplier && <span>{'\u041f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a: '}{p.supplier.name}</span>}
                           <span>{formatDate(p.date)}</span>
-                          <span>{Number(p.quantity)} \u00d7 {formatCurrency(Number(p.unitPrice))} = {formatCurrency(Number(p.totalAmount))}</span>
+                          <span>{Number(p.quantity)} × {formatCurrency(Number(p.unitPrice))} = {formatCurrency(Number(p.totalAmount))}</span>
                           {debt > 0 && <span className="text-red-600 font-medium">{'\u0414\u043e\u043b\u0433: '}{formatCurrency(debt)}</span>}
                         </div>
                       </div>

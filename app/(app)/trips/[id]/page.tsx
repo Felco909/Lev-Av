@@ -541,12 +541,12 @@ export default function TripDetailPage() {
                   <span className="font-medium">{trip.contact.name}</span>
                   {trip.contact.phone && (
                     <a href={`tel:${trip.contact.phone}`} className="text-blue-600 hover:underline text-xs" title={"\u041F\u043E\u0437\u0432\u043E\u043D\u0438\u0442\u044C"}>
-                      \u260E {trip.contact.phone}
+                      ☎ {trip.contact.phone}
                     </a>
                   )}
                   {trip.contact.email && (
                     <a href={`mailto:${trip.contact.email}`} className="text-blue-600 hover:underline text-xs" title={"\u041D\u0430\u043F\u0438\u0441\u0430\u0442\u044C"}>
-                      \u2709
+                      ✉
                     </a>
                   )}
                 </div>
