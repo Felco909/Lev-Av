@@ -13,9 +13,16 @@ import {
   type CarrierApplicationLang,
 } from '@/lib/carrier-application-pdf';
 import { carrierRequestDocx, type DocData, type OrderForCarrierRequest } from '@/lib/doc-generators';
+import {
+  GoogleGenerativeAI,
+  GoogleGenerativeAIFetchError,
+  SchemaType,
+  type Part,
+  type ResponseSchema,
+} from '@google/generative-ai';
 
 const EXTRACT_SYSTEM = `Ты помощник TMS транспортной компании Lev&Av.
-Извлеки из договора-заявки поля и верни ТОЛЬКО валидный JSON без markdown:
+Извлеки из договора-заявки поля:
 {
   "tripNumber": "номер заявки/договора или null",
   "tripDate": "YYYY-MM-DD или null",
@@ -30,32 +37,107 @@ const EXTRACT_SYSTEM = `Ты помощник TMS транспортной ко�
 }
 Не выдумывай данные. Если поле не найдено — null.`;
 
-type ContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
+/*
+ * ЗАМЕНЕНО на Google Gemini (см. callGeminiJson ниже). Оставлено для справки/отката.
+ * ANTHROPIC_API_KEY и ANTHROPIC_MODEL по-прежнему в .env.local — просто не используются в коде.
+ *
+ * type ContentBlock =
+ *   | { type: 'text'; text: string }
+ *   | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
+ *
+ * function getAnthropicApiKey(): string | null {
+ *   const key = String(process.env.ANTHROPIC_API_KEY ?? '')
+ *     .trim()
+ *     .replace(/^['"]|['"]$/g, '');
+ *   if (!key || !key.startsWith('sk-ant-')) return null;
+ *   return key;
+ * }
+ *
+ * function claudeErrorMessage(status: number, errText: string): string {
+ *   try {
+ *     const j = JSON.parse(errText) as { error?: { type?: string; message?: string } };
+ *     const msg = j?.error?.message ?? '';
+ *     if (status === 401) {
+ *       return 'Неверный ANTHROPIC_API_KEY. Создайте новый ключ в console.anthropic.com и обновите .env.local';
+ *     }
+ *     if (status === 404) return msg || 'Модель Claude недоступна для этого ключа';
+ *     if (msg) return `Claude API: ${msg}`;
+ *   } catch {
+ *     // ignore
+ *   }
+ *   return 'Ошибка Claude API';
+ * }
+ */
+
+/** JSON-схема ответа extract-агента — Gemini гарантирует соответствие ей (responseSchema). */
+const EXTRACT_RESPONSE_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    tripNumber: { type: SchemaType.STRING, nullable: true, description: 'Номер заявки/договора' },
+    tripDate: { type: SchemaType.STRING, nullable: true, description: 'Дата в формате YYYY-MM-DD' },
+    clientName: { type: SchemaType.STRING, nullable: true, description: 'Заказчик' },
+    amount: { type: SchemaType.NUMBER, nullable: true },
+    currency: {
+      type: SchemaType.STRING,
+      format: 'enum',
+      enum: ['AMD', 'USD', 'EUR', 'RUB', 'GEL'],
+      nullable: true,
+    },
+    routeFrom: { type: SchemaType.STRING, nullable: true, description: 'Пункт отправления' },
+    routeTo: { type: SchemaType.STRING, nullable: true, description: 'Пункт назначения' },
+    basisText: {
+      type: SchemaType.STRING,
+      nullable: true,
+      description: 'Основание/номер договора одной строкой',
+    },
+    cargoWeight: { type: SchemaType.NUMBER, nullable: true, description: 'Вес груза в тоннах' },
+    confidence: { type: SchemaType.STRING, format: 'enum', enum: ['high', 'medium', 'low'] },
+  },
+  required: [
+    'tripNumber',
+    'tripDate',
+    'clientName',
+    'amount',
+    'currency',
+    'routeFrom',
+    'routeTo',
+    'basisText',
+    'cargoWeight',
+    'confidence',
+  ],
+};
+
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
 
 /** Ключ из .env.local / .env (Next.js подхватывает на сервере). */
-function getAnthropicApiKey(): string | null {
-  const key = String(process.env.ANTHROPIC_API_KEY ?? '')
+function getGeminiApiKey(): string | null {
+  const key = String(process.env.GEMINI_API_KEY ?? '')
     .trim()
     .replace(/^['"]|['"]$/g, '');
-  if (!key || !key.startsWith('sk-ant-')) return null;
+  if (!key) return null;
   return key;
 }
 
-function claudeErrorMessage(status: number, errText: string): string {
-  try {
-    const j = JSON.parse(errText) as { error?: { type?: string; message?: string } };
-    const msg = j?.error?.message ?? '';
-    if (status === 401) {
-      return 'Неверный ANTHROPIC_API_KEY. Создайте новый ключ в console.anthropic.com и обновите .env.local';
-    }
-    if (status === 404) return msg || 'Модель Claude недоступна для этого ключа';
-    if (msg) return `Claude API: ${msg}`;
-  } catch {
-    /* ignore */
+function isRetryableGeminiStatus(status: number | undefined): boolean {
+  if (status === undefined) return false;
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+function geminiErrorMessage(status: number | undefined, message: string): string {
+  if (status === 401 || status === 403) {
+    return 'Неверный GEMINI_API_KEY. Создайте новый ключ в Google AI Studio (aistudio.google.com) и обновите .env.local';
   }
-  return 'Ошибка Claude API';
+  if (status === 429) {
+    return 'Превышен лимит запросов к Gemini API (бесплатный тариф). Попробуйте ещё раз через минуту.';
+  }
+  if (status === 404) return message || 'Модель Gemini недоступна для этого ключа';
+  if (message) return `Gemini API: ${message}`;
+  return 'Ошибка Gemini API';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function stripDocxXml(xml: string): string {
@@ -79,54 +161,59 @@ function extractDocxText(buffer: Buffer): string {
   return text.slice(0, 120_000);
 }
 
-async function callClaudeJson(system: string, content: ContentBlock[], hasPdf: boolean) {
-  const apiKey = getAnthropicApiKey();
+async function callGeminiJson(parts: Part[]) {
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     return {
-      error: 'Не настроен ANTHROPIC_API_KEY в .env.local (формат: sk-ant-...)',
+      error: 'Не настроен GEMINI_API_KEY в .env.local',
       status: 500 as const,
     };
   }
 
-  const model =
-    process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-20250514';
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-  };
-  if (hasPdf) {
-    headers['anthropic-beta'] = 'pdfs-2024-09-25';
-  }
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model,
-      max_tokens: 1200,
-      system,
-      messages: [{ role: 'user', content }],
-    }),
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction: EXTRACT_SYSTEM,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: EXTRACT_RESPONSE_SCHEMA,
+    },
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error('[agents/document] Claude error:', res.status, errText);
-    return {
-      error: claudeErrorMessage(res.status, errText),
-      status: res.status === 401 ? 401 : 502,
-    };
+  let lastStatus: number | undefined;
+  let lastMessage = '';
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const result = await model.generateContent(parts);
+      const raw = result.response.text();
+      try {
+        return { parsed: JSON.parse(raw) };
+      } catch {
+        return { error: 'Не удалось разобрать ответ Gemini', status: 502 as const };
+      }
+    } catch (err) {
+      lastStatus = err instanceof GoogleGenerativeAIFetchError ? err.status : undefined;
+      lastMessage = err instanceof Error ? err.message : 'Ошибка Gemini API';
+
+      const retryable = isRetryableGeminiStatus(lastStatus);
+      const attemptsLeft = attempt < RETRY_DELAYS_MS.length;
+      if (!retryable || !attemptsLeft) break;
+
+      console.error(
+        `[agents/document] Gemini error (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1}), retrying in ${RETRY_DELAYS_MS[attempt]}ms:`,
+        lastStatus,
+        lastMessage,
+      );
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
   }
 
-  const data = await res.json();
-  const raw = data?.content?.find((c: { type?: string }) => c?.type === 'text')?.text ?? '{}';
-  const jsonMatch = String(raw).match(/\{[\s\S]*\}/);
-  try {
-    return { parsed: JSON.parse(jsonMatch ? jsonMatch[0] : raw) };
-  } catch {
-    return { error: 'Не удалось разобрать ответ Claude', status: 502 as const };
-  }
+  console.error('[agents/document] Gemini error:', lastStatus, lastMessage);
+  return {
+    error: geminiErrorMessage(lastStatus, lastMessage),
+    status: lastStatus === 401 || lastStatus === 403 ? (401 as const) : (502 as const),
+  };
 }
 
 async function handleCarrierApplicationPdf(body: Record<string, unknown>) {
@@ -390,30 +477,26 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const content: ContentBlock[] = [];
+    const parts: Part[] = [];
 
     if (isPdf) {
-      content.push({
-        type: 'document',
-        source: {
-          type: 'base64',
-          media_type: 'application/pdf',
+      parts.push({
+        inlineData: {
+          mimeType: 'application/pdf',
           data: buffer.toString('base64'),
         },
       });
-      content.push({
-        type: 'text',
+      parts.push({
         text: 'Извлеки данные заявки из прикреплённого PDF-договора.',
       });
     } else {
       const docText = extractDocxText(buffer);
-      content.push({
-        type: 'text',
+      parts.push({
         text: `Извлеки данные заявки из текста договора Word:\n\n${docText}`,
       });
     }
 
-    const llm = await callClaudeJson(EXTRACT_SYSTEM, content, isPdf);
+    const llm = await callGeminiJson(parts);
     if ('error' in llm && llm.error) {
       return NextResponse.json({ error: llm.error }, { status: llm.status ?? 500 });
     }
