@@ -29,6 +29,12 @@ prisma/*.db-journal
 backups/
 uploads/temp/
 
+# Local Postgres runtime (binaries/pgdata, ~GBs) and uploaded business documents —
+# neither belongs in version control (see docs/postgres-windows-service.md).
+LOCAL_DB_RUNTIME/
+storage/
+.runtime/
+
 # Build caches
 *.tsbuildinfo
 .cache/
