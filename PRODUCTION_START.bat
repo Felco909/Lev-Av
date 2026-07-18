@@ -96,9 +96,9 @@ if not exist "%PG_DATA%\PG_VERSION" goto :ERR_PG_DATA
 >> "%DEBUG_LOG%" echo [STEP] Check local PostgreSQL on port %PG_PORT%
 "%PG_BIN%\pg_isready.exe" -h localhost -p %PG_PORT% -d levav_prod_local >nul 2>&1
 if errorlevel 1 (
-  echo [INFO] Local PostgreSQL is not running. Starting...
-  >> "%LOG_FILE%" echo %date% %time% [INFO] Starting local PostgreSQL on %PG_PORT%
-  "%PG_BIN%\pg_ctl.exe" -D "%PG_DATA%" -l "%PG_LOG%" -o "-p %PG_PORT%" start >nul 2>&1
+  echo [INFO] Local PostgreSQL service is not running. Starting...
+  >> "%LOG_FILE%" echo %date% %time% [INFO] Starting LevAV_Postgres service on %PG_PORT%
+  net start LevAV_Postgres >nul 2>&1
   timeout /t 2 /nobreak >nul
   "%PG_BIN%\pg_isready.exe" -h localhost -p %PG_PORT% -d levav_prod_local >nul 2>&1
   if errorlevel 1 goto :ERR_PG_START
@@ -205,14 +205,20 @@ call :SHOW_LAN_URLS
 echo [INFO] Browser opens when http://localhost:3000 responds (background script).
 start /b powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%PROJECT_DIR%scripts\open-browser-when-ready.ps1" -Url "http://localhost:3000" -TimeoutSeconds 300
 echo [INFO] Starting server: npm run start (stop: Ctrl+C in this window).
+echo [INFO] Server output logged to: %RUNTIME_DIR%\npm_start_last.log
 >> "%LOG_FILE%" echo %date% %time% [INFO] npm run start
 >> "%DEBUG_LOG%" echo [STEP] npm run start
-call npm run start
+set "NPM_START_LOG=%RUNTIME_DIR%\npm_start_last.log"
+call npm run start > "%NPM_START_LOG%" 2>&1
 set "NPM_EXIT=!ERRORLEVEL!"
 >> "%DEBUG_LOG%" echo [INFO] npm run start exit code=!NPM_EXIT!
 if not "!NPM_EXIT!"=="0" (
-  echo [INFO] Next.js exited, code !NPM_EXIT! (Ctrl+C is normal).
+  echo [INFO] Next.js exited, code !NPM_EXIT! (Ctrl+C is normal^).
+  echo [HINT] Full server log: %NPM_START_LOG%
   >> "%LOG_FILE%" echo %date% %time% [INFO] npm run start ended !NPM_EXIT!
+  >> "%DEBUG_LOG%" echo ---- npm_start_last.log tail (exit !NPM_EXIT!) ----
+  powershell -NoProfile -Command "Get-Content -LiteralPath '%NPM_START_LOG%' -Tail 40 -ErrorAction SilentlyContinue" >> "%DEBUG_LOG%" 2>nul
+  >> "%DEBUG_LOG%" echo ---- end npm_start_last.log tail ----
 )
 >> "%DEBUG_LOG%" echo [OK] launcher finished
 echo.
