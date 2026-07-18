@@ -79,10 +79,12 @@ profit = clientRateAmd + totalClientExpensesAmd - carrierRateAmd - totalCarrierE
 
 ## Хранилище файлов
 Основной путь вложений — локальный диск (`lib/attachment-service.ts`, `storage/uploads/...`,
-`/api/upload/local`, `/api/files`). Часть роутов (`clients/[id]/templates`, `templates`,
-`part-purchases*`, `documents/by-client`) всё ещё завязана на S3 (`lib/s3.ts`) — на этой машине
-нет `~/.aws/credentials`, поэтому эти конкретные роуты сейчас не работают. Не удивляться и не
-чинить как "новый баг" — это известный, ещё не закрытый пункт миграции на локальное хранилище.
+`/api/upload/local`, `/api/files`). `clients/[id]/templates`, `templates` и `part-purchases*`
+уже мигрированы на локальное хранилище (коммит `d66c9df`) — S3 там больше не используется.
+Единственный оставшийся роут на S3 (`lib/s3.ts`) — `documents/by-client` (проверено грепом
+`from '@/lib/s3'` по `app/`); на этой машине нет `~/.aws/credentials`, поэтому именно он сейчас
+не работает. Не удивляться и не чинить как "новый баг" — известный, ещё не закрытый пункт
+миграции.
 
 ## Статусы сделок
 Воркфлоу: ... → "На оплату" → "Сверка" (чек-лист долг/налоговый код) → "Завершён".
