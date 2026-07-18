@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeClientDueAmd, computeCarrierDueAmd } from '@/lib/finance/formulas';
+import { isExcludedStatusForClientPaymentOverdue } from '@/lib/client-overdue-logic';
 
 export async function GET() {
   try {
@@ -13,7 +14,17 @@ export async function GET() {
     // Helper to derive overdue/urgency status based on DUE DATE, NOT trip date.
     // Overdue is ONLY meaningful for status='completed' AND a due date set.
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const calcDueState = (dueDate: Date | null | undefined, unloadDate?: Date | null, paymentTermsDays?: number | null) => {
+    // isOverdue исключает статусы new/in_progress/archived/отменённые — та же
+    // канонический список, что использует client-overdue-logic.ts везде
+    // (дашборд, финансы директора). Раньше это место не проверяло статус вообще
+    // (аудит, пункт 3): архивная/отменённая заявка с давно прошедшим сроком
+    // могла показаться "просроченной" здесь, но не в остальной системе.
+    const calcDueState = (
+      dueDate: Date | null | undefined,
+      unloadDate?: Date | null,
+      paymentTermsDays?: number | null,
+      status?: string | null
+    ) => {
       let effectiveDue: Date | null = dueDate ? new Date(dueDate) : null;
       if (!effectiveDue && unloadDate && paymentTermsDays && paymentTermsDays > 0) {
         effectiveDue = new Date(unloadDate);
@@ -24,11 +35,12 @@ export async function GET() {
       }
       const due = new Date(effectiveDue); due.setHours(0, 0, 0, 0);
       const daysLeft = Math.ceil((due.getTime() - todayStart.getTime()) / 86400000);
+      const excluded = isExcludedStatusForClientPaymentOverdue(status);
       return {
         paymentDueDate: due.toISOString().slice(0, 10),
         daysLeft,
-        isOverdue: daysLeft < 0,
-        isUrgent: daysLeft >= 0 && daysLeft <= 3,
+        isOverdue: daysLeft < 0 && !excluded,
+        isUrgent: daysLeft >= 0 && daysLeft <= 3 && !excluded,
       };
     };
 
@@ -51,7 +63,7 @@ export async function GET() {
       const rateAmd = computeClientDueAmd(clientRateAmd, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
       const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
-      const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays);
+      const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays, t.status);
       const carrierPaidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
       const cashGap = t.tripType === 'expedition' && carrierPaidAmd > paidAmd ? carrierPaidAmd - paidAmd : 0;
       return {
@@ -83,7 +95,7 @@ export async function GET() {
       const cId = t.client?.id ?? 'unknown';
       const carrierPaidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
       const cashGap = t.tripType === 'expedition' && carrierPaidAmd > paidAmd ? carrierPaidAmd - paidAmd : 0;
-      const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays);
+      const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays, t.status);
       if (!groupedMap.has(cId)) {
         groupedMap.set(cId, {
           client: { id: cId, name: t.client?.name ?? '—', phone: (t.client as any)?.phone ?? null, email: (t.client as any)?.email ?? null },
@@ -123,7 +135,7 @@ export async function GET() {
       const rateAmd = computeCarrierDueAmd(carrierBaseAmd, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
       const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
-      const dueState = calcDueState((t as any).carrierPaymentDate);
+      const dueState = calcDueState((t as any).carrierPaymentDate, null, null, t.status);
       const clientPaidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
       const cashGap = paidAmd > clientPaidAmd ? paidAmd - clientPaidAmd : 0;
       return {

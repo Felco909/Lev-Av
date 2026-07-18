@@ -41,6 +41,20 @@ function bucketByOverdueDays(daysOverdue: number): 'not_due' | 'overdue_1_3' | '
   return 'overdue_15_plus';
 }
 
+// "Факт" рейса = статус показывает, что рейс реально состоялся (минимум разгрузка),
+// а не просто числился запланированным на сегодня и не был отменён. new/in_progress —
+// ещё не произошло; отменённые — не произошло вовсе. Остальные статусы (unloaded и
+// дальше по воронке, включая archived) — состоялось.
+const ACTUAL_TRIP_EXCLUDED_STATUSES = new Set(['new', 'in_progress']);
+function isCancelledStatus(status: string | null | undefined): boolean {
+  return typeof status === 'string' && status.toLowerCase().includes('cancel');
+}
+function tripActuallyHappened(status: string | null | undefined): boolean {
+  if (!status) return false;
+  if (ACTUAL_TRIP_EXCLUDED_STATUSES.has(status)) return false;
+  return !isCancelledStatus(status);
+}
+
 async function loadRows(where: any) {
   const trips = await prisma.trip.findMany({
     where,
@@ -132,14 +146,14 @@ export async function GET() {
 
     const planFactDay = {
       plannedTrips: todayData.rows.length,
-      actualTrips: todayData.rows.filter((r) => r.clientPaidAmd > 0 || r.carrierPaidAmd > 0 || r.tripType === 'own_transport').length,
+      actualTrips: todayData.rows.filter((r) => tripActuallyHappened(todayData.tripMap.get(r.tripId)?.status)).length,
       plannedRevenueAmd: roundMoney(todayData.rows.reduce((s, r) => s + r.clientRateAmd, 0)),
       actualRevenueAmd: roundMoney(todayData.rows.reduce((s, r) => s + r.clientPaidAmd, 0)),
       plannedProfitAmd: roundMoney(todayData.rows.reduce((s, r) => s + r.profitAmd, 0)),
       actualProfitAmd: roundMoney(
         todayData.rows.reduce((s, r) => {
           const paidDelta = r.clientPaidAmd - (r.tripType === 'expedition' ? r.carrierPaidAmd : 0);
-          return s + (r.tripType === 'expedition' ? paidDelta - r.expensesAmd : paidDelta - r.expensesAmd);
+          return s + (paidDelta - r.expensesAmd);
         }, 0)
       ),
     };
@@ -152,25 +166,53 @@ export async function GET() {
       overdue_15_plus: 'Просрочка 15+ дней',
     };
 
-    const bucketInit = ['not_due', 'overdue_1_3', 'overdue_4_7', 'overdue_8_14', 'overdue_15_plus'].map((k) => ({
-      bucket: k as 'not_due' | 'overdue_1_3' | 'overdue_4_7' | 'overdue_8_14' | 'overdue_15_plus',
-      label: bucketLabels[k],
-      clientDebtAmd: 0,
-      carrierDebtAmd: 0,
-      tripCount: 0,
-    }));
-    const bucketMap = new Map(bucketInit.map((b) => [b.bucket, b]));
+    const bucketKeys = ['not_due', 'overdue_1_3', 'overdue_4_7', 'overdue_8_14', 'overdue_15_plus'] as const;
+    const bucketState = new Map(
+      bucketKeys.map((k) => [k, { clientDebtAmd: 0, carrierDebtAmd: 0, tripIds: new Set<string>() }]),
+    );
 
+    // Бакетуем по РЕАЛЬНОМУ сроку оплаты (paymentDueDate для клиента,
+    // carrierPaymentDate для перевозчика) — раздельно, т.к. сроки могут отличаться.
+    // Флаг "просрочено" берём из row.clientOverdue/row.carrierOverdue —
+    // тех же канонических полей, что и в /api/dashboard, /api/director-finance
+    // (computeOverdueFlag в lib/finance/formulas.ts): они уже корректно исключают
+    // статусы new/in_progress/archived/отменённые из просрочки. Раньше этот блок
+    // пересчитывал просрочку заново по голой дате, без учёта статуса — расхождение
+    // с остальной системой (аудит, пункт 3). Если срок не задан или флаг false —
+    // долг считается непросроченным, а НЕ "просроченным на возраст рейса".
     for (const row of allData.rows) {
       const trip = allData.tripMap.get(row.tripId);
-      const dueDate = trip?.paymentDueDate ?? trip?.carrierPaymentDate ?? trip?.tripDate;
-      if (!dueDate) continue;
-      const bucket = bucketByOverdueDays(daysDiffFromToday(new Date(dueDate)));
-      const target = bucketMap.get(bucket)!;
-      target.clientDebtAmd = roundMoney(target.clientDebtAmd + row.clientDebtAmd);
-      target.carrierDebtAmd = roundMoney(target.carrierDebtAmd + row.carrierDebtAmd);
-      if (row.clientDebtAmd > 0 || row.carrierDebtAmd > 0) target.tripCount += 1;
+      if (!trip) continue;
+
+      if (row.clientDebtAmd > 0) {
+        const bucket = row.clientOverdue && trip.paymentDueDate
+          ? bucketByOverdueDays(daysDiffFromToday(new Date(trip.paymentDueDate)))
+          : 'not_due';
+        const state = bucketState.get(bucket)!;
+        state.clientDebtAmd = roundMoney(state.clientDebtAmd + row.clientDebtAmd);
+        state.tripIds.add(row.tripId);
+      }
+
+      if (row.carrierDebtAmd > 0) {
+        const bucket = row.carrierOverdue && trip.carrierPaymentDate
+          ? bucketByOverdueDays(daysDiffFromToday(new Date(trip.carrierPaymentDate)))
+          : 'not_due';
+        const state = bucketState.get(bucket)!;
+        state.carrierDebtAmd = roundMoney(state.carrierDebtAmd + row.carrierDebtAmd);
+        state.tripIds.add(row.tripId);
+      }
     }
+
+    const bucketInit = bucketKeys.map((k) => {
+      const state = bucketState.get(k)!;
+      return {
+        bucket: k,
+        label: bucketLabels[k],
+        clientDebtAmd: state.clientDebtAmd,
+        carrierDebtAmd: state.carrierDebtAmd,
+        tripCount: state.tripIds.size,
+      };
+    });
 
     const expectedIncomingAmd = roundMoney(todayData.rows.reduce((s, r) => s + r.clientDebtAmd, 0));
     const actualIncomingAmd = roundMoney(

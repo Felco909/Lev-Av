@@ -138,21 +138,24 @@ export default function ReportsPage() {
     return rows;
   }, [profitData?.rows, paymentFilter]);
 
-  // Calculate full trip expense: manual expenses (from expenses block) + carrier rate (for expedition)
-  // Note: r.expenses is already in AMD (sum of amountAmd from API)
-  const calcTripExpense = (r: any) =>
-    Number(r.expenses || 0) + (r.tripTypeRaw === 'expedition' ? Number(r.carrierRateAmd || r.carrierRate || 0) : 0);
+  // Каноническая прибыль — уже посчитана и сохранена на самой заявке (та же формула,
+  // что в trip-form.tsx / lib/finance/*). Раньше здесь пересчитывали прибыль заново по
+  // плоской сумме всех расходов заявки (без разделения на клиентскую/перевозчицкую
+  // сторону), из-за чего перевыставляемые клиенту расходы вычитались как издержка
+  // вместо того, чтобы прибавляться к доходу — прибыль на этой странице и в Excel-
+  // экспорте была занижена относительно дашборда/финансов директора.
+  const calcTripProfit = (r: any) => Number(r.profitAmd ?? r.profit ?? 0);
 
   // Period totals — computed from ALL filtered rows (not just payment-filtered)
   const allRows = profitData?.rows || [];
   const periodRevenue = allRows.reduce((s: number, r: any) => s + Number(r.clientRateAmd || r.clientRate || 0), 0);
-  const periodExpense = allRows.reduce((s: number, r: any) => s + calcTripExpense(r), 0);
-  const periodProfit = periodRevenue - periodExpense;
+  const periodProfit = allRows.reduce((s: number, r: any) => s + calcTripProfit(r), 0);
+  const periodExpense = periodRevenue - periodProfit;
 
   // Profit tab totals (use payment-filtered rows)
   const profitTotalRevenue = profitRows.reduce((s: number, r: any) => s + Number(r.clientRateAmd || r.clientRate || 0), 0);
-  const profitTotalExpense = profitRows.reduce((s: number, r: any) => s + calcTripExpense(r), 0);
-  const profitTotalProfit = profitTotalRevenue - profitTotalExpense;
+  const profitTotalProfit = profitRows.reduce((s: number, r: any) => s + calcTripProfit(r), 0);
+  const profitTotalExpense = profitTotalRevenue - profitTotalProfit;
 
   // Sverka group
   const sverkaRows = useMemo(() => (profitData?.rows || []).filter((r: any) => r.status === 'sverka'), [profitData?.rows]);
@@ -244,8 +247,8 @@ export default function ReportsPage() {
     if (tab === 'profit') {
       rows.push(['Дата', 'Маршрут', 'Клиент', 'Тип', 'Доход ֏', 'Расход ֏', 'Прибыль ֏']);
       for (const r of profitRows) {
-        const exp = calcTripExpense(r);
-        const prof = Number(r.clientRateAmd || r.clientRate || 0) - exp;
+        const prof = calcTripProfit(r);
+        const exp = Number(r.clientRateAmd || r.clientRate || 0) - prof;
         rows.push([r.date, `${r.routeFrom} → ${r.routeTo}`, r.client, r.tripType, String(Math.round(r.clientRateAmd || r.clientRate)), String(Math.round(exp)), String(Math.round(prof))]);
       }
     } else if (tab === 'own_fleet') {
@@ -483,8 +486,8 @@ export default function ReportsPage() {
                   </thead>
                   <tbody>
                     {profitRows.map((r: any, i: number) => {
-                      const exp = calcTripExpense(r);
-                      const profit = Number(r.clientRateAmd || r.clientRate || 0) - exp;
+                      const profit = calcTripProfit(r);
+                      const exp = Number(r.clientRateAmd || r.clientRate || 0) - profit;
                       return (
                         <tr key={i} className="border-b hover:bg-muted/30 transition">
                           <td className="py-2.5 px-4 text-xs whitespace-nowrap">{r.date}</td>

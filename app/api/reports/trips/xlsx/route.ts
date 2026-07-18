@@ -211,11 +211,11 @@ export async function GET(req: Request) {
     // ========== SHEET 3: Profit ==========
     const profitRows = trips.map(t => {
       const revenue = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
-      const totalExpenses = t.expenses?.reduce((s: number, e: any) => s + Number(e.amountAmd || e.amount || 0), 0) || 0;
-      const carrierCost = t.tripType === 'expedition' ? Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0) : 0;
-      // Include manual expenses (from Expense block) + carrier rate (for expedition)
-      const expense = totalExpenses + carrierCost;
-      const profit = revenue - expense;
+      // Каноническое сохранённое profitAmd/profit (та же формула, что в trip-form.tsx /
+      // lib/finance/*), а не пересчёт по плоской сумме расходов — та версия не отличала
+      // перевыставляемые клиенту расходы от реальных издержек и занижала прибыль.
+      const profit = Number((t as any).profitAmd ?? t.profit ?? 0);
+      const expense = revenue - profit;
       return {
         date: t.tripDate,
         tripNumber: t.tripNumber,
