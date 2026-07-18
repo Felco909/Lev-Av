@@ -280,11 +280,14 @@ export async function PATCH(req: Request, { params: paramsPromise }: { params: P
       const rate = cur === 'AMD' ? 1 : Number(oldTrip?.exchangeRate ?? 1);
       data.clientRateAmd = new Decimal(Math.round(cr * rate * 100) / 100);
     }
-    // Client paid amount (simple manual field)
+    // Client paid amount (simple manual field) — конвертация в AMD по курсу заявки,
+    // тот же паттерн, что и для clientRate выше.
     if (body.clientPaidAmount !== undefined) {
       const paid = Number(body.clientPaidAmount) || 0;
       data.clientPaidAmount = new Decimal(paid);
-      data.clientPaidAmountAmd = new Decimal(paid); // stored as AMD
+      const cur = oldTrip?.currency || 'AMD';
+      const rate = cur === 'AMD' ? 1 : Number(oldTrip?.exchangeRate ?? 1);
+      data.clientPaidAmountAmd = new Decimal(Math.round(paid * rate * 100) / 100);
     }
     // Auto-calculate client payment status — сумма к оплате включает
     // перевыставляемые клиентские расходы (см. computeTripProfitAmd/CLAUDE.md).
@@ -306,11 +309,14 @@ export async function PATCH(req: Request, { params: paramsPromise }: { params: P
         data.carrierRateAmd = new Decimal(Math.round(cr * cRate * 100) / 100);
       }
     }
-    // Carrier paid amount
+    // Carrier paid amount — конвертация в AMD по курсу перевозчика, тот же паттерн,
+    // что и для carrierRate выше.
     if (body.carrierPaidAmount !== undefined) {
       const paid = Number(body.carrierPaidAmount) || 0;
       data.carrierPaidAmount = new Decimal(paid);
-      data.carrierPaidAmountAmd = new Decimal(paid);
+      const cCur = oldTrip?.carrierCurrency || oldTrip?.currency || 'AMD';
+      const cRate = cCur === 'AMD' ? 1 : Number(oldTrip?.carrierExchangeRate ?? oldTrip?.exchangeRate ?? 1);
+      data.carrierPaidAmountAmd = new Decimal(Math.round(paid * cRate * 100) / 100);
     }
     // Auto-calculate carrier payment status — сумма к оплате включает
     // расходы перевозчика (маркер __carrier__, см. CLAUDE.md).

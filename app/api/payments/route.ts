@@ -2,13 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
+import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 
-/** Recalculate paid totals & payment status for a trip (both client and carrier) */
-async function recalcTripPayments(tripId: string) {
-  const payments = await prisma.payment.findMany({ where: { tripId } });
+/**
+ * Recalculate paid totals & payment status for a trip (both client and carrier).
+ * Принимает опциональный tx-клиент, чтобы вызываться внутри prisma.$transaction —
+ * иначе создание платежа и пересчёт заявки были бы двумя независимыми запросами
+ * и при сбое между ними могли разойтись (см. CLAUDE.md / аудит).
+ */
+async function recalcTripPayments(tripId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  const payments = await client.payment.findMany({ where: { tripId } });
 
   // Client payments
   const clientPayments = payments.filter(p => p.type === 'client');
@@ -20,7 +26,7 @@ async function recalcTripPayments(tripId: string) {
   const carrierPaidAmd = carrierPayments.reduce((s, p) => s + Number(p.amountAmd || 0), 0);
   const carrierPaidOrig = carrierPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
-  const trip = await prisma.trip.findUnique({
+  const trip = await client.trip.findUnique({
     where: { id: tripId },
     select: { clientRateAmd: true, clientRate: true, carrierRateAmd: true, carrierRate: true, expenses: true },
   });
@@ -33,7 +39,7 @@ async function recalcTripPayments(tripId: string) {
   const carrierDue = computeCarrierDueAmd(trip?.carrierRateAmd != null ? Number(trip.carrierRateAmd) : (trip?.carrierRate != null ? Number(trip.carrierRate) : 0), trip?.expenses ?? []);
   const carrierStatus = computePaymentStatus(carrierDue, carrierPaidAmd);
 
-  await prisma.trip.update({
+  await client.trip.update({
     where: { id: tripId },
     data: {
       clientPaidAmount: new Decimal(clientPaidOrig),
@@ -78,20 +84,23 @@ export async function POST(req: NextRequest) {
   const computedAmountAmd = cur === 'AMD' ? Number(amount) : Math.round(Number(amount) * rate * 100) / 100;
   const paymentType = type === 'carrier' ? 'carrier' : 'client';
 
-  const payment = await prisma.payment.create({
-    data: {
-      tripId,
-      type: paymentType,
-      amount: Number(amount),
-      amountAmd: computedAmountAmd,
-      currency: cur,
-      exchangeRate: rate,
-      paymentDate: new Date(paymentDate),
-      method: method || 'bank_transfer',
-      description: description || null,
-    },
+  const payment = await prisma.$transaction(async (tx) => {
+    const created = await tx.payment.create({
+      data: {
+        tripId,
+        type: paymentType,
+        amount: Number(amount),
+        amountAmd: computedAmountAmd,
+        currency: cur,
+        exchangeRate: rate,
+        paymentDate: new Date(paymentDate),
+        method: method || 'bank_transfer',
+        description: description || null,
+      },
+    });
+    await recalcTripPayments(tripId, tx);
+    return created;
   });
-  await recalcTripPayments(tripId);
   return NextResponse.json({
     ...payment,
     amount: Number(payment.amount),
@@ -108,7 +117,9 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
   const payment = await prisma.payment.findUnique({ where: { id }, select: { tripId: true } });
-  await prisma.payment.delete({ where: { id } });
-  if (payment?.tripId) await recalcTripPayments(payment.tripId);
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.delete({ where: { id } });
+    if (payment?.tripId) await recalcTripPayments(payment.tripId, tx);
+  });
   return NextResponse.json({ ok: true });
 }

@@ -3,11 +3,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { assertRole, CRITICAL_PAYMENTS_ROLES } from '@/lib/auth/role-guard';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041d\u0435 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d' }, { status: 401 });
+    const guard = assertRole(session, CRITICAL_PAYMENTS_ROLES, '\u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u043f\u043b\u0430\u0442\u0435\u0436\u0430 \u0437\u0430 \u0437\u0430\u043f\u0447\u0430\u0441\u0442\u0438');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const { id } = await params;
     const body = await req.json();
     const { amount, paymentDate, notes } = body;
@@ -51,6 +54,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041d\u0435 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d' }, { status: 401 });
+    const guard = assertRole(session, CRITICAL_PAYMENTS_ROLES, '\u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u043f\u043b\u0430\u0442\u0435\u0436\u0430 \u0437\u0430 \u0437\u0430\u043f\u0447\u0430\u0441\u0442\u0438');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const { id: purchaseId } = await params;
     const { searchParams } = new URL(req.url);
     const paymentId = searchParams.get('paymentId');
