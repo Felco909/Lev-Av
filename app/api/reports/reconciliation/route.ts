@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
+import { convertHtmlToPdf } from '@/lib/pdf-convert';
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -81,44 +82,17 @@ export async function GET(req: NextRequest) {
     <div class="footer"><div class="sign-block"><p>\u041E\u0442 \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438:</p><div class="sign-line"></div><p style="font-size:10px;color:#888;">\u041F\u043E\u0434\u043F\u0438\u0441\u044C / \u043F\u0435\u0447\u0430\u0442\u044C</p></div><div class="sign-block"><p>\u041E\u0442 \u043A\u043B\u0438\u0435\u043D\u0442\u0430 (${client.name}):</p><div class="sign-line"></div><p style="font-size:10px;color:#888;">\u041F\u043E\u0434\u043F\u0438\u0441\u044C / \u043F\u0435\u0447\u0430\u0442\u044C</p></div></div>
   </body></html>`;
 
-  // Generate PDF via html2pdf API
+  // Render locally via LibreOffice headless (no external/paid service — see lib/pdf-convert.ts).
   try {
-    const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: { format: 'A4', margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' } },
-      }),
+    const pdfBuf = await convertHtmlToPdf(html);
+    return new NextResponse(pdfBuf, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="reconciliation_${client.name}_${today}.pdf"`,
+      },
     });
-    const { request_id } = await createRes.json();
-    if (!request_id) return NextResponse.json({ error: 'PDF creation failed' }, { status: 500 });
-
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusData = await statusRes.json();
-      if (statusData?.status === 'SUCCESS' && statusData?.result?.result) {
-        const pdfBuf = Buffer.from(statusData.result.result, 'base64');
-        return new NextResponse(pdfBuf, {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="reconciliation_${client.name}_${today}.pdf"`,
-          },
-        });
-      }
-      if (statusData?.status === 'FAILED') {
-        return NextResponse.json({ error: 'PDF generation failed' }, { status: 500 });
-      }
-    }
-    return NextResponse.json({ error: 'PDF generation timed out' }, { status: 500 });
   } catch (err) {
     console.error('Reconciliation PDF error:', err);
-    return NextResponse.json({ error: 'PDF generation error' }, { status: 500 });
+    return NextResponse.json({ error: 'Ошибка генерации PDF' }, { status: 500 });
   }
 }
