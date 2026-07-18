@@ -5,12 +5,8 @@ Next.js 16.2.10 (App Router) + React 19.2.7 + Prisma 6.7.0 + PostgreSQL, next-au
 Документы: `docx`, `exceljs`, локальный LibreOffice для PDF (см. ниже).
 Работает на основном ПК, доступ по LAN (статический IP 192.168.0.100), порт 3000.
 
-Апгрейд с Next.js 14.2.28/React 18 на Next.js 16/React 19 уже смёржен в master
-(`c3536a7 Merge branch 'upgrade/nextjs-16'`) — версии выше актуальны и закоммичены.
-На 18.07.2026 отдельно от этого в рабочем дереве незакоммиченные изменения:
-`package.json` (добавлен `@google/generative-ai`), `prisma/schema.prisma` (новые поля
-`perDiem2`/`perDiem3` в `VehicleTrip` — суточные №2/№3 для мультистрановых маршрутов,
-миграция в БД ещё не накатана). Перед серьёзными правками сверяться с `git status`.
+Апгрейд с Next.js 14.2.28/React 18 на Next.js 16/React 19 смёржен (`c3536a7`), ветка — `main`
+(переименована с `master` 18.07.2026, репозиторий теперь на GitHub: `Felco909/Lev-Av`, приватный).
 
 Пересборка после изменений в бэкенде:
 ```
@@ -76,6 +72,13 @@ profit = clientRateAmd + totalClientExpensesAmd - carrierRateAmd - totalCarrierE
 `Maintenance`, `FuelRecord`, `TireSet`, `DocumentExpiry`, `DriverVehicleHistory`), финансы
 (`Payment`, `TripHistory`), документы (`DocumentTemplate`, `TripAttachment`, `PartAttachment`),
 закупки (`PartPurchase`, `PartPayment`), сервис (`ServiceRegulation`, `ServiceRecord`), `User`, `Setting`.
+
+С 18.07.2026 схема отслеживается через **Prisma Migrate** (`prisma/migrations/0_init/` —
+бейзлайн-миграция от текущего состояния боевой БД, применена через `migrate resolve --applied`
+без выполнения SQL, т.к. на момент бейзлайна drift был нулевым). Новые изменения схемы —
+`npx prisma migrate dev --name <описание>`, **не** `prisma db push` (у пользователя `postgres`
+в `.env` есть CREATEDB для shadow-базы, дополнительной настройки не требуется). Перед серьёзной
+правкой схемы — сначала план, потом код (см. «Правила работы»).
 
 ## Хранилище файлов
 Основной путь вложений — локальный диск (`lib/attachment-service.ts`, `storage/uploads/...`,
