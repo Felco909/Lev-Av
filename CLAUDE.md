@@ -1,9 +1,14 @@
 # LevAV_MAIN_SYSTEM — контекст для Claude Code
 
 ## Стек
-Next.js 14.2.28 (App Router) + Prisma 6.7.0 + PostgreSQL, next-auth 4.24.11, TypeScript 5.2.2.
+Next.js 16.2.10 (App Router) + React 19.2.7 + Prisma 6.7.0 + PostgreSQL, next-auth 4.24.14, TypeScript 5.2.2.
 Документы: `docx`, `exceljs`, локальный LibreOffice для PDF (см. ниже).
 Работает на основном ПК, доступ по LAN (статический IP 192.168.0.100), порт 3000.
+
+⚠️ На 18.07.2026 апгрейд с Next.js 14.2.28/React 18 на Next.js 16/React 19 лежит
+в рабочем дереве незакоммиченным (`package.json`, `prisma/schema.prisma` — см. `git status`),
+прод по-прежнему на старой версии. Перед серьёзными правками сверяться с `git status`/`git log`,
+не считать эти версии окончательно закоммиченными без проверки.
 
 Пересборка после изменений в бэкенде:
 ```
@@ -24,10 +29,13 @@ npm start
 ```
 profit = clientRateAmd + totalClientExpensesAmd - carrierRateAmd - totalCarrierExpensesAmd
 ```
-Точка истины: `app/(app)/trips/_components/trip-form.tsx:589` (`profitAmd = totalClientAmd - totalCarrierAmd`).
-В `lib/finance/formulas.ts` — смежные, но НЕ идентичные хелперы (`computeExpeditionProfitAmd`,
-`computeOwnTransportProfitAmd` — там расходы одной суммой, без раздельных client/carrier expenses).
-Не путать эти два места при правках.
+Точка истины: `lib/finance/formulas.ts:66` (`computeTripProfitAmd()`), вызывается из
+`app/(app)/trips/_components/trip-form.tsx:591` (`profitAmd = useMemo(() => computeTripProfitAmd(...))`).
+Формула переехала из инлайна в trip-form.tsx в отдельную функцию — используйте
+`computeTripProfitAmd()` как точку истины, а не строку в trip-form.tsx.
+В том же `lib/finance/formulas.ts` — смежные, но НЕ идентичные хелперы (`computeExpeditionProfitAmd`,
+`computeOwnTransportProfitAmd`, используются в `lib/finance/finance-metrics-service.ts` — там расходы
+одной суммой, без раздельных client/carrier expenses). Не путать эти места при правках.
 
 Валюты: AMD/RUB/USD/EUR/GEL. Известный баг (уже исправлен, но следить): конвертация RUB считалась по курсу×1.
 Единая логика в `lib/finance/*` (`finance-contract.ts`, `finance-metrics-service.ts`, `formulas.ts`,
@@ -51,6 +59,14 @@ profit = clientRateAmd + totalClientExpensesAmd - carrierRateAmd - totalCarrierE
    игнорирует CSS `border`/`width`/`background` на `<table>`, но уважает старые HTML4-атрибуты
    (`border="1"`, `width="100%"`, `bgcolor="..."`). Файл: `lib/document-templates.ts`.
    Не использовать grid/flex/сложный CSS в шаблонах документов — только table + HTML4-атрибуты.
+3. **Postgres крэшился с exception 0xC000013A** — разобрано и закрыто 13.07.2026. Причина:
+   Postgres запускался консольно (`pg_ctl start` из `PRODUCTION_START.bat`), дочерние процессы
+   наследовали ту же консоль, что и `npm run start`; любой console control event (закрытие
+   окна/Ctrl+C/logoff) убивал случайный дочерний процесс Postgres → полный crash-restart.
+   Повторялось 78 раз с 06.05.2026. Решение: Postgres зарегистрирован как служба Windows
+   `LevAV_Postgres` (Automatic, Session 0, без консоли). `SAFE_SHUTDOWN.bat` больше не
+   останавливает Postgres — служба работает постоянно, батник останавливает только Next.js.
+   Подробности и команды отката: `docs/postgres-windows-service.md`.
 
 ## Данные (Prisma)
 27 моделей в `prisma/schema.prisma`: заявки/рейсы (`Trip`, `VehicleTrip`, `Expense`, `FleetExpense`),
