@@ -60,6 +60,8 @@ export async function POST(req: NextRequest) {
     tripNumber: customTripNumber,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
+    perDiem2, perDiem2Currency, perDiem2Rate,
+    perDiem3, perDiem3Currency, perDiem3Rate,
     otherExpenses, otherCurrency, otherRate,
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
@@ -77,6 +79,8 @@ export async function POST(req: NextRequest) {
   };
   const sCur = salaryCurrency || 'AMD'; const sRate = parseFloat(salaryRate) || 1;
   const pCur = perDiemCurrency || 'AMD'; const pRate = parseFloat(perDiemRate) || 1;
+  const p2Cur = perDiem2Currency || 'AMD'; const p2Rate = parseFloat(perDiem2Rate) || 1;
+  const p3Cur = perDiem3Currency || 'AMD'; const p3Rate = parseFloat(perDiem3Rate) || 1;
   const oCur = otherCurrency || 'AMD'; const oRate = parseFloat(otherRate) || 1;
   const fCur = fuelCurrency || 'AMD'; const fRate = parseFloat(fuelRate) || 1;
 
@@ -97,6 +101,10 @@ export async function POST(req: NextRequest) {
       salaryAmd: toAmd(salary, sCur, sRate),
       perDiem: perDiem ? parseFloat(perDiem) : null, perDiemCurrency: pCur, perDiemRate: pRate,
       perDiemAmd: toAmd(perDiem, pCur, pRate),
+      perDiem2: perDiem2 ? parseFloat(perDiem2) : null, perDiem2Currency: p2Cur, perDiem2Rate: p2Rate,
+      perDiem2Amd: toAmd(perDiem2, p2Cur, p2Rate),
+      perDiem3: perDiem3 ? parseFloat(perDiem3) : null, perDiem3Currency: p3Cur, perDiem3Rate: p3Rate,
+      perDiem3Amd: toAmd(perDiem3, p3Cur, p3Rate),
       otherExpenses: otherExpenses ? parseFloat(otherExpenses) : null, otherCurrency: oCur, otherRate: oRate,
       otherExpensesAmd: toAmd(otherExpenses, oCur, oRate),
       fuelLiters: fuelLiters ? parseFloat(fuelLiters) : null,
@@ -121,6 +129,8 @@ export async function PUT(req: NextRequest) {
     tripNumber,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
+    perDiem2, perDiem2Currency, perDiem2Rate,
+    perDiem3, perDiem3Currency, perDiem3Rate,
     otherExpenses, otherCurrency, otherRate,
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
@@ -156,13 +166,31 @@ export async function PUT(req: NextRequest) {
     data.salaryAmd = toAmd(salary, c, r);
   }
 
-  // PerDiem
+  // PerDiem (слот №1)
   if (perDiem !== undefined) data.perDiem = perDiem ? parseFloat(perDiem) : null;
   if (perDiemCurrency !== undefined) data.perDiemCurrency = perDiemCurrency;
   if (perDiemRate !== undefined) data.perDiemRate = parseFloat(perDiemRate) || 1;
   if (perDiem !== undefined || perDiemCurrency !== undefined || perDiemRate !== undefined) {
     const c = perDiemCurrency ?? 'AMD'; const r = parseFloat(perDiemRate) || 1;
     data.perDiemAmd = toAmd(perDiem, c, r);
+  }
+
+  // PerDiem №2
+  if (perDiem2 !== undefined) data.perDiem2 = perDiem2 ? parseFloat(perDiem2) : null;
+  if (perDiem2Currency !== undefined) data.perDiem2Currency = perDiem2Currency;
+  if (perDiem2Rate !== undefined) data.perDiem2Rate = parseFloat(perDiem2Rate) || 1;
+  if (perDiem2 !== undefined || perDiem2Currency !== undefined || perDiem2Rate !== undefined) {
+    const c = perDiem2Currency ?? 'AMD'; const r = parseFloat(perDiem2Rate) || 1;
+    data.perDiem2Amd = toAmd(perDiem2, c, r);
+  }
+
+  // PerDiem №3
+  if (perDiem3 !== undefined) data.perDiem3 = perDiem3 ? parseFloat(perDiem3) : null;
+  if (perDiem3Currency !== undefined) data.perDiem3Currency = perDiem3Currency;
+  if (perDiem3Rate !== undefined) data.perDiem3Rate = parseFloat(perDiem3Rate) || 1;
+  if (perDiem3 !== undefined || perDiem3Currency !== undefined || perDiem3Rate !== undefined) {
+    const c = perDiem3Currency ?? 'AMD'; const r = parseFloat(perDiem3Rate) || 1;
+    data.perDiem3Amd = toAmd(perDiem3, c, r);
   }
 
   // Other

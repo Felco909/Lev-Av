@@ -348,10 +348,14 @@ export async function GET(req: Request) {
     }
     const vehicleTripExpenses = await prisma.vehicleTrip.findMany({
       where: vtWhere,
-      select: { salaryAmd: true, perDiemAmd: true, otherExpensesAmd: true, fuelCostAmd: true },
+      select: { salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, otherExpensesAmd: true, fuelCostAmd: true },
     });
     const ownFleetSalary = vehicleTripExpenses.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
-    const ownFleetPerDiem = vehicleTripExpenses.reduce((s, v) => s + (Number(v.perDiemAmd) || 0), 0);
+    // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
+    const ownFleetPerDiem = vehicleTripExpenses.reduce(
+      (s, v) => s + (Number(v.perDiemAmd) || 0) + (Number(v.perDiem2Amd) || 0) + (Number(v.perDiem3Amd) || 0),
+      0
+    );
     const ownFleetOther = vehicleTripExpenses.reduce((s, v) => s + (Number(v.otherExpensesAmd) || 0), 0);
     const ownFleetFuel = vehicleTripExpenses.reduce((s, v) => s + (Number(v.fuelCostAmd) || 0), 0);
     const ownFleetExpenses = ownFleetSalary + ownFleetPerDiem + ownFleetOther + ownFleetFuel;
@@ -372,6 +376,44 @@ export async function GET(req: Request) {
       orderBy: { name: 'asc' },
     });
 
+    // \u2500\u2500 10. COMMAND CENTER: ATTENTION (\u043d\u0435\u0442 \u0441\u0447\u0451\u0442\u0430/\u0430\u043a\u0442\u0430 / \u043d\u0435\u0442 \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0439) \u2500\u2500
+    // \u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b \u0438\u043c\u0435\u044e\u0442 \u0441\u043c\u044b\u0441\u043b \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u043e\u0441\u043b\u0435 \u0432\u044b\u0433\u0440\u0443\u0437\u043a\u0438 \u2014 \u043d\u0435 \u0444\u043b\u0430\u0433\u0430\u0435\u043c 'new'/'in_progress'
+    // (\u0435\u0449\u0451 \u0440\u0430\u043d\u043e) \u0438 'archived' (\u0443\u0436\u0435 \u0437\u0430\u043a\u0440\u044b\u0442\u043e, \u043d\u0435 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u043e \u0434\u043b\u044f "\u041b\u0438\u0441\u0442\u0430 \u0434\u043d\u044f").
+    const DOCS_DUE_STATUSES = ['unloaded', 'awaiting_payment', 'sverka', 'completed'];
+    const docsDueTrips = await prisma.trip.findMany({
+      where: { status: { in: DOCS_DUE_STATUSES } },
+      select: {
+        id: true,
+        tripNumber: true,
+        status: true,
+        invoiceDocNumber: true,
+        actDocNumber: true,
+        client: { select: { name: true } },
+        _count: { select: { attachments: true } },
+      },
+      orderBy: { tripDate: 'desc' },
+    });
+
+    // \u0421\u0447\u0451\u0442/\u0430\u043a\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c \u043f\u043e \u043f\u043e\u043b\u044e \u0432 \u0411\u0414 \u0422\u041e\u041b\u042c\u041a\u041e \u0434\u043b\u044f \u0441\u0442\u0430\u0442\u0443\u0441\u0430 'unloaded' (\u0432\u044b\u0433\u0440\u0443\u0436\u0435\u043d\u043e,
+    // \u043d\u043e \u0435\u0449\u0451 \u043d\u0435 \u043f\u0435\u0440\u0435\u0432\u0435\u0434\u0435\u043d\u043e \u043d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443). \u041a\u0430\u043a \u0442\u043e\u043b\u044c\u043a\u043e \u0437\u0430\u044f\u0432\u043a\u0430 \u0434\u043e\u0448\u043b\u0430 \u0434\u043e 'awaiting_payment'
+    // ("\u041d\u0430 \u043e\u043f\u043b\u0430\u0442\u0443") \u0438 \u0434\u0430\u043b\u044c\u0448\u0435 \u2014 \u043f\u043e \u0440\u0435\u0433\u043b\u0430\u043c\u0435\u043d\u0442\u0443 \u043a\u043e\u043c\u043f\u0430\u043d\u0438\u0438 \u0441\u0447\u0451\u0442 \u0438 \u0430\u043a\u0442 \u0443\u0436\u0435 \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u043e
+    // \u0432\u044b\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u044b, \u0441\u0430\u043c \u043f\u0435\u0440\u0435\u0445\u043e\u0434 \u0441\u0442\u0430\u0442\u0443\u0441\u0430 \u044d\u0442\u043e \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u0435\u0442; \u043f\u043e\u043b\u0435 invoiceDocNumber/
+    // actDocNumber \u0438\u0441\u0442\u043e\u0440\u0438\u0447\u0435\u0441\u043a\u0438 \u043d\u0435 \u0432\u0441\u0435\u0433\u0434\u0430 \u0437\u0430\u043f\u043e\u043b\u043d\u044f\u043b\u043e\u0441\u044c (\u0441\u043c. \u0444\u0438\u043a\u0441 generate-docs),
+    // \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0434\u043e\u0432\u0435\u0440\u044f\u0442\u044c \u0435\u0433\u043e \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0438\u044e \u043d\u0430 \u044d\u0442\u0438\u0445 \u0441\u0442\u0430\u0434\u0438\u044f\u0445 \u043d\u0435\u043b\u044c\u0437\u044f \u2014 \u0434\u0430\u0451\u0442 \u043b\u043e\u0436\u043d\u044b\u0435 \u0441\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u043d\u0438\u044f.
+    const noInvoiceActTrips = docsDueTrips
+      .filter((t) => t.status === 'unloaded' && (!t.invoiceDocNumber || !t.actDocNumber))
+      .slice(0, 10)
+      .map((t) => ({ id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '\u2014' }));
+
+    const noAttachmentTrips = docsDueTrips
+      .filter((t) => t._count.attachments === 0)
+      .slice(0, 10)
+      .map((t) => ({ id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '\u2014' }));
+
+    const commandCenter = {
+      attention: { noInvoiceActTrips, noAttachmentTrips },
+    };
+
     return NextResponse.json({
       kpi: { totalClientDebt, totalCarrierDebt, totalProfit, totalCashGap },
       prevKpi,
@@ -385,6 +427,7 @@ export async function GET(req: Request) {
       expiringDocs: expiringDocsEnriched,
       clients,
       ownFleet,
+      commandCenter,
     });
   } catch (e: any) {
     console.error('Dashboard API error:', e);

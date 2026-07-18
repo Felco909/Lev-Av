@@ -38,7 +38,8 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
 
   // Direct expense fields (on VehicleTrip itself)
   const directSalaryAmd = Number(vt.salaryAmd) || 0;
-  const directPerDiemAmd = Number(vt.perDiemAmd) || 0;
+  // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
+  const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0);
   const directOtherAmd = Number(vt.otherExpensesAmd) || 0;
   const directFuelAmd = Number(vt.fuelCostAmd) || 0;
   const directTotalAmd = directSalaryAmd + directPerDiemAmd + directOtherAmd + directFuelAmd;

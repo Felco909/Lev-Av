@@ -533,6 +533,19 @@ model VehicleTrip {
   perDiemRate         Decimal   @default(1) @map("per_diem_rate") @db.Decimal(12, 4)
   perDiemAmd          Decimal?  @map("per_diem_amd") @db.Decimal(14, 2)
 
+  // Суточные №2 и №3 — маршрут может проходить через несколько стран, суточные
+  // по каждой считаются отдельно (своя сумма/валюта/курс). Слот №1 — поля perDiem*
+  // выше (не переименованы, чтобы не терять исторические данные без миграции).
+  perDiem2            Decimal?  @map("per_diem_2") @db.Decimal(12, 2)
+  perDiem2Currency    String    @default("AMD") @map("per_diem_2_currency")
+  perDiem2Rate        Decimal   @default(1) @map("per_diem_2_rate") @db.Decimal(12, 4)
+  perDiem2Amd         Decimal?  @map("per_diem_2_amd") @db.Decimal(14, 2)
+
+  perDiem3            Decimal?  @map("per_diem_3") @db.Decimal(12, 2)
+  perDiem3Currency    String    @default("AMD") @map("per_diem_3_currency")
+  perDiem3Rate        Decimal   @default(1) @map("per_diem_3_rate") @db.Decimal(12, 4)
+  perDiem3Amd         Decimal?  @map("per_diem_3_amd") @db.Decimal(14, 2)
+
   otherExpenses       Decimal?  @map("other_expenses") @db.Decimal(12, 2)
   otherCurrency       String    @default("AMD") @map("other_currency")
   otherRate           Decimal   @default(1) @map("other_rate") @db.Decimal(12, 4)

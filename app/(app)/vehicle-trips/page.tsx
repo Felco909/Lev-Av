@@ -14,10 +14,14 @@ interface VT {
   returnDate: string | null; endMileage: number | null; endFuel: number | null;
   status: string; notes: string | null;
   salary: number | null; perDiem: number | null; otherExpenses: number | null;
+  perDiem2: number | null; perDiem3: number | null;
   salaryCurrency: string; salaryRate: number;
   perDiemCurrency: string; perDiemRate: number;
+  perDiem2Currency: string; perDiem2Rate: number;
+  perDiem3Currency: string; perDiem3Rate: number;
   otherCurrency: string; otherRate: number;
   salaryAmd: number | null; perDiemAmd: number | null; otherExpensesAmd: number | null;
+  perDiem2Amd: number | null; perDiem3Amd: number | null;
   fuelLiters: number | null; fuelCost: number | null;
   fuelCurrency: string; fuelRate: number; fuelCostAmd: number | null;
   _count: { trips: number; fleetExpenses: number };
@@ -34,8 +38,11 @@ interface TripForm {
   startMileage: string; startFuel: string; returnDate: string;
   endMileage: string; endFuel: string; notes: string; status: string;
   salary: string; perDiem: string; otherExpenses: string;
+  perDiem2: string; perDiem3: string;
   salaryCurrency: string; salaryRate: string;
   perDiemCurrency: string; perDiemRate: string;
+  perDiem2Currency: string; perDiem2Rate: string;
+  perDiem3Currency: string; perDiem3Rate: string;
   otherCurrency: string; otherRate: string;
   fuelLiters: string; fuelCost: string;
   fuelCurrency: string; fuelRate: string;
@@ -52,8 +59,11 @@ const emptyTripForm = (): TripForm => ({
   tripNumber: '', vehicleId: '', driverId: '', departureDate: new Date().toISOString().slice(0, 10),
   startMileage: '', startFuel: '', returnDate: '', endMileage: '', endFuel: '', notes: '', status: 'active',
   salary: '', perDiem: '', otherExpenses: '',
+  perDiem2: '', perDiem3: '',
   salaryCurrency: 'AMD', salaryRate: '1',
   perDiemCurrency: 'AMD', perDiemRate: '1',
+  perDiem2Currency: 'AMD', perDiem2Rate: '1',
+  perDiem3Currency: 'AMD', perDiem3Rate: '1',
   otherCurrency: 'AMD', otherRate: '1',
   fuelLiters: '', fuelCost: '',
   fuelCurrency: 'AMD', fuelRate: '1',
@@ -127,11 +137,17 @@ export default function VehicleTripsPage() {
       notes: r.notes || '', status: r.status || 'active',
       salary: r.salary != null ? String(Number(r.salary)) : '',
       perDiem: r.perDiem != null ? String(Number(r.perDiem)) : '',
+      perDiem2: r.perDiem2 != null ? String(Number(r.perDiem2)) : '',
+      perDiem3: r.perDiem3 != null ? String(Number(r.perDiem3)) : '',
       otherExpenses: r.otherExpenses != null ? String(Number(r.otherExpenses)) : '',
       salaryCurrency: r.salaryCurrency || 'AMD',
       salaryRate: r.salaryRate != null ? String(Number(r.salaryRate)) : '1',
       perDiemCurrency: r.perDiemCurrency || 'AMD',
       perDiemRate: r.perDiemRate != null ? String(Number(r.perDiemRate)) : '1',
+      perDiem2Currency: r.perDiem2Currency || 'AMD',
+      perDiem2Rate: r.perDiem2Rate != null ? String(Number(r.perDiem2Rate)) : '1',
+      perDiem3Currency: r.perDiem3Currency || 'AMD',
+      perDiem3Rate: r.perDiem3Rate != null ? String(Number(r.perDiem3Rate)) : '1',
       otherCurrency: r.otherCurrency || 'AMD',
       otherRate: r.otherRate != null ? String(Number(r.otherRate)) : '1',
       fuelLiters: r.fuelLiters != null ? String(Number(r.fuelLiters)) : '',
@@ -231,10 +247,15 @@ export default function VehicleTripsPage() {
   const tripExpAmd = () => {
     const sRate = tripForm.salaryCurrency === 'AMD' ? 1 : (parseFloat(tripForm.salaryRate) || 1);
     const pRate = tripForm.perDiemCurrency === 'AMD' ? 1 : (parseFloat(tripForm.perDiemRate) || 1);
+    const p2Rate = tripForm.perDiem2Currency === 'AMD' ? 1 : (parseFloat(tripForm.perDiem2Rate) || 1);
+    const p3Rate = tripForm.perDiem3Currency === 'AMD' ? 1 : (parseFloat(tripForm.perDiem3Rate) || 1);
     const oRate = tripForm.otherCurrency === 'AMD' ? 1 : (parseFloat(tripForm.otherRate) || 1);
     const fRate = tripForm.fuelCurrency === 'AMD' ? 1 : (parseFloat(tripForm.fuelRate) || 1);
     const s = (parseFloat(tripForm.salary) || 0) * sRate;
-    const p = (parseFloat(tripForm.perDiem) || 0) * pRate;
+    const p1 = (parseFloat(tripForm.perDiem) || 0) * pRate;
+    const p2 = (parseFloat(tripForm.perDiem2) || 0) * p2Rate;
+    const p3 = (parseFloat(tripForm.perDiem3) || 0) * p3Rate;
+    const p = p1 + p2 + p3;
     const o = (parseFloat(tripForm.otherExpenses) || 0) * oRate;
     const f = (parseFloat(tripForm.fuelCost) || 0) * fRate;
     return { s: Math.round(s), p: Math.round(p), o: Math.round(o), f: Math.round(f), total: Math.round(s + p + o + f) };
@@ -396,9 +417,13 @@ export default function VehicleTripsPage() {
                             <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-2">
                               <p className="text-[10px] text-purple-600">{'Суточные'}</p>
                               <p className="font-medium font-mono">{detail.directPerDiemAmd ? fmtAmd(detail.directPerDiemAmd) : '—'}</p>
-                              {detail.perDiem && detail.perDiemCurrency !== 'AMD' && (
-                                <p className="text-[10px] text-muted-foreground">{Number(detail.perDiem).toLocaleString('ru-RU')} {CUR_SYMBOL[detail.perDiemCurrency] || detail.perDiemCurrency}</p>
-                              )}
+                              {[
+                                { amount: detail.perDiem, currency: detail.perDiemCurrency },
+                                { amount: detail.perDiem2, currency: detail.perDiem2Currency },
+                                { amount: detail.perDiem3, currency: detail.perDiem3Currency },
+                              ].filter(slot => slot.amount && slot.currency !== 'AMD').map((slot, i) => (
+                                <p key={i} className="text-[10px] text-muted-foreground">{Number(slot.amount).toLocaleString('ru-RU')} {CUR_SYMBOL[slot.currency] || slot.currency}</p>
+                              ))}
                             </div>
                             <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2">
                               <p className="text-[10px] text-amber-600">{'Топливо'}</p>
@@ -608,9 +633,11 @@ export default function VehicleTripsPage() {
                 </div>
               </div>
             </div>
-            {/* Per Diem row */}
+            {/* Per Diem rows — маршрут может проходить через несколько стран, суточные по
+                каждой считаются отдельно, поэтому блок повторён 3 раза (не страна-специфичные
+                поля — просто три одинаковых слота, логист заполняет сколько нужно). */}
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-purple-600">{'Суточные'}</label>
+              <label className="text-[11px] font-medium text-purple-600">{'Суточные №1'}</label>
               <div className="grid grid-cols-4 gap-2">
                 <input type="number" step="0.01" min="0" value={tripForm.perDiem} onChange={e => setTripForm({...tripForm, perDiem: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
                 <select value={tripForm.perDiemCurrency} onChange={e => setTripForm({...tripForm, perDiemCurrency: e.target.value, perDiemRate: e.target.value === 'AMD' ? '1' : tripForm.perDiemRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
@@ -619,6 +646,32 @@ export default function VehicleTripsPage() {
                 <input type="number" step="0.0001" min="0" value={tripForm.perDiemRate} onChange={e => setTripForm({...tripForm, perDiemRate: e.target.value})} disabled={tripForm.perDiemCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
                 <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
                   {tripForm.perDiemCurrency !== 'AMD' && (parseFloat(tripForm.perDiem) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem) || 0) * (parseFloat(tripForm.perDiemRate) || 1))) : ''}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-purple-600">{'Суточные №2'}</label>
+              <div className="grid grid-cols-4 gap-2">
+                <input type="number" step="0.01" min="0" value={tripForm.perDiem2} onChange={e => setTripForm({...tripForm, perDiem2: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                <select value={tripForm.perDiem2Currency} onChange={e => setTripForm({...tripForm, perDiem2Currency: e.target.value, perDiem2Rate: e.target.value === 'AMD' ? '1' : tripForm.perDiem2Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <input type="number" step="0.0001" min="0" value={tripForm.perDiem2Rate} onChange={e => setTripForm({...tripForm, perDiem2Rate: e.target.value})} disabled={tripForm.perDiem2Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                  {tripForm.perDiem2Currency !== 'AMD' && (parseFloat(tripForm.perDiem2) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem2) || 0) * (parseFloat(tripForm.perDiem2Rate) || 1))) : ''}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-purple-600">{'Суточные №3'}</label>
+              <div className="grid grid-cols-4 gap-2">
+                <input type="number" step="0.01" min="0" value={tripForm.perDiem3} onChange={e => setTripForm({...tripForm, perDiem3: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                <select value={tripForm.perDiem3Currency} onChange={e => setTripForm({...tripForm, perDiem3Currency: e.target.value, perDiem3Rate: e.target.value === 'AMD' ? '1' : tripForm.perDiem3Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <input type="number" step="0.0001" min="0" value={tripForm.perDiem3Rate} onChange={e => setTripForm({...tripForm, perDiem3Rate: e.target.value})} disabled={tripForm.perDiem3Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                  {tripForm.perDiem3Currency !== 'AMD' && (parseFloat(tripForm.perDiem3) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem3) || 0) * (parseFloat(tripForm.perDiem3Rate) || 1))) : ''}
                 </div>
               </div>
             </div>

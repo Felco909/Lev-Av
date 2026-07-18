@@ -77,6 +77,24 @@ export async function POST(request: Request, { params: paramsPromise }: { params
       } catch {}
     }
 
+    // Сохраняем фактически присвоенные номера счёта/акта в заявку — иначе
+    // "Лист дня" (commandCenter.attention.noInvoiceActTrips) не может узнать,
+    // что документы уже выданы, и ложно считает их отсутствующими.
+    try {
+      const now = new Date();
+      await prisma.trip.update({
+        where: { id: tripId },
+        data: {
+          invoiceDocNumber: String(invoiceOv.docNumber ?? invoiceNumber),
+          actDocNumber: String(actOv.docNumber ?? actNumber),
+          invoiceDocDate: now,
+          actDocDate: now,
+        },
+      });
+    } catch (e) {
+      console.error('[trips/generate-docs] failed to persist doc numbers', e);
+    }
+
     return NextResponse.json({
       success: true,
       invoice: {
