@@ -562,6 +562,13 @@ model VehicleTrip {
   fuelRate            Decimal   @default(1) @map("fuel_rate") @db.Decimal(12, 4)
   fuelCostAmd         Decimal?  @map("fuel_cost_amd") @db.Decimal(14, 2)
 
+  // Автоматический расчёт итогов рейса из Wialon (пробег/расход топлива за выезд-возврат) —
+  // не путать с fuelLiters/fuelCost выше (это купленное/заправленное топливо как расход).
+  calculatedKm            Float?    @map("calculated_km")
+  calculatedFuelConsumedL Float?    @map("calculated_fuel_consumed_l")
+  fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "odometer_diff"
+  fuelCalcAt              DateTime? @map("fuel_calc_at")
+
   createdAt      DateTime  @default(now()) @map("created_at")
 
   trips          Trip[]

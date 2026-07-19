@@ -5,7 +5,7 @@ import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive } from 'lucide-react';
 import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
 
-interface Vehicle { id: string; plateNumber: string; brand: string; model: string }
+interface Vehicle { id: string; plateNumber: string; brand: string; model: string; wialonUnitId?: string | null }
 interface Driver { id: string; fullName: string }
 interface VT {
   id: string; tripNumber: string; vehicleId: string; driverId: string | null;
@@ -24,6 +24,8 @@ interface VT {
   perDiem2Amd: number | null; perDiem3Amd: number | null;
   fuelLiters: number | null; fuelCost: number | null;
   fuelCurrency: string; fuelRate: number; fuelCostAmd: number | null;
+  calculatedKm: number | null; calculatedFuelConsumedL: number | null;
+  fuelCalcSource: string | null; fuelCalcAt: string | null;
   _count: { trips: number; fleetExpenses: number };
 }
 
@@ -54,6 +56,12 @@ interface ExpForm {
 }
 
 const CURRENCIES = ['AMD', 'RUB', 'USD', 'GEL', 'EUR'];
+
+function wialonHintText(reason?: string): string {
+  if (reason === 'too_old') return 'Дата слишком старая для автозаполнения (>30 дней) — введите вручную';
+  if (reason === 'wialon_error') return 'Wialon сейчас недоступен — введите вручную';
+  return 'Нет данных Wialon на эту дату — введите вручную';
+}
 
 const emptyTripForm = (): TripForm => ({
   tripNumber: '', vehicleId: '', driverId: '', departureDate: new Date().toISOString().slice(0, 10),
@@ -103,10 +111,89 @@ export default function VehicleTripsPage() {
   const [expSaving, setExpSaving] = useState(false);
   const [expDeleting, setExpDeleting] = useState<string | null>(null);
 
+  // Wialon auto-fill (Выезд/Возврат) — только для машин со связанным wialonUnitId
+  // и только для сегодня/недавних дат (см. CLAUDE.md/план: исторический разбор не делаем).
+  const [departureSnapshotLoading, setDepartureSnapshotLoading] = useState(false);
+  const [returnSnapshotLoading, setReturnSnapshotLoading] = useState(false);
+  const [departureHint, setDepartureHint] = useState<string | null>(null);
+  const [returnHint, setReturnHint] = useState<string | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
+
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
     fetch('/api/drivers').then(r => r.json()).then(d => setDrivers(Array.isArray(d) ? d : d.drivers || []));
   }, []);
+
+  const fetchWialonSnapshot = useCallback(async (wialonUnitId: string, dateStr: string) => {
+    const datetime = new Date(`${dateStr}T12:00:00`).toISOString();
+    const res = await fetch(`/api/wialon/vehicle-snapshot?wialonUnitId=${encodeURIComponent(wialonUnitId)}&datetime=${encodeURIComponent(datetime)}`);
+    return res.json();
+  }, []);
+
+  useEffect(() => {
+    const vehicle = vehicles.find(v => v.id === tripForm.vehicleId);
+    if (!vehicle?.wialonUnitId || !tripForm.departureDate) { setDepartureHint(null); return; }
+    let cancelled = false;
+    setDepartureSnapshotLoading(true);
+    setDepartureHint(null);
+    fetchWialonSnapshot(vehicle.wialonUnitId, tripForm.departureDate).then(data => {
+      if (cancelled) return;
+      if (data.available) {
+        setTripForm(prev => ({
+          ...prev,
+          startMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
+          startFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
+        }));
+        setDepartureHint(
+          data.isApproximate
+            ? 'Показано текущее значение из Wialon (не точно на выбранную дату) — проверьте вручную'
+            : null
+        );
+      } else {
+        setDepartureHint(wialonHintText(data.reason));
+      }
+    }).catch(() => { if (!cancelled) setDepartureHint(wialonHintText('wialon_error')); })
+      .finally(() => { if (!cancelled) setDepartureSnapshotLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripForm.vehicleId, tripForm.departureDate]);
+
+  useEffect(() => {
+    const vehicle = vehicles.find(v => v.id === tripForm.vehicleId);
+    if (!vehicle?.wialonUnitId || !tripForm.returnDate) { setReturnHint(null); return; }
+    let cancelled = false;
+    setReturnSnapshotLoading(true);
+    setReturnHint(null);
+    fetchWialonSnapshot(vehicle.wialonUnitId, tripForm.returnDate).then(data => {
+      if (cancelled) return;
+      if (data.available) {
+        setTripForm(prev => ({
+          ...prev,
+          endMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.endMileage,
+          endFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.endFuel,
+        }));
+        setReturnHint(
+          data.isApproximate
+            ? 'Показано текущее значение из Wialon (не точно на выбранную дату) — проверьте вручную'
+            : null
+        );
+      } else {
+        setReturnHint(wialonHintText(data.reason));
+      }
+    }).catch(() => { if (!cancelled) setReturnHint(wialonHintText('wialon_error')); })
+      .finally(() => { if (!cancelled) setReturnSnapshotLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripForm.vehicleId, tripForm.returnDate]);
+
+  const recalculateFuel = async () => {
+    if (!detail?.id) return;
+    setRecalculating(true);
+    try {
+      await fetch(`/api/vehicle-trips/${detail.id}/recalculate-fuel`, { method: 'POST' });
+      await loadDetail(detail.id);
+    } catch {} finally { setRecalculating(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -403,6 +490,33 @@ export default function VehicleTripsPage() {
                           )}
                         </div>
 
+                        {/* Итоги рейса — автоматический расчёт из Wialon, только для закрытых рейсов */}
+                        {detail.returnDate && (
+                          <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold text-emerald-700 dark:text-emerald-400">{'Итоги рейса'}</p>
+                              <button onClick={recalculateFuel} disabled={recalculating} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                {recalculating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
+                                {'Пересчитать по Wialon'}
+                              </button>
+                            </div>
+                            <p>
+                              {detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : 'пробег не рассчитан'}
+                              {', '}
+                              {detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л топлива` : 'расход не рассчитан'}
+                              {detail.fuelCalcSource === 'odometer_diff' && (
+                                <span className="text-amber-600"> {'(расчёт по разнице остатков, точность ниже)'}</span>
+                              )}
+                            </p>
+                            {detail.fuelCalcAt && (
+                              <p className="text-[10px] text-muted-foreground">
+                                {'Рассчитано: '}{new Date(detail.fuelCalcAt).toLocaleString('ru-RU')}
+                                {' — трекер может досылать данные с задержкой (например, после зон без покрытия), пересчитайте позже при сомнениях.'}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         {/* Direct expenses block */}
                         <div>
                           <p className="text-xs font-semibold flex items-center gap-1 mb-2"><Banknote className="w-3.5 h-3.5" /> {'Расходы по рейсу'}</p>
@@ -592,13 +706,14 @@ export default function VehicleTripsPage() {
                 <input type="date" value={tripForm.departureDate} onChange={e => setTripForm({...tripForm, departureDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{'Пробег (км)'}</label>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
                 <input type="number" min="0" value={tripForm.startMileage} onChange={e => setTripForm({...tripForm, startMileage: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'нач.'} />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{'Топливо (л)'}</label>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
                 <input type="number" step="0.01" min="0" value={tripForm.startFuel} onChange={e => setTripForm({...tripForm, startFuel: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'остаток'} />
               </div>
+              {departureHint && <p className="col-span-3 text-[11px] text-amber-600">{departureHint}</p>}
             </div>
 
             <p className="text-xs font-medium text-muted-foreground mt-2 border-t pt-2">{'Возврат'}</p>
@@ -608,13 +723,14 @@ export default function VehicleTripsPage() {
                 <input type="date" value={tripForm.returnDate} onChange={e => setTripForm({...tripForm, returnDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{'Пробег (км)'}</label>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
                 <input type="number" min="0" value={tripForm.endMileage} onChange={e => setTripForm({...tripForm, endMileage: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'кон.'} />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{'Топливо (л)'}</label>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
                 <input type="number" step="0.01" min="0" value={tripForm.endFuel} onChange={e => setTripForm({...tripForm, endFuel: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'остаток'} />
               </div>
+              {returnHint && <p className="col-span-3 text-[11px] text-amber-600">{returnHint}</p>}
             </div>
 
             {/* Expenses section in trip form — per-expense currency/rate */}

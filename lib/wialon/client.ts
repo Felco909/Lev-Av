@@ -4,7 +4,6 @@
  * python-wialon/php-wialon: POST, тело application/x-www-form-urlencoded
  * с полями svc / params (JSON-строка) / sid. Ответ — JSON, ошибки — {"error": <code>}.
  *
- * Это ТОЛЬКО тестовое подключение (шаг 1) — Prisma/TMS не затрагиваются.
  */
 
 const WIALON_ERROR_MESSAGES: Record<number, string> = {
@@ -93,6 +92,24 @@ export interface WialonLoginResult {
   sid: string;
   /** Полный ответ token_login (host, au — имя пользователя, tm, user и т.д.) */
   raw: Record<string, unknown>;
+}
+
+/**
+ * Кэш сессии в памяти процесса — Wialon-сессии живут ~5 минут простоя, обновляем
+ * заведомо раньше (4 минуты), чтобы не ловить "invalid session" в середине запроса.
+ * Только для новых high-level методов ниже (getCurrentSnapshot и т.п.) — существующие
+ * методы (getUnits, getUnitsWithMileage...) как принимали sid явным параметром, так и принимают.
+ */
+let cachedSession: { sid: string; obtainedAt: number } | null = null;
+const SESSION_TTL_MS = 4 * 60 * 1000;
+
+async function getCachedSid(): Promise<string> {
+  if (cachedSession && Date.now() - cachedSession.obtainedAt < SESSION_TTL_MS) {
+    return cachedSession.sid;
+  }
+  const { sid } = await login();
+  cachedSession = { sid, obtainedAt: Date.now() };
+  return sid;
 }
 
 /**
@@ -255,4 +272,134 @@ export async function getUnitReport(
     },
     sid
   );
+}
+
+// ───────────────────────── Текущий снимок пробега/топлива ─────────────────────────
+// Сырые сообщения Wialon содержат протокол-специфичные параметры (io_270 и т.п.), не
+// "odometer"/"fuel" — расшифровываются через настроенные в Wialon датчики с кусочно-линейной
+// калибровочной таблицей. Живой пример для этого парка: датчик "1-ին բաք" (1й бак),
+// параметр io_270, tbl из точек {x, a, b}, значение = a*raw + b для брекета, куда попал raw.
+
+interface WialonSensorTableEntry {
+  x: number;
+  a: number;
+  b: number;
+}
+
+export interface WialonFuelSensor {
+  id: number;
+  name: string;
+  /** Имя параметра в "p" объекте сообщения (например "io_270") */
+  param: string;
+  table: WialonSensorTableEntry[];
+}
+
+const FUEL_SENSOR_NAME_RE = /бак|tank|fuel|թ?բաք/i;
+
+/** Датчики топлива машины (по эвристике имени) — с калибровочной таблицей. */
+export async function getFuelSensors(sid: string, unitId: number): Promise<WialonFuelSensor[]> {
+  const data = await callWialon<{
+    items?: Array<{ id: number; sens?: Record<string, { id: number; n: string; p: string; tbl?: WialonSensorTableEntry[] }> }>;
+  }>(
+    'core/search_items',
+    {
+      spec: { itemsType: 'avl_unit', propName: 'sys_id', propValueMask: String(unitId), sortType: 'sys_id' },
+      force: 1,
+      flags: 1 | 4096, // 1 = общие свойства, 4096 (0x1000) = датчики
+      from: 0,
+      to: 0,
+    },
+    sid
+  );
+
+  const item = (data.items ?? [])[0];
+  const sensors = item?.sens ? Object.values(item.sens) : [];
+  return sensors
+    .filter((s) => FUEL_SENSOR_NAME_RE.test(s.n) && Array.isArray(s.tbl) && s.tbl.length > 0)
+    .map((s) => ({ id: s.id, name: s.n, param: s.p, table: s.tbl! }));
+}
+
+/** Применяет калибровочную таблицу датчика к сырому значению параметра. */
+export function resolveSensorValue(sensor: WialonFuelSensor, rawValue: number): number {
+  const sorted = [...sensor.table].sort((a, b) => a.x - b.x);
+  let bracket = sorted[0];
+  for (const entry of sorted) {
+    if (entry.x <= rawValue) bracket = entry;
+    else break;
+  }
+  return bracket.a * rawValue + bracket.b;
+}
+
+interface WialonMessage {
+  t: number;
+  p?: Record<string, number | string>;
+}
+
+/** Сырые сообщения машины за последние N часов (для "текущего" снимка, не историю). */
+async function loadRecentMessages(sid: string, unitId: number, hoursBack: number): Promise<WialonMessage[]> {
+  const now = Math.floor(Date.now() / 1000);
+  const timeFrom = now - hoursBack * 3600;
+  const data = await callWialon<{ messages?: WialonMessage[] }>(
+    'messages/load_interval',
+    {
+      itemId: unitId,
+      timeFrom,
+      timeTo: now,
+      flags: 0,
+      flagsMask: 0xff00, // все "данные" сообщения (не события/тревоги)
+      loadCount: 5000, // с запасом на окно в несколько часов при частоте ~1 сообщение/мин
+    },
+    sid
+  );
+  return (data.messages ?? []).slice().sort((a, b) => a.t - b.t);
+}
+
+export interface WialonVehicleSnapshot {
+  mileageKm: number | null;
+  fuelLevelL: number | null;
+  /** Время последнего сообщения, из которого взято топливо (для пробега — время запроса) */
+  measuredAt: Date | null;
+}
+
+/**
+ * "Текущий" снимок пробега + остатка топлива машины — НЕ историческая точка на прошлую
+ * дату (см. CLAUDE.md/план: решено не реализовывать произвольный исторический разбор
+ * сырых сообщений — риск разойтись с тем, что показывает сам Wialon). Пробег — через
+ * уже проверенный счётчик (core/search_items + Counters). Топливо — последнее сообщение
+ * с показанием датчика за последние часы, прогнанное через калибровочную таблицу.
+ */
+export async function getCurrentSnapshot(unitId: number): Promise<WialonVehicleSnapshot> {
+  const sid = await getCachedSid();
+
+  const mileage = await getUnitMileage(sid, unitId).catch(() => null);
+
+  let fuelLevelL: number | null = null;
+  let measuredAt: Date | null = null;
+  try {
+    const sensors = await getFuelSensors(sid, unitId);
+    if (sensors.length > 0) {
+      const messages = await loadRecentMessages(sid, unitId, 6);
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        const values: number[] = [];
+        for (const sensor of sensors) {
+          const raw = msg.p?.[sensor.param];
+          if (typeof raw === 'number') values.push(resolveSensorValue(sensor, raw));
+        }
+        if (values.length > 0) {
+          fuelLevelL = Math.round(values.reduce((s, v) => s + v, 0) * 10) / 10;
+          measuredAt = new Date(msg.t * 1000);
+          break;
+        }
+      }
+    }
+  } catch {
+    // Топливо — best effort; отсутствие датчиков/сообщений не должно ронять весь снимок.
+  }
+
+  return {
+    mileageKm: mileage?.mileageKm ?? null,
+    fuelLevelL,
+    measuredAt: measuredAt ?? (mileage ? new Date() : null),
+  };
 }

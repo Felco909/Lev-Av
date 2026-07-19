@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
+import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
+
+/**
+ * Автоматический расчёт итогов рейса при сохранении с обеими датами заполненными.
+ * Обёрнуто в try/catch намеренно — сбой Wialon не должен блокировать сохранение
+ * самого рейса (ручной ввод продолжает работать как раньше). Дальше данные можно
+ * пересчитать вручную кнопкой "Пересчитать по Wialon".
+ */
+async function maybeCalculateTotals(tripId: string, departureDate: Date | null, returnDate: Date | null) {
+  if (!departureDate || !returnDate) return;
+  try {
+    await calculateVehicleTripTotals(tripId);
+  } catch (e) {
+    console.error('[vehicle-trips] авторасчёт итогов рейса не удался:', e);
+  }
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -117,6 +133,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+
   return NextResponse.json(record, { status: 201 });
 }
 
@@ -220,6 +238,8 @@ export async function PUT(req: NextRequest) {
       driver: { select: { id: true, fullName: true } },
     },
   });
+
+  await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
 
   return NextResponse.json(record);
 }
