@@ -10,26 +10,29 @@ import type {
   DayTaskPanelData,
   DebtsResponse,
   FinanceAuditResponse,
-  TripsReportResponse,
+  TripRow,
 } from './_components/types';
 
 type DayTasksPayload = {
   dashboard: DashboardResponse | null;
   debts: DebtsResponse | null;
   audit: FinanceAuditResponse | null;
-  tripsTodayTomorrow: TripsReportResponse | null;
+  trips: TripRow[] | null;
 };
 
-function ymd(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+const STATUS_LABEL: Record<string, string> = {
+  new: 'Новая',
+  in_progress: 'В пути',
+  unloaded: 'Разгружен',
+  awaiting_payment: 'На оплату',
+};
 
 export default function DayTasksPage() {
   const [payload, setPayload] = useState<DayTasksPayload>({
     dashboard: null,
     debts: null,
     audit: null,
-    tripsTodayTomorrow: null,
+    trips: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,32 +41,26 @@ export default function DayTasksPage() {
     setLoading(true);
     setError(null);
     try {
-      const today = new Date();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
-      const dateFrom = ymd(today);
-      const dateTo = ymd(tomorrow);
-
       const [dashboardRes, debtsRes, auditRes, tripsRes] = await Promise.all([
         fetch('/api/dashboard'),
         fetch('/api/debts'),
         fetch('/api/finance/audit'),
-        fetch(`/api/reports/trips?dateFrom=${dateFrom}&dateTo=${dateTo}`),
+        fetch('/api/trips'),
       ]);
 
       if (!dashboardRes.ok) throw new Error('Не удалось загрузить дашборд');
       if (!debtsRes.ok) throw new Error('Не удалось загрузить раздел долгов');
       if (!auditRes.ok) throw new Error('Не удалось загрузить финансовый аудит');
-      if (!tripsRes.ok) throw new Error('Не удалось загрузить отчёт по заявкам');
+      if (!tripsRes.ok) throw new Error('Не удалось загрузить заявки');
 
-      const [dashboard, debts, audit, tripsTodayTomorrow] = await Promise.all([
+      const [dashboard, debts, audit, trips] = await Promise.all([
         dashboardRes.json(),
         debtsRes.json(),
         auditRes.json(),
         tripsRes.json(),
       ]);
 
-      setPayload({ dashboard, debts, audit, tripsTodayTomorrow });
+      setPayload({ dashboard, debts, audit, trips });
     } catch (e: any) {
       setError(e?.message ?? 'Ошибка загрузки данных');
     } finally {
@@ -79,15 +76,27 @@ export default function DayTasksPage() {
     const dashboard = payload.dashboard;
     const debts = payload.debts;
     const audit = payload.audit;
-    const trips = payload.tripsTodayTomorrow?.rows ?? [];
+    const trips = payload.trips ?? [];
 
-    const todayTrips: DayTaskItem[] = trips.slice(0, 8).map((t) => ({
-      id: `trip-today-${t.id}`,
-      label: `${t.tripNumber}: ${t.routeFrom} -> ${t.routeTo}`,
-      href: `/trips/${t.id}`,
-      tone: t.status === 'new' || t.status === 'in_progress' ? 'warning' : 'default',
-      meta: t.client ? `Клиент: ${t.client}, статус: ${t.status}` : `Статус: ${t.status}`,
-    }));
+    const logistTrips: DayTaskItem[] = trips
+      .filter((t) => t.status === 'new' || t.status === 'in_progress')
+      .map((t) => ({
+        id: `logist-${t.id}`,
+        label: `${t.tripNumber}: ${t.routeFrom} → ${t.routeTo}`,
+        href: `/trips/${t.id}`,
+        tone: t.status === 'new' ? ('warning' as const) : ('default' as const),
+        meta: `${t.client?.name ?? 'Клиент не указан'}, статус: ${STATUS_LABEL[t.status] ?? t.status}`,
+      }));
+
+    const accountantStatusTrips: DayTaskItem[] = trips
+      .filter((t) => t.status === 'unloaded' || t.status === 'awaiting_payment')
+      .map((t) => ({
+        id: `acc-status-${t.id}`,
+        label: `${t.tripNumber}: ${t.routeFrom} → ${t.routeTo}`,
+        href: `/trips/${t.id}`,
+        tone: 'warning' as const,
+        meta: `${t.client?.name ?? 'Клиент не указан'}, статус: ${STATUS_LABEL[t.status] ?? t.status}`,
+      }));
 
     const missingDocs: DayTaskItem[] = [
       ...(dashboard?.commandCenter?.attention?.noInvoiceActTrips ?? []).map((t) => ({
@@ -103,23 +112,6 @@ export default function DayTasksPage() {
         href: `/trips/${t.id}`,
         tone: 'warning' as const,
         meta: t.clientName || 'Клиент не указан',
-      })),
-    ].slice(0, 8);
-
-    const logisticsQueue: DayTaskItem[] = [
-      ...(dashboard?.reminders?.overduePayments ?? []).map((r) => ({
-        id: `log-overdue-${r.id}`,
-        label: `${r.tripNumber} — просрочен контроль`,
-        href: `/trips/${r.id}`,
-        tone: 'danger' as const,
-        meta: `${r.clientName ?? 'Клиент'}${typeof r.daysLeft === 'number' ? `, дней: ${r.daysLeft}` : ''}`,
-      })),
-      ...(dashboard?.reminders?.paymentDueTrips ?? []).map((r) => ({
-        id: `log-due-${r.id}`,
-        label: `${r.tripNumber} — контроль оплаты`,
-        href: `/trips/${r.id}`,
-        tone: 'warning' as const,
-        meta: `${r.clientName ?? 'Клиент'}${typeof r.daysLeft === 'number' ? `, дней: ${r.daysLeft}` : ''}`,
       })),
     ].slice(0, 8);
 
@@ -240,22 +232,12 @@ export default function DayTasksPage() {
     return [
       {
         roleTitle: 'Логист',
-        roleSubtitle: 'Оперативный список заявок и действий на сегодня',
+        roleSubtitle: 'Заявки в работе: новые и в пути',
         blocks: [
           {
-            title: 'Заявки сегодня / завтра',
-            emptyText: 'На сегодня и завтра заявок не найдено',
-            items: todayTrips,
-          },
-          {
-            title: 'Не закрыто по документам / маршруту',
-            emptyText: 'Критичных незакрытых позиций нет',
-            items: missingDocs,
-          },
-          {
-            title: 'Сделать сегодня',
-            emptyText: 'Очередь на сегодня пустая',
-            items: logisticsQueue,
+            title: 'Заявки: новые и в пути',
+            emptyText: 'Нет активных заявок',
+            items: logistTrips,
           },
         ],
       },
@@ -264,14 +246,19 @@ export default function DayTasksPage() {
         roleSubtitle: 'Оплаты, документы и сверка финансовых отклонений',
         blocks: [
           {
-            title: 'Очередь оплат (входящие / исходящие)',
-            emptyText: 'Сегодня нет срочных оплат',
-            items: [...accountantIncoming, ...accountantOutgoing].slice(0, 10),
+            title: 'Заявки: разгружены и на оплату',
+            emptyText: 'Нет заявок в этом статусе',
+            items: accountantStatusTrips,
           },
           {
             title: 'Заявки без счета / акта / документов',
             emptyText: 'Все заявки укомплектованы',
             items: missingDocs,
+          },
+          {
+            title: 'Очередь оплат (входящие / исходящие)',
+            emptyText: 'Сегодня нет срочных оплат',
+            items: [...accountantIncoming, ...accountantOutgoing].slice(0, 10),
           },
           {
             title: 'Финансовые расхождения',

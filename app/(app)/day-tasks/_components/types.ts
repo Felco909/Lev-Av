@@ -109,13 +109,11 @@ export interface FinanceAuditResponse {
   };
 }
 
-export interface TripsReportResponse {
-  rows?: Array<{
-    id: string;
-    tripNumber: string;
-    routeFrom: string;
-    routeTo: string;
-    status: string;
-    client?: string;
-  }>;
+export interface TripRow {
+  id: string;
+  tripNumber: string;
+  routeFrom: string;
+  routeTo: string;
+  status: string;
+  client?: { name?: string } | null;
 }
