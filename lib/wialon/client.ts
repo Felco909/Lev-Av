@@ -147,6 +147,72 @@ export async function getUnits(sid: string): Promise<WialonUnit[]> {
   return (data.items ?? []).map((it) => ({ id: it.id, name: it.nm }));
 }
 
+export interface WialonUnitMileage {
+  id: number;
+  name: string;
+  /** Показание счётчика пробега (cnm) в км — null, если Wialon его не отдал */
+  mileageKm: number | null;
+}
+
+/** flags: 1 (общие свойства: id/nm) | 8192 (0x2000, "Counters": cnm/cneh/cnkb) */
+const UNITS_WITH_COUNTERS_FLAGS = 1 | 8192;
+
+/**
+ * Пробег по всем машинам аккаунта одним запросом (core/search_items, flags включает
+ * "Counters" — cnm). Используется демоном синхронизации (lib/wialon/syncMileage.ts),
+ * чтобы не дёргать API отдельным запросом на каждую машину.
+ */
+export async function getUnitsWithMileage(sid: string): Promise<WialonUnitMileage[]> {
+  const data = await callWialon<{ items?: Array<{ id: number; nm: string; cnm?: number }> }>(
+    'core/search_items',
+    {
+      spec: {
+        itemsType: 'avl_unit',
+        propName: 'sys_name',
+        propValueMask: '*',
+        sortType: 'sys_name',
+      },
+      force: 1,
+      flags: UNITS_WITH_COUNTERS_FLAGS,
+      from: 0,
+      to: 0,
+    },
+    sid
+  );
+
+  return (data.items ?? []).map((it) => ({
+    id: it.id,
+    name: it.nm,
+    mileageKm: typeof it.cnm === 'number' ? it.cnm : null,
+  }));
+}
+
+/** Пробег одной конкретной машины по её Wialon unit id. */
+export async function getUnitMileage(sid: string, unitId: number): Promise<WialonUnitMileage> {
+  const data = await callWialon<{ items?: Array<{ id: number; nm: string; cnm?: number }> }>(
+    'core/search_items',
+    {
+      spec: {
+        itemsType: 'avl_unit',
+        propName: 'sys_id',
+        propValueMask: String(unitId),
+        sortType: 'sys_id',
+      },
+      force: 1,
+      flags: UNITS_WITH_COUNTERS_FLAGS,
+      from: 0,
+      to: 0,
+    },
+    sid
+  );
+
+  const item = (data.items ?? [])[0];
+  if (!item) {
+    throw new Error(`Wialon: машина с unit id=${unitId} не найдена (нет доступа у токена или id неверный)`);
+  }
+  return { id: item.id, name: item.nm, mileageKm: typeof item.cnm === 'number' ? item.cnm : null };
+}
+
 export interface WialonUnitReportOptions {
   /** ID ресурса Wialon, в котором сохранён шаблон отчёта (Reports -> Templates) */
   resourceId: number;

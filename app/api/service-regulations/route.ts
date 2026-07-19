@@ -21,13 +21,14 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
-    const { name, description, mileageInterval, monthsInterval } = body;
+    const { name, description, vehicleModel, mileageInterval, monthsInterval } = body;
     if (!name) return NextResponse.json({ error: 'Укажите название' }, { status: 400 });
     if (!mileageInterval && !monthsInterval) return NextResponse.json({ error: 'Укажите хотя бы один интервал' }, { status: 400 });
     const item = await prisma.serviceRegulation.create({
       data: {
         name,
         description: description || null,
+        vehicleModel: vehicleModel || null,
         mileageInterval: mileageInterval ? Number(mileageInterval) : null,
         monthsInterval: monthsInterval ? Number(monthsInterval) : null,
       },

@@ -8,7 +8,7 @@ interface Vehicle {
   id: string; plateNumber: string; brand: string; model: string; currentMileage: number | null;
 }
 interface Regulation {
-  id: string; name: string; description: string | null; mileageInterval: number | null; monthsInterval: number | null;
+  id: string; name: string; description: string | null; vehicleModel: string | null; mileageInterval: number | null; monthsInterval: number | null;
   _count?: { serviceRecords: number };
 }
 interface ServiceRecord {
@@ -16,9 +16,10 @@ interface ServiceRecord {
   vehicle: Vehicle; regulation: { id: string; name: string; mileageInterval: number | null; monthsInterval: number | null };
 }
 interface RegStatus {
-  regulation: { id: string; name: string; mileageInterval: number | null; monthsInterval: number | null };
+  regulation: { id: string; name: string; vehicleModel: string | null; mileageInterval: number | null; monthsInterval: number | null };
   lastRecord: { id: string; date: string; mileage: number; cost: number } | null;
   nextMileage: number | null; nextDate: string | null;
+  remainingKm: number | null; remainingDays: number | null;
   status: 'green' | 'yellow' | 'red';
 }
 interface VehicleStatus {
@@ -109,7 +110,7 @@ export default function MaintenancePage() {
   // Modals
   const [showRegModal, setShowRegModal] = useState(false);
   const [editRegId, setEditRegId] = useState<string | null>(null);
-  const [regForm, setRegForm] = useState({ name: '', description: '', mileageInterval: '', monthsInterval: '' });
+  const [regForm, setRegForm] = useState({ name: '', description: '', vehicleModel: '', mileageInterval: '', monthsInterval: '' });
 
   const [showRecordModal, setShowRecordModal] = useState(false);
   const [recordForm, setRecordForm] = useState({ vehicleId: '', regulationId: '', date: '', mileage: '', cost: '', comment: '' });
@@ -154,7 +155,7 @@ export default function MaintenancePage() {
   /* ─── Regulation CRUD ─── */
   const openNewReg = () => {
     setEditRegId(null);
-    setRegForm({ name: '', description: '', mileageInterval: '', monthsInterval: '' });
+    setRegForm({ name: '', description: '', vehicleModel: '', mileageInterval: '', monthsInterval: '' });
     setShowRegModal(true);
   };
   const openEditReg = (r: Regulation) => {
@@ -162,6 +163,7 @@ export default function MaintenancePage() {
     setRegForm({
       name: r.name,
       description: r.description || '',
+      vehicleModel: r.vehicleModel || '',
       mileageInterval: r.mileageInterval ? String(r.mileageInterval) : '',
       monthsInterval: r.monthsInterval ? String(r.monthsInterval) : '',
     });
@@ -178,6 +180,7 @@ export default function MaintenancePage() {
         body: JSON.stringify({
           name: regForm.name,
           description: regForm.description || null,
+          vehicleModel: regForm.vehicleModel || null,
           mileageInterval: regForm.mileageInterval ? Number(regForm.mileageInterval) : null,
           monthsInterval: regForm.monthsInterval ? Number(regForm.monthsInterval) : null,
         }),
@@ -625,8 +628,18 @@ export default function MaintenancePage() {
                                   {s.lastRecord ? (
                                     <>
                                       <span>Последнее: {formatDate(s.lastRecord.date)} при {s.lastRecord.mileage.toLocaleString()} км</span>
-                                      {s.nextMileage && <span className="flex items-center gap-1"><Gauge className="w-3 h-3" />След: {s.nextMileage.toLocaleString()} км</span>}
-                                      {s.nextDate && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />До: {formatDate(s.nextDate)}</span>}
+                                      {s.nextMileage && (
+                                        <span className="flex items-center gap-1">
+                                          <Gauge className="w-3 h-3" />След: {s.nextMileage.toLocaleString()} км
+                                          {s.remainingKm != null && ` (осталось ${s.remainingKm.toLocaleString()} км)`}
+                                        </span>
+                                      )}
+                                      {s.nextDate && (
+                                        <span className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3" />До: {formatDate(s.nextDate)}
+                                          {s.remainingDays != null && ` (осталось ${s.remainingDays} дн.)`}
+                                        </span>
+                                      )}
                                     </>
                                   ) : (
                                     <span className="text-amber-600">Нет записей — требуется первое обслуживание</span>
@@ -671,6 +684,9 @@ export default function MaintenancePage() {
                     <div>
                       <h4 className="font-semibold text-sm">{r.name}</h4>
                       {r.description && <p className="text-xs text-muted-foreground mt-0.5">{r.description}</p>}
+                      <span className="inline-block text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded mt-1">
+                        {r.vehicleModel || 'Все модели'}
+                      </span>
                     </div>
                     <div className="flex gap-1 shrink-0">
                       <button onClick={() => openEditReg(r)} className="p-1.5 hover:bg-muted rounded-md transition"><Pencil className="w-3.5 h-3.5" /></button>
@@ -765,6 +781,16 @@ export default function MaintenancePage() {
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Описание</label>
                 <input type="text" value={regForm.description} onChange={e => setRegForm({ ...regForm, description: e.target.value })} placeholder="Необязательно" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Модель техники</label>
+                <select value={regForm.vehicleModel} onChange={e => setRegForm({ ...regForm, vehicleModel: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                  <option value="">Все модели</option>
+                  {Array.from(new Set(vehicles.map(v => v.model))).sort().map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1">«Все модели» — общий регламент для всего парка</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

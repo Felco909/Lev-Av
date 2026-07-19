@@ -10,12 +10,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const { id } = await params;
     const body = await req.json();
-    const { name, description, mileageInterval, monthsInterval } = body;
+    const { name, description, vehicleModel, mileageInterval, monthsInterval } = body;
     const item = await prisma.serviceRegulation.update({
       where: { id },
       data: {
         name,
         description: description || null,
+        vehicleModel: vehicleModel || null,
         mileageInterval: mileageInterval ? Number(mileageInterval) : null,
         monthsInterval: monthsInterval ? Number(monthsInterval) : null,
       },

@@ -70,6 +70,8 @@ model Vehicle {
   model          String
   status         String   @default("active")
   currentMileage Int?     @map("current_mileage")
+  currentMileageUpdatedAt DateTime? @map("current_mileage_updated_at")
+  wialonUnitId   String?  @map("wialon_unit_id")
   driverId       String?  @map("driver_id")
   driver         Driver?  @relation("VehicleDriver", fields: [driverId], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now()) @map("created_at")
@@ -329,6 +331,7 @@ model ServiceRegulation {
   id              String   @id @default(cuid())
   name            String
   description     String?
+  vehicleModel    String?  @map("vehicle_model") // null = общий норматив для всех моделей техники
   mileageInterval Int?     @map("mileage_interval")
   monthsInterval  Int?     @map("months_interval")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -338,16 +341,18 @@ model ServiceRegulation {
 }
 
 model ServiceRecord {
-  id           String            @id @default(cuid())
-  vehicleId    String            @map("vehicle_id")
-  vehicle      Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  regulationId String            @map("regulation_id")
-  regulation   ServiceRegulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
-  date         DateTime          @db.Date
-  mileage      Int
-  cost         Decimal           @default(0) @db.Decimal(12, 2)
-  comment      String?
-  createdAt    DateTime          @default(now()) @map("created_at")
+  id            String             @id @default(cuid())
+  vehicleId     String             @map("vehicle_id")
+  vehicle       Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  regulationId  String?            @map("regulation_id")
+  regulation    ServiceRegulation? @relation(fields: [regulationId], references: [id], onDelete: SetNull)
+  workType      String?            @map("work_type") // описание работы, если без regulationId (внеплановый ремонт)
+  isUnscheduled Boolean            @default(false) @map("is_unscheduled")
+  date          DateTime           @db.Date
+  mileage       Int
+  cost          Decimal            @default(0) @db.Decimal(12, 2)
+  comment       String?
+  createdAt     DateTime           @default(now()) @map("created_at")
 
   @@index([vehicleId])
   @@index([regulationId])

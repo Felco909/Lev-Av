@@ -3,8 +3,18 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { calculateMaintenanceStatus, type MaintenanceStatusLevel } from '@/lib/maintenance/calculateStatus';
 
-// Computes maintenance status for each vehicle+regulation pair
+/** 'ok'/'soon'/'overdue' (lib/maintenance/calculateStatus.ts) -> цвета, которые уже ждёт фронтенд. */
+const STATUS_TO_COLOR: Record<MaintenanceStatusLevel, 'green' | 'yellow' | 'red'> = {
+  ok: 'green',
+  soon: 'yellow',
+  overdue: 'red',
+};
+
+// Computes maintenance status for each vehicle+regulation pair (regulation scoped by
+// vehicleModel — см. ServiceRegulation.vehicleModel; null = общий регламент для всех моделей).
+// Расчёт вынесен в lib/maintenance/calculateStatus.ts (единый порог 15% на обеих осях).
 // Returns: { vehicles: [{ vehicle, statuses: [{ regulation, lastRecord, nextMileage, nextDate, status }], overallStatus }] }
 export async function GET() {
   try {
@@ -16,58 +26,38 @@ export async function GET() {
       orderBy: { brand: 'asc' },
     });
     const regulations = await prisma.serviceRegulation.findMany({ orderBy: { name: 'asc' } });
+    // Только плановые записи (isUnscheduled=false) участвуют в расчёте "когда следующее ТО" —
+    // внеплановые ремонты (regulationId=null) физически не могут совпасть ни с одним reg.id.
     const records = await prisma.serviceRecord.findMany({
       orderBy: { date: 'desc' },
     });
 
-    const today = new Date();
-
     const result = vehicles.map(vehicle => {
       const vehicleRecords = records.filter(r => r.vehicleId === vehicle.id);
-      const statuses = regulations.map(reg => {
+      const regsForVehicle = regulations.filter(
+        reg => reg.vehicleModel === null || reg.vehicleModel === vehicle.model
+      );
+
+      const statuses = regsForVehicle.map(reg => {
         const recsForReg = vehicleRecords.filter(r => r.regulationId === reg.id);
         const lastRecord = recsForReg.length > 0 ? recsForReg[0] : null; // already sorted desc
 
-        let nextMileage: number | null = null;
-        let nextDate: string | null = null;
-        let status: 'green' | 'yellow' | 'red' = 'green';
-
-        if (!lastRecord) {
-          // Never serviced - red if vehicle has mileage
-          status = vehicle.currentMileage ? 'red' : 'yellow';
-        } else {
-          if (reg.mileageInterval && lastRecord.mileage) {
-            nextMileage = lastRecord.mileage + reg.mileageInterval;
-          }
-          if (reg.monthsInterval && lastRecord.date) {
-            const d = new Date(lastRecord.date);
-            d.setMonth(d.getMonth() + reg.monthsInterval);
-            nextDate = d.toISOString();
-          }
-
-          // Check mileage status
-          if (nextMileage !== null && vehicle.currentMileage) {
-            const remaining = nextMileage - vehicle.currentMileage;
-            const threshold = reg.mileageInterval ? reg.mileageInterval * 0.1 : 1000;
-            if (remaining <= 0) status = 'red';
-            else if (remaining <= threshold) status = 'yellow';
-          }
-
-          // Check date status
-          if (nextDate) {
-            const nd = new Date(nextDate);
-            const daysUntil = Math.floor((nd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysUntil <= 0 && status !== 'red') status = 'red';
-            else if (daysUntil <= 30 && status === 'green') status = 'yellow';
-          }
-        }
+        const calc = calculateMaintenanceStatus({
+          currentMileage: vehicle.currentMileage,
+          lastServiceMileage: lastRecord?.mileage ?? null,
+          lastServiceDate: lastRecord?.date ?? null,
+          mileageInterval: reg.mileageInterval,
+          monthsInterval: reg.monthsInterval,
+        });
 
         return {
-          regulation: { id: reg.id, name: reg.name, mileageInterval: reg.mileageInterval, monthsInterval: reg.monthsInterval },
+          regulation: { id: reg.id, name: reg.name, vehicleModel: reg.vehicleModel, mileageInterval: reg.mileageInterval, monthsInterval: reg.monthsInterval },
           lastRecord: lastRecord ? { id: lastRecord.id, date: lastRecord.date, mileage: lastRecord.mileage, cost: lastRecord.cost } : null,
-          nextMileage,
-          nextDate,
-          status,
+          nextMileage: calc.nextMileage,
+          nextDate: calc.nextDate ? calc.nextDate.toISOString() : null,
+          remainingKm: calc.remainingKm,
+          remainingDays: calc.remainingDays,
+          status: STATUS_TO_COLOR[calc.status],
         };
       });
 
