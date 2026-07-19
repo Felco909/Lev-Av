@@ -4,7 +4,11 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getCurrentSnapshot, WialonApiError } from '@/lib/wialon/client';
 
-const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // ±30 дней (решено с пользователем)
+// ±365 дней — расширено с 30: рейсы своего парка (Армения-Россия-Грузия/СНГ) могут длиться
+// больше месяца, дата выезда активного рейса не должна считаться "слишком старой". Точность
+// вне текущего дня всё равно ограничена (см. isApproximate ниже) — предупреждение в UI, не
+// точное историческое значение, поэтому расширение окна не увеличивает риск неверных данных.
+const RECENT_WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
 const SAME_DAY_MS = 24 * 60 * 60 * 1000;
 
 /**

@@ -58,7 +58,7 @@ interface ExpForm {
 const CURRENCIES = ['AMD', 'RUB', 'USD', 'GEL', 'EUR'];
 
 function wialonHintText(reason?: string): string {
-  if (reason === 'too_old') return 'Дата слишком старая для автозаполнения (>30 дней) — введите вручную';
+  if (reason === 'too_old') return 'Дата слишком старая для автозаполнения (>1 года) — введите вручную';
   if (reason === 'wialon_error') return 'Wialon сейчас недоступен — введите вручную';
   return 'Нет данных Wialon на эту дату — введите вручную';
 }
