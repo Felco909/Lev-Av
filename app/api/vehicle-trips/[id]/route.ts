@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   const vt = await prisma.vehicleTrip.findUnique({
     where: { id: params.id },
     include: {
-      vehicle: { select: { id: true, plateNumber: true, brand: true, model: true } },
+      vehicle: { select: { id: true, plateNumber: true, brand: true, model: true, wialonUnitId: true } },
       driver: { select: { id: true, fullName: true } },
       trips: {
         select: {

@@ -6,12 +6,12 @@
  * например после транзита через зоны без покрытия).
  */
 import { prisma } from '@/lib/prisma';
-import { getUnitReport } from '@/lib/wialon/client';
+import { getUnitReport, getMileageFromTrack, getFuelConsumedBetweenDates } from '@/lib/wialon/client';
 
 export interface TripFuelCalcResult {
   calculatedKm: number | null;
   calculatedFuelConsumedL: number | null;
-  fuelCalcSource: 'wialon_report' | 'odometer_diff' | null;
+  fuelCalcSource: 'wialon_report' | 'wialon_track' | 'odometer_diff' | null;
   fuelCalcAt: Date;
 }
 
@@ -65,7 +65,21 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     fuelCalcAt: now,
   };
 
-  if (trip.startMileage != null && trip.endMileage != null) {
+  // Пробег — приоритет реальному GPS-треку (getMileageFromTrack, сумма гаверсинус-расстояний
+  // между точками маршрута за интервал выезд-возврат) — не накапливает погрешность вручную
+  // введённых/автозаполненных показаний одометра. Fallback — разница startMileage/endMileage,
+  // если у машины нет wialonUnitId или по треку вообще не нашлось GPS-сообщений за рейс.
+  if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
+    try {
+      const track = await getMileageFromTrack(Number(trip.vehicle.wialonUnitId), trip.departureDate, trip.returnDate);
+      if (track.messagesUsed > 0) {
+        result.calculatedKm = track.mileageKm;
+      }
+    } catch (e) {
+      console.error('[calculateTripFuel] getMileageFromTrack failed, falling back to odometer fields:', e);
+    }
+  }
+  if (result.calculatedKm == null && trip.startMileage != null && trip.endMileage != null) {
     result.calculatedKm = trip.endMileage - trip.startMileage;
   }
 
@@ -74,6 +88,25 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     if (reportConsumed != null) {
       result.calculatedFuelConsumedL = reportConsumed;
       result.fuelCalcSource = 'wialon_report';
+    }
+  }
+
+  // Следующий по надёжности источник — реальные показания топливного датчика на даты
+  // выезда/возврата (getFuelConsumedBetweenDates), НЕ значения, введённые в форму рейса.
+  // Как и form-fallback ниже, не учитывает дозаправки в пути — см. lib/wialon/client.ts.
+  if (result.fuelCalcSource === null && trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
+    try {
+      const consumption = await getFuelConsumedBetweenDates(
+        Number(trip.vehicle.wialonUnitId),
+        trip.departureDate,
+        trip.returnDate
+      );
+      if (consumption.fuelConsumedL != null && consumption.fuelConsumedL >= 0) {
+        result.calculatedFuelConsumedL = consumption.fuelConsumedL;
+        result.fuelCalcSource = 'wialon_track';
+      }
+    } catch (e) {
+      console.error('[calculateTripFuel] getFuelConsumedBetweenDates failed, falling back:', e);
     }
   }
 

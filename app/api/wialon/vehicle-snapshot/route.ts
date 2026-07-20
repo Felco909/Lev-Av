@@ -2,20 +2,25 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { getCurrentSnapshot, WialonApiError } from '@/lib/wialon/client';
+import { getOdometerAtDate, getFuelLevelAtDate, WialonApiError } from '@/lib/wialon/client';
 
-// ±365 дней — расширено с 30: рейсы своего парка (Армения-Россия-Грузия/СНГ) могут длиться
-// больше месяца, дата выезда активного рейса не должна считаться "слишком старой". Точность
-// вне текущего дня всё равно ограничена (см. isApproximate ниже) — предупреждение в UI, не
-// точное историческое значение, поэтому расширение окна не увеличивает риск неверных данных.
-const RECENT_WINDOW_MS = 365 * 24 * 60 * 60 * 1000;
-const SAME_DAY_MS = 24 * 60 * 60 * 1000;
+// getOdometerAtDate прогоняет весь GPS-трек от даты до сейчас (getMileageFromTrack) — дороже
+// прямого запроса, поэтому глубину в прошлое ограничиваем ради отзывчивости интерактивного
+// автозаполнения. 45 дней с запасом покрывает типичный длинный рейс этого парка (см. CLAUDE.md:
+// маршруты Армения-Россия-Грузия/СНГ), полноценный расчёт на любую дату остаётся доступен через
+// "Пересчитать по Wialon" (calculateVehicleTripTotals), который считает по границам самого рейса,
+// а не "от даты до сейчас", и не имеет этого ограничения.
+const MILEAGE_TRACK_WINDOW_MS = 45 * 24 * 60 * 60 * 1000;
+
+// Остаток топлива ищется в окне вокруг даты (см. getFuelLevelAtDate, до ±7 дней) — если там
+// пусто, дальше не расширяем: это уже "нет данных", а не "слишком старая дата".
+const FUEL_APPROXIMATE_THRESHOLD_SEC = 30 * 60;
 
 /**
- * Снимок пробега/топлива машины "сейчас" — используется для автозаполнения полей
- * Выезд/Возврат в форме рейса, ТОЛЬКО когда запрошенная дата близка к текущей
- * (см. CLAUDE.md/план: произвольный исторический разбор сырых сообщений Wialon
- * сочли слишком рискованным — можно разойтись с тем, что показывает сам Wialon).
+ * Снимок пробега/топлива машины НА КОНКРЕТНУЮ ДАТУ — используется для автозаполнения полей
+ * Выезд/Возврат в форме рейса. Оба значения — честные исторические (пробег: текущий счётчик
+ * минус пройденное по GPS-треку с даты; топливо: ближайшее по времени сырое показание датчика
+ * рядом с датой), а не "текущее значение с оговоркой", как было раньше.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -36,25 +41,27 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Некорректный datetime' }, { status: 400 });
     }
 
-    if (Math.abs(Date.now() - datetime.getTime()) > RECENT_WINDOW_MS) {
-      return NextResponse.json({ available: false, reason: 'too_old' });
+    const withinMileageWindow = Math.abs(Date.now() - datetime.getTime()) <= MILEAGE_TRACK_WINDOW_MS;
+
+    const [mileageResult, fuelResult] = await Promise.all([
+      withinMileageWindow
+        ? getOdometerAtDate(unitId, datetime).catch(() => ({ mileageKm: null, raw: {} }))
+        : Promise.resolve({ mileageKm: null, raw: { reason: 'too_old_for_track' } }),
+      getFuelLevelAtDate(unitId, datetime).catch(() => ({ fuelLevelL: null, measuredAt: null, raw: {} })),
+    ]);
+
+    if (mileageResult.mileageKm == null && fuelResult.fuelLevelL == null) {
+      return NextResponse.json({ available: false, reason: withinMileageWindow ? 'no_data' : 'too_old' });
     }
 
-    const snapshot = await getCurrentSnapshot(unitId);
-    if (snapshot.mileageKm == null && snapshot.fuelLevelL == null) {
-      return NextResponse.json({ available: false, reason: 'no_data' });
-    }
-
-    // Snapshot всегда отражает ТЕКУЩЕЕ показание (Wialon не хранит истории без отчёта,
-    // см. план) — если запрошенная дата не сегодня/вчера, это лишь приближение,
-    // фронтенд должен явно предупредить об этом диспетчера.
-    const isApproximate = Math.abs(Date.now() - datetime.getTime()) > SAME_DAY_MS;
+    const fuelDiffSec = typeof fuelResult.raw?.diffSeconds === 'number' ? fuelResult.raw.diffSeconds : null;
+    const isApproximate = fuelDiffSec != null && fuelDiffSec > FUEL_APPROXIMATE_THRESHOLD_SEC;
 
     return NextResponse.json({
       available: true,
-      mileageKm: snapshot.mileageKm,
-      fuelLevelL: snapshot.fuelLevelL,
-      measuredAt: snapshot.measuredAt ? snapshot.measuredAt.toISOString() : null,
+      mileageKm: mileageResult.mileageKm,
+      fuelLevelL: fuelResult.fuelLevelL,
+      measuredAt: fuelResult.measuredAt ? fuelResult.measuredAt.toISOString() : null,
       isApproximate,
     });
   } catch (e: any) {

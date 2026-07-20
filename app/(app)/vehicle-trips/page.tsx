@@ -58,7 +58,7 @@ interface ExpForm {
 const CURRENCIES = ['AMD', 'RUB', 'USD', 'GEL', 'EUR'];
 
 function wialonHintText(reason?: string): string {
-  if (reason === 'too_old') return 'Дата слишком старая для автозаполнения (>1 года) — введите вручную';
+  if (reason === 'too_old') return 'Дата слишком старая для расчёта пробега по треку (>45 дней) — введите вручную';
   if (reason === 'wialon_error') return 'Wialon сейчас недоступен — введите вручную';
   return 'Нет данных Wialon на эту дату — введите вручную';
 }
@@ -76,6 +76,58 @@ const emptyTripForm = (): TripForm => ({
   fuelLiters: '', fuelCost: '',
   fuelCurrency: 'AMD', fuelRate: '1',
 });
+
+/** VT/VTDetail -> TripForm, для заполнения редактируемой формы в развёрнутой карточке. */
+function mapVtToForm(r: VT): TripForm {
+  return {
+    id: r.id, tripNumber: r.tripNumber || '',
+    vehicleId: r.vehicleId, driverId: r.driverId || '',
+    departureDate: r.departureDate?.slice(0, 10) || '',
+    startMileage: r.startMileage != null ? String(r.startMileage) : '',
+    startFuel: r.startFuel != null ? String(Number(r.startFuel)) : '',
+    returnDate: r.returnDate?.slice(0, 10) || '',
+    endMileage: r.endMileage != null ? String(r.endMileage) : '',
+    endFuel: r.endFuel != null ? String(Number(r.endFuel)) : '',
+    notes: r.notes || '', status: r.status || 'active',
+    salary: r.salary != null ? String(Number(r.salary)) : '',
+    perDiem: r.perDiem != null ? String(Number(r.perDiem)) : '',
+    perDiem2: r.perDiem2 != null ? String(Number(r.perDiem2)) : '',
+    perDiem3: r.perDiem3 != null ? String(Number(r.perDiem3)) : '',
+    otherExpenses: r.otherExpenses != null ? String(Number(r.otherExpenses)) : '',
+    salaryCurrency: r.salaryCurrency || 'AMD',
+    salaryRate: r.salaryRate != null ? String(Number(r.salaryRate)) : '1',
+    perDiemCurrency: r.perDiemCurrency || 'AMD',
+    perDiemRate: r.perDiemRate != null ? String(Number(r.perDiemRate)) : '1',
+    perDiem2Currency: r.perDiem2Currency || 'AMD',
+    perDiem2Rate: r.perDiem2Rate != null ? String(Number(r.perDiem2Rate)) : '1',
+    perDiem3Currency: r.perDiem3Currency || 'AMD',
+    perDiem3Rate: r.perDiem3Rate != null ? String(Number(r.perDiem3Rate)) : '1',
+    otherCurrency: r.otherCurrency || 'AMD',
+    otherRate: r.otherRate != null ? String(Number(r.otherRate)) : '1',
+    fuelLiters: r.fuelLiters != null ? String(Number(r.fuelLiters)) : '',
+    fuelCost: r.fuelCost != null ? String(Number(r.fuelCost)) : '',
+    fuelCurrency: r.fuelCurrency || 'AMD',
+    fuelRate: r.fuelRate != null ? String(Number(r.fuelRate)) : '1',
+  };
+}
+
+/** Итого расходов рейса в AMD по значениям произвольной формы (создание/детальная карточка). */
+function computeExpAmd(form: TripForm) {
+  const sRate = form.salaryCurrency === 'AMD' ? 1 : (parseFloat(form.salaryRate) || 1);
+  const pRate = form.perDiemCurrency === 'AMD' ? 1 : (parseFloat(form.perDiemRate) || 1);
+  const p2Rate = form.perDiem2Currency === 'AMD' ? 1 : (parseFloat(form.perDiem2Rate) || 1);
+  const p3Rate = form.perDiem3Currency === 'AMD' ? 1 : (parseFloat(form.perDiem3Rate) || 1);
+  const oRate = form.otherCurrency === 'AMD' ? 1 : (parseFloat(form.otherRate) || 1);
+  const fRate = form.fuelCurrency === 'AMD' ? 1 : (parseFloat(form.fuelRate) || 1);
+  const s = (parseFloat(form.salary) || 0) * sRate;
+  const p1 = (parseFloat(form.perDiem) || 0) * pRate;
+  const p2 = (parseFloat(form.perDiem2) || 0) * p2Rate;
+  const p3 = (parseFloat(form.perDiem3) || 0) * p3Rate;
+  const p = p1 + p2 + p3;
+  const o = (parseFloat(form.otherExpenses) || 0) * oRate;
+  const f = (parseFloat(form.fuelCost) || 0) * fRate;
+  return { s: Math.round(s), p: Math.round(p), o: Math.round(o), f: Math.round(f), total: Math.round(s + p + o + f) };
+}
 
 const emptyExpForm = (): ExpForm => ({
   date: new Date().toISOString().slice(0, 10), expenseType: 'fuel', liters: '',
@@ -100,10 +152,13 @@ export default function VehicleTripsPage() {
   const [tripForm, setTripForm] = useState<TripForm>(emptyTripForm());
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  // Detail view (expanded inline)
+  // Detail view (expanded inline) — теперь это единственное место редактирования всего,
+  // кроме самого создания рейса (машина/водитель/даты) — см. detailForm ниже.
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<VTDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailForm, setDetailForm] = useState<TripForm>(emptyTripForm());
+  const [detailSaving, setDetailSaving] = useState(false);
 
   // Expense modal (for additional fleet expenses)
   const [showExpModal, setShowExpModal] = useState(false);
@@ -130,23 +185,25 @@ export default function VehicleTripsPage() {
     return res.json();
   }, []);
 
+  // Wialon-автозаполнение теперь живёт в развёрнутой карточке (detailForm), не в модалке
+  // создания — машина в карточке уже известна из detail.vehicle.
   useEffect(() => {
-    const vehicle = vehicles.find(v => v.id === tripForm.vehicleId);
-    if (!vehicle?.wialonUnitId || !tripForm.departureDate) { setDepartureHint(null); return; }
+    const wialonUnitId = detail?.vehicle?.wialonUnitId;
+    if (!wialonUnitId || !detailForm.departureDate) { setDepartureHint(null); return; }
     let cancelled = false;
     setDepartureSnapshotLoading(true);
     setDepartureHint(null);
-    fetchWialonSnapshot(vehicle.wialonUnitId, tripForm.departureDate).then(data => {
+    fetchWialonSnapshot(wialonUnitId, detailForm.departureDate).then(data => {
       if (cancelled) return;
       if (data.available) {
-        setTripForm(prev => ({
+        setDetailForm(prev => ({
           ...prev,
           startMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
           startFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
         }));
         setDepartureHint(
           data.isApproximate
-            ? 'Показано текущее значение из Wialon (не точно на выбранную дату) — проверьте вручную'
+            ? 'Ближайшее найденное показание Wialon не точно на этот момент (машина могла быть вне сети) — проверьте вручную'
             : null
         );
       } else {
@@ -156,25 +213,25 @@ export default function VehicleTripsPage() {
       .finally(() => { if (!cancelled) setDepartureSnapshotLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripForm.vehicleId, tripForm.departureDate]);
+  }, [detail?.vehicle?.wialonUnitId, detailForm.departureDate]);
 
   useEffect(() => {
-    const vehicle = vehicles.find(v => v.id === tripForm.vehicleId);
-    if (!vehicle?.wialonUnitId || !tripForm.returnDate) { setReturnHint(null); return; }
+    const wialonUnitId = detail?.vehicle?.wialonUnitId;
+    if (!wialonUnitId || !detailForm.returnDate) { setReturnHint(null); return; }
     let cancelled = false;
     setReturnSnapshotLoading(true);
     setReturnHint(null);
-    fetchWialonSnapshot(vehicle.wialonUnitId, tripForm.returnDate).then(data => {
+    fetchWialonSnapshot(wialonUnitId, detailForm.returnDate).then(data => {
       if (cancelled) return;
       if (data.available) {
-        setTripForm(prev => ({
+        setDetailForm(prev => ({
           ...prev,
           endMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.endMileage,
           endFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.endFuel,
         }));
         setReturnHint(
           data.isApproximate
-            ? 'Показано текущее значение из Wialon (не точно на выбранную дату) — проверьте вручную'
+            ? 'Ближайшее найденное показание Wialon не точно на этот момент (машина могла быть вне сети) — проверьте вручную'
             : null
         );
       } else {
@@ -184,7 +241,7 @@ export default function VehicleTripsPage() {
       .finally(() => { if (!cancelled) setReturnSnapshotLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripForm.vehicleId, tripForm.returnDate]);
+  }, [detail?.vehicle?.wialonUnitId, detailForm.returnDate]);
 
   const recalculateFuel = async () => {
     if (!detail?.id) return;
@@ -210,51 +267,23 @@ export default function VehicleTripsPage() {
   useEffect(() => { load(); }, [load]);
 
   // --- Trip CRUD ---
+  // Создание — только машина/водитель/даты (см. план). Всё остальное редактируется
+  // в развёрнутой карточке (detailForm) после создания, не в этой модалке.
   const openNewTrip = () => { setTripForm(emptyTripForm()); setShowTripModal(true); };
-  const openEditTrip = (r: VT) => {
-    setTripForm({
-      id: r.id, tripNumber: r.tripNumber || '',
-      vehicleId: r.vehicleId, driverId: r.driverId || '',
-      departureDate: r.departureDate?.slice(0, 10) || '',
-      startMileage: r.startMileage != null ? String(r.startMileage) : '',
-      startFuel: r.startFuel != null ? String(Number(r.startFuel)) : '',
-      returnDate: r.returnDate?.slice(0, 10) || '',
-      endMileage: r.endMileage != null ? String(r.endMileage) : '',
-      endFuel: r.endFuel != null ? String(Number(r.endFuel)) : '',
-      notes: r.notes || '', status: r.status || 'active',
-      salary: r.salary != null ? String(Number(r.salary)) : '',
-      perDiem: r.perDiem != null ? String(Number(r.perDiem)) : '',
-      perDiem2: r.perDiem2 != null ? String(Number(r.perDiem2)) : '',
-      perDiem3: r.perDiem3 != null ? String(Number(r.perDiem3)) : '',
-      otherExpenses: r.otherExpenses != null ? String(Number(r.otherExpenses)) : '',
-      salaryCurrency: r.salaryCurrency || 'AMD',
-      salaryRate: r.salaryRate != null ? String(Number(r.salaryRate)) : '1',
-      perDiemCurrency: r.perDiemCurrency || 'AMD',
-      perDiemRate: r.perDiemRate != null ? String(Number(r.perDiemRate)) : '1',
-      perDiem2Currency: r.perDiem2Currency || 'AMD',
-      perDiem2Rate: r.perDiem2Rate != null ? String(Number(r.perDiem2Rate)) : '1',
-      perDiem3Currency: r.perDiem3Currency || 'AMD',
-      perDiem3Rate: r.perDiem3Rate != null ? String(Number(r.perDiem3Rate)) : '1',
-      otherCurrency: r.otherCurrency || 'AMD',
-      otherRate: r.otherRate != null ? String(Number(r.otherRate)) : '1',
-      fuelLiters: r.fuelLiters != null ? String(Number(r.fuelLiters)) : '',
-      fuelCost: r.fuelCost != null ? String(Number(r.fuelCost)) : '',
-      fuelCurrency: r.fuelCurrency || 'AMD',
-      fuelRate: r.fuelRate != null ? String(Number(r.fuelRate)) : '1',
-    });
-    setShowTripModal(true);
-  };
 
   const saveTripForm = async () => {
     if (!tripForm.vehicleId || !tripForm.departureDate) return;
     setSaving(true);
-    await fetch('/api/vehicle-trips', {
-      method: tripForm.id ? 'PUT' : 'POST',
+    const res = await fetch('/api/vehicle-trips', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tripForm),
     });
+    const created = await res.json().catch(() => null);
     setSaving(false); setShowTripModal(false); load();
-    if (tripForm.id && expandedId === tripForm.id) loadDetail(tripForm.id);
+    // Сразу разворачиваем карточку нового рейса — дальше пробег/топливо/расходы
+    // заполняются прямо там, не нужно искать отдельную форму редактирования.
+    if (created?.id) { setExpandedId(created.id); loadDetail(created.id); }
   };
 
   const deleteTrip = async (id: string) => {
@@ -266,18 +295,33 @@ export default function VehicleTripsPage() {
     load();
   };
 
-  // --- Detail / Expand ---
+  // --- Detail / Expand — единственное место редактирования после создания ---
   const loadDetail = async (id: string) => {
     setDetailLoading(true);
     const res = await fetch(`/api/vehicle-trips/${id}`);
     const data = await res.json();
     setDetail(data);
+    setDetailForm(mapVtToForm(data));
     setDetailLoading(false);
   };
 
   const toggleExpand = (id: string) => {
-    if (expandedId === id) { setExpandedId(null); setDetail(null); }
+    if (expandedId === id) { setExpandedId(null); setDetail(null); setDetailForm(emptyTripForm()); }
     else { setExpandedId(id); loadDetail(id); }
+  };
+
+  const saveDetailForm = async () => {
+    if (!detail) return;
+    setDetailSaving(true);
+    try {
+      await fetch('/api/vehicle-trips', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...detailForm, id: detail.id }),
+      });
+      await loadDetail(detail.id);
+      await load();
+    } finally { setDetailSaving(false); }
   };
 
   // --- Expense CRUD (additional fleet expenses) ---
@@ -330,23 +374,6 @@ export default function VehicleTripsPage() {
     return expForm.currency === 'AMD' ? amt : Math.round(amt * rate * 100) / 100;
   };
 
-  // Trip form AMD preview (per-expense currency/rate)
-  const tripExpAmd = () => {
-    const sRate = tripForm.salaryCurrency === 'AMD' ? 1 : (parseFloat(tripForm.salaryRate) || 1);
-    const pRate = tripForm.perDiemCurrency === 'AMD' ? 1 : (parseFloat(tripForm.perDiemRate) || 1);
-    const p2Rate = tripForm.perDiem2Currency === 'AMD' ? 1 : (parseFloat(tripForm.perDiem2Rate) || 1);
-    const p3Rate = tripForm.perDiem3Currency === 'AMD' ? 1 : (parseFloat(tripForm.perDiem3Rate) || 1);
-    const oRate = tripForm.otherCurrency === 'AMD' ? 1 : (parseFloat(tripForm.otherRate) || 1);
-    const fRate = tripForm.fuelCurrency === 'AMD' ? 1 : (parseFloat(tripForm.fuelRate) || 1);
-    const s = (parseFloat(tripForm.salary) || 0) * sRate;
-    const p1 = (parseFloat(tripForm.perDiem) || 0) * pRate;
-    const p2 = (parseFloat(tripForm.perDiem2) || 0) * p2Rate;
-    const p3 = (parseFloat(tripForm.perDiem3) || 0) * p3Rate;
-    const p = p1 + p2 + p3;
-    const o = (parseFloat(tripForm.otherExpenses) || 0) * oRate;
-    const f = (parseFloat(tripForm.fuelCost) || 0) * fRate;
-    return { s: Math.round(s), p: Math.round(p), o: Math.round(o), f: Math.round(f), total: Math.round(s + p + o + f) };
-  };
 
   return (
     <div className="space-y-6">
@@ -430,11 +457,8 @@ export default function VehicleTripsPage() {
                       </div>
                     </div>
                     <div className="flex gap-1 flex-shrink-0 items-center">
-                      <button onClick={() => toggleExpand(r.id)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title={'Подробности'}>
+                      <button onClick={() => toggleExpand(r.id)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title={'Подробности (редактирование внутри)'}>
                         {isExpanded ? <ChevronUp className="w-4 h-4 text-primary" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-                      </button>
-                      <button onClick={() => openEditTrip(r)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title={'Редактировать'}>
-                        <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                       </button>
                       <button onClick={() => deleteTrip(r.id)} disabled={deleting === r.id} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                         {deleting === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 text-red-500" />}
@@ -466,28 +490,65 @@ export default function VehicleTripsPage() {
                           </div>
                         </div>
 
-                        {/* Info row: mileage & fuel */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                          <div className="bg-muted/40 rounded-lg p-2">
-                            <p className="text-[10px] text-muted-foreground">{'Пробег'}</p>
-                            <p className="font-medium">{detail.mileage != null ? `${detail.mileage.toLocaleString('ru-RU')} км` : '—'}</p>
-                          </div>
-                          <div className="bg-muted/40 rounded-lg p-2">
-                            <p className="text-[10px] text-muted-foreground">{'Топливо'}</p>
-                            <p className="font-medium">{detail.startFuel != null ? `${Number(detail.startFuel)}` : '?'} {'→'} {detail.endFuel != null ? `${Number(detail.endFuel)} л` : '?'}</p>
-                          </div>
-                          {detail.fleetExpenses.filter((e: any) => e.expenseType === 'fuel' && e.liters).length > 0 && (
-                            <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2">
-                              <p className="text-[10px] text-amber-600">{'Заправлено'}</p>
-                              <p className="font-medium">{detail.fleetExpenses.filter((e: any) => e.expenseType === 'fuel' && e.liters).reduce((s: number, e: any) => s + Number(e.liters), 0).toLocaleString('ru-RU')} {'л'}</p>
+                        {/* Editable: Выезд/Возврат — пробег и топливо, с автозаполнением Wialon */}
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div className="space-y-2 bg-muted/30 rounded-lg p-2.5">
+                            <p className="text-[11px] font-medium text-muted-foreground">{'Выезд'}</p>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[10px] text-muted-foreground">{'Дата'} *</label>
+                                <input type="date" value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                                <input type="number" min="0" value={detailForm.startMileage} onChange={e => setDetailForm({...detailForm, startMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'нач.'} />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                                <input type="number" step="0.01" min="0" value={detailForm.startFuel} onChange={e => setDetailForm({...detailForm, startFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'остаток'} />
+                              </div>
                             </div>
-                          )}
-                          {detail.notes && (
-                            <div className="bg-muted/40 rounded-lg p-2 col-span-2 sm:col-span-1">
-                              <p className="text-[10px] text-muted-foreground">{'Заметки'}</p>
-                              <p className="font-medium truncate">{detail.notes}</p>
+                            {departureHint && <p className="text-[10px] text-amber-600">{departureHint}</p>}
+                          </div>
+                          <div className="space-y-2 bg-muted/30 rounded-lg p-2.5">
+                            <p className="text-[11px] font-medium text-muted-foreground">{'Возврат'}</p>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[10px] text-muted-foreground">{'Дата'}</label>
+                                <input type="date" value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                                <input type="number" min="0" value={detailForm.endMileage} onChange={e => setDetailForm({...detailForm, endMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'кон.'} />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                                <input type="number" step="0.01" min="0" value={detailForm.endFuel} onChange={e => setDetailForm({...detailForm, endFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'остаток'} />
+                              </div>
                             </div>
-                          )}
+                            {returnHint && <p className="text-[10px] text-amber-600">{returnHint}</p>}
+                          </div>
+                        </div>
+
+                        {detail.fleetExpenses.filter((e: any) => e.expenseType === 'fuel' && e.liters).length > 0 && (
+                          <p className="text-[11px] text-amber-600">
+                            {'Заправлено (доп. расходы)'}: {detail.fleetExpenses.filter((e: any) => e.expenseType === 'fuel' && e.liters).reduce((s: number, e: any) => s + Number(e.liters), 0).toLocaleString('ru-RU')} {'л'}
+                          </p>
+                        )}
+
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] text-muted-foreground">{'Статус'}</label>
+                            <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
+                              <option value="active">{'В рейсе'}</option>
+                              <option value="completed">{'Завершён'}</option>
+                              <option value="archived">{'Архив'}</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-muted-foreground">{'Заметки'}</label>
+                            <input type="text" value={detailForm.notes} onChange={e => setDetailForm({...detailForm, notes: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                          </div>
                         </div>
 
                         {/* Итоги рейса — автоматический расчёт из Wialon, только для закрытых рейсов */}
@@ -504,8 +565,11 @@ export default function VehicleTripsPage() {
                               {detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : 'пробег не рассчитан'}
                               {', '}
                               {detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л топлива` : 'расход не рассчитан'}
+                              {detail.fuelCalcSource === 'wialon_track' && (
+                                <span className="text-emerald-600"> {'(по реальным показаниям датчика Wialon на даты выезда/возврата)'}</span>
+                              )}
                               {detail.fuelCalcSource === 'odometer_diff' && (
-                                <span className="text-amber-600"> {'(расчёт по разнице остатков, точность ниже)'}</span>
+                                <span className="text-amber-600"> {'(расчёт по разнице остатков, введённых вручную, точность ниже)'}</span>
                               )}
                             </p>
                             {detail.fuelCalcAt && (
@@ -517,47 +581,103 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
-                        {/* Direct expenses block */}
+                        {/* Editable expenses block */}
                         <div>
                           <p className="text-xs font-semibold flex items-center gap-1 mb-2"><Banknote className="w-3.5 h-3.5" /> {'Расходы по рейсу'}</p>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
-                            <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-2">
-                              <p className="text-[10px] text-blue-600">{'Зарплата'}</p>
-                              <p className="font-medium font-mono">{detail.directSalaryAmd ? fmtAmd(detail.directSalaryAmd) : '—'}</p>
-                              {detail.salary && detail.salaryCurrency !== 'AMD' && (
-                                <p className="text-[10px] text-muted-foreground">{Number(detail.salary).toLocaleString('ru-RU')} {CUR_SYMBOL[detail.salaryCurrency] || detail.salaryCurrency}</p>
-                              )}
+                          <div className="space-y-2">
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-blue-600">{'Зарплата'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.salary} onChange={e => setDetailForm({...detailForm, salary: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                                <select value={detailForm.salaryCurrency} onChange={e => setDetailForm({...detailForm, salaryCurrency: e.target.value, salaryRate: e.target.value === 'AMD' ? '1' : detailForm.salaryRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.salaryRate} onChange={e => setDetailForm({...detailForm, salaryRate: e.target.value})} disabled={detailForm.salaryCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                                <div className="flex items-center text-xs font-mono text-blue-600 pl-1">
+                                  {detailForm.salaryCurrency !== 'AMD' && (parseFloat(detailForm.salary) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.salary) || 0) * (parseFloat(detailForm.salaryRate) || 1))) : ''}
+                                </div>
+                              </div>
                             </div>
-                            <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-2">
-                              <p className="text-[10px] text-purple-600">{'Суточные'}</p>
-                              <p className="font-medium font-mono">{detail.directPerDiemAmd ? fmtAmd(detail.directPerDiemAmd) : '—'}</p>
-                              {[
-                                { amount: detail.perDiem, currency: detail.perDiemCurrency },
-                                { amount: detail.perDiem2, currency: detail.perDiem2Currency },
-                                { amount: detail.perDiem3, currency: detail.perDiem3Currency },
-                              ].filter(slot => slot.amount && slot.currency !== 'AMD').map((slot, i) => (
-                                <p key={i} className="text-[10px] text-muted-foreground">{Number(slot.amount).toLocaleString('ru-RU')} {CUR_SYMBOL[slot.currency] || slot.currency}</p>
-                              ))}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-purple-600">{'Суточные №1'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.perDiem} onChange={e => setDetailForm({...detailForm, perDiem: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                                <select value={detailForm.perDiemCurrency} onChange={e => setDetailForm({...detailForm, perDiemCurrency: e.target.value, perDiemRate: e.target.value === 'AMD' ? '1' : detailForm.perDiemRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.perDiemRate} onChange={e => setDetailForm({...detailForm, perDiemRate: e.target.value})} disabled={detailForm.perDiemCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                                  {detailForm.perDiemCurrency !== 'AMD' && (parseFloat(detailForm.perDiem) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.perDiem) || 0) * (parseFloat(detailForm.perDiemRate) || 1))) : ''}
+                                </div>
+                              </div>
                             </div>
-                            <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-2">
-                              <p className="text-[10px] text-amber-600">{'Топливо'}</p>
-                              <p className="font-medium font-mono">{detail.directFuelAmd ? fmtAmd(detail.directFuelAmd) : '—'}</p>
-                              {detail.fuelCost && detail.fuelCurrency !== 'AMD' && (
-                                <p className="text-[10px] text-muted-foreground">{Number(detail.fuelCost).toLocaleString('ru-RU')} {CUR_SYMBOL[detail.fuelCurrency] || detail.fuelCurrency}</p>
-                              )}
-                              {detail.fuelLiters && <p className="text-[10px] text-muted-foreground">{Number(detail.fuelLiters)} {'л'}</p>}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-purple-600">{'Суточные №2'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.perDiem2} onChange={e => setDetailForm({...detailForm, perDiem2: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                                <select value={detailForm.perDiem2Currency} onChange={e => setDetailForm({...detailForm, perDiem2Currency: e.target.value, perDiem2Rate: e.target.value === 'AMD' ? '1' : detailForm.perDiem2Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.perDiem2Rate} onChange={e => setDetailForm({...detailForm, perDiem2Rate: e.target.value})} disabled={detailForm.perDiem2Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                                  {detailForm.perDiem2Currency !== 'AMD' && (parseFloat(detailForm.perDiem2) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.perDiem2) || 0) * (parseFloat(detailForm.perDiem2Rate) || 1))) : ''}
+                                </div>
+                              </div>
                             </div>
-                            <div className="bg-slate-50 dark:bg-slate-800/30 rounded-lg p-2">
-                              <p className="text-[10px] text-slate-600">{'Прочие'}</p>
-                              <p className="font-medium font-mono">{detail.directOtherAmd ? fmtAmd(detail.directOtherAmd) : '—'}</p>
-                              {detail.otherExpenses && detail.otherCurrency !== 'AMD' && (
-                                <p className="text-[10px] text-muted-foreground">{Number(detail.otherExpenses).toLocaleString('ru-RU')} {CUR_SYMBOL[detail.otherCurrency] || detail.otherCurrency}</p>
-                              )}
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-purple-600">{'Суточные №3'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.perDiem3} onChange={e => setDetailForm({...detailForm, perDiem3: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                                <select value={detailForm.perDiem3Currency} onChange={e => setDetailForm({...detailForm, perDiem3Currency: e.target.value, perDiem3Rate: e.target.value === 'AMD' ? '1' : detailForm.perDiem3Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.perDiem3Rate} onChange={e => setDetailForm({...detailForm, perDiem3Rate: e.target.value})} disabled={detailForm.perDiem3Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                                  {detailForm.perDiem3Currency !== 'AMD' && (parseFloat(detailForm.perDiem3) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.perDiem3) || 0) * (parseFloat(detailForm.perDiem3Rate) || 1))) : ''}
+                                </div>
+                              </div>
                             </div>
-                            <div className="bg-red-50 dark:bg-red-950/30 rounded-lg p-2">
-                              <p className="text-[10px] text-red-600">{'Итого'}</p>
-                              <p className="font-medium font-mono font-bold text-red-600">{fmtAmd(detail.directTotalAmd)}</p>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-slate-600">{'Прочие'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.otherExpenses} onChange={e => setDetailForm({...detailForm, otherExpenses: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder={'Сумма'} />
+                                <select value={detailForm.otherCurrency} onChange={e => setDetailForm({...detailForm, otherCurrency: e.target.value, otherRate: e.target.value === 'AMD' ? '1' : detailForm.otherRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.otherRate} onChange={e => setDetailForm({...detailForm, otherRate: e.target.value})} disabled={detailForm.otherCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder={'Курс'} />
+                                <div className="flex items-center text-xs font-mono text-slate-600 pl-1">
+                                  {detailForm.otherCurrency !== 'AMD' && (parseFloat(detailForm.otherExpenses) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.otherExpenses) || 0) * (parseFloat(detailForm.otherRate) || 1))) : ''}
+                                </div>
+                              </div>
                             </div>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-amber-600">{'Топливо'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.fuelCost} onChange={e => setDetailForm({...detailForm, fuelCost: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder={'Стоимость'} />
+                                <select value={detailForm.fuelCurrency} onChange={e => setDetailForm({...detailForm, fuelCurrency: e.target.value, fuelRate: e.target.value === 'AMD' ? '1' : detailForm.fuelRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.fuelRate} onChange={e => setDetailForm({...detailForm, fuelRate: e.target.value})} disabled={detailForm.fuelCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder={'Курс'} />
+                                <div className="flex items-center text-xs font-mono text-amber-600 pl-1">
+                                  {detailForm.fuelCurrency !== 'AMD' && (parseFloat(detailForm.fuelCost) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.fuelCost) || 0) * (parseFloat(detailForm.fuelRate) || 1))) : ''}
+                                </div>
+                              </div>
+                              <div className="mt-1">
+                                <input type="number" step="0.01" min="0" value={detailForm.fuelLiters} onChange={e => setDetailForm({...detailForm, fuelLiters: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-[140px]" placeholder={'Литры'} />
+                              </div>
+                            </div>
+                          </div>
+                          {(() => {
+                            const a = computeExpAmd(detailForm);
+                            return a.total > 0 ? (
+                              <p className="text-xs text-red-600 font-bold mt-2">{'Итого расходы'}: {fmtAmd(a.total)}</p>
+                            ) : null;
+                          })()}
+                          <div className="flex justify-end mt-3">
+                            <button type="button" onClick={saveDetailForm} disabled={detailSaving}
+                              className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5">
+                              {detailSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {'Сохранить'}
+                            </button>
                           </div>
                         </div>
 
@@ -661,187 +781,45 @@ export default function VehicleTripsPage() {
       {/* Trip Create/Edit Modal */}
       {showTripModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowTripModal(false)}>
-          <div className="bg-card rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold">{tripForm.id ? 'Редактировать рейс' : 'Новый рейс машины'}</h2>
+          <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">{'Новый рейс машины'}</h2>
+            <p className="text-xs text-muted-foreground -mt-2">{'Пробег, топливо, расходы и статус заполняются потом — в развёрнутой карточке рейса.'}</p>
 
-            {/* Trip number + Vehicle + Driver */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">{'№ рейса'}</label>
-                <input type="text" value={tripForm.tripNumber} onChange={e => setTripForm({...tripForm, tripNumber: e.target.value})}
-                  className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5 font-mono" placeholder={'авто'} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{'Машина'} *</label>
-                <select value={tripForm.vehicleId} onChange={e => setTripForm({...tripForm, vehicleId: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5">
-                  <option value="">{'Выберите…'}</option>
-                  {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNumber} {'—'} {v.brand} {v.model}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">{'Водитель'}</label>
-                <select value={tripForm.driverId} onChange={e => setTripForm({...tripForm, driverId: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5">
-                  <option value="">{'Не указан'}</option>
-                  {drivers.map(d => <option key={d.id} value={d.id}>{d.fullName}</option>)}
-                </select>
-              </div>
+            <div>
+              <label className="text-xs text-muted-foreground">{'№ рейса'}</label>
+              <input type="text" value={tripForm.tripNumber} onChange={e => setTripForm({...tripForm, tripNumber: e.target.value})}
+                className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5 font-mono" placeholder={'авто'} />
             </div>
-
-            {/* Status selector */}
-            {tripForm.id && (
+            <div>
+              <label className="text-xs text-muted-foreground">{'Машина'} *</label>
+              <select value={tripForm.vehicleId} onChange={e => setTripForm({...tripForm, vehicleId: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5">
+                <option value="">{'Выберите…'}</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNumber} {'—'} {v.brand} {v.model}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">{'Водитель'}</label>
+              <select value={tripForm.driverId} onChange={e => setTripForm({...tripForm, driverId: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5">
+                <option value="">{'Не указан'}</option>
+                {drivers.map(d => <option key={d.id} value={d.id}>{d.fullName}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground">{'Статус'}</label>
-                <select value={tripForm.status} onChange={e => setTripForm({...tripForm, status: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5">
-                  <option value="active">{'\u0412 \u0440\u0435\u0439\u0441\u0435'}</option>
-                  <option value="completed">{'\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D'}</option>
-                  <option value="archived">{'\u0410\u0440\u0445\u0438\u0432'}</option>
-                </select>
-              </div>
-            )}
-
-            <p className="text-xs font-medium text-muted-foreground mt-2 border-t pt-2">{'Выезд'}</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">{'Дата'} *</label>
+                <label className="text-xs text-muted-foreground">{'Дата выезда'} *</label>
                 <input type="date" value={tripForm.departureDate} onChange={e => setTripForm({...tripForm, departureDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                <input type="number" min="0" value={tripForm.startMileage} onChange={e => setTripForm({...tripForm, startMileage: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'нач.'} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                <input type="number" step="0.01" min="0" value={tripForm.startFuel} onChange={e => setTripForm({...tripForm, startFuel: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'остаток'} />
-              </div>
-              {departureHint && <p className="col-span-3 text-[11px] text-amber-600">{departureHint}</p>}
-            </div>
-
-            <p className="text-xs font-medium text-muted-foreground mt-2 border-t pt-2">{'Возврат'}</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground">{'Дата'}</label>
+                <label className="text-xs text-muted-foreground">{'Дата возврата'}</label>
                 <input type="date" value={tripForm.returnDate} onChange={e => setTripForm({...tripForm, returnDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                <input type="number" min="0" value={tripForm.endMileage} onChange={e => setTripForm({...tripForm, endMileage: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'кон.'} />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                <input type="number" step="0.01" min="0" value={tripForm.endFuel} onChange={e => setTripForm({...tripForm, endFuel: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'остаток'} />
-              </div>
-              {returnHint && <p className="col-span-3 text-[11px] text-amber-600">{returnHint}</p>}
-            </div>
-
-            {/* Expenses section in trip form — per-expense currency/rate */}
-            <p className="text-xs font-medium text-muted-foreground mt-2 border-t pt-2">{'Расходы по рейсу'}</p>
-            {/* Salary row */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-blue-600">{'Зарплата'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <input type="number" step="0.01" min="0" value={tripForm.salary} onChange={e => setTripForm({...tripForm, salary: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
-                <select value={tripForm.salaryCurrency} onChange={e => setTripForm({...tripForm, salaryCurrency: e.target.value, salaryRate: e.target.value === 'AMD' ? '1' : tripForm.salaryRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.salaryRate} onChange={e => setTripForm({...tripForm, salaryRate: e.target.value})} disabled={tripForm.salaryCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
-                <div className="flex items-center text-xs font-mono text-blue-600 pl-1">
-                  {tripForm.salaryCurrency !== 'AMD' && (parseFloat(tripForm.salary) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.salary) || 0) * (parseFloat(tripForm.salaryRate) || 1))) : ''}
-                </div>
-              </div>
-            </div>
-            {/* Per Diem rows — маршрут может проходить через несколько стран, суточные по
-                каждой считаются отдельно, поэтому блок повторён 3 раза (не страна-специфичные
-                поля — просто три одинаковых слота, логист заполняет сколько нужно). */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-purple-600">{'Суточные №1'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <input type="number" step="0.01" min="0" value={tripForm.perDiem} onChange={e => setTripForm({...tripForm, perDiem: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
-                <select value={tripForm.perDiemCurrency} onChange={e => setTripForm({...tripForm, perDiemCurrency: e.target.value, perDiemRate: e.target.value === 'AMD' ? '1' : tripForm.perDiemRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.perDiemRate} onChange={e => setTripForm({...tripForm, perDiemRate: e.target.value})} disabled={tripForm.perDiemCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
-                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
-                  {tripForm.perDiemCurrency !== 'AMD' && (parseFloat(tripForm.perDiem) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem) || 0) * (parseFloat(tripForm.perDiemRate) || 1))) : ''}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-purple-600">{'Суточные №2'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <input type="number" step="0.01" min="0" value={tripForm.perDiem2} onChange={e => setTripForm({...tripForm, perDiem2: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
-                <select value={tripForm.perDiem2Currency} onChange={e => setTripForm({...tripForm, perDiem2Currency: e.target.value, perDiem2Rate: e.target.value === 'AMD' ? '1' : tripForm.perDiem2Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.perDiem2Rate} onChange={e => setTripForm({...tripForm, perDiem2Rate: e.target.value})} disabled={tripForm.perDiem2Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
-                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
-                  {tripForm.perDiem2Currency !== 'AMD' && (parseFloat(tripForm.perDiem2) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem2) || 0) * (parseFloat(tripForm.perDiem2Rate) || 1))) : ''}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-purple-600">{'Суточные №3'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <input type="number" step="0.01" min="0" value={tripForm.perDiem3} onChange={e => setTripForm({...tripForm, perDiem3: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
-                <select value={tripForm.perDiem3Currency} onChange={e => setTripForm({...tripForm, perDiem3Currency: e.target.value, perDiem3Rate: e.target.value === 'AMD' ? '1' : tripForm.perDiem3Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.perDiem3Rate} onChange={e => setTripForm({...tripForm, perDiem3Rate: e.target.value})} disabled={tripForm.perDiem3Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
-                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
-                  {tripForm.perDiem3Currency !== 'AMD' && (parseFloat(tripForm.perDiem3) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.perDiem3) || 0) * (parseFloat(tripForm.perDiem3Rate) || 1))) : ''}
-                </div>
-              </div>
-            </div>
-            {/* Other expenses row */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-slate-600">{'Прочие'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <input type="number" step="0.01" min="0" value={tripForm.otherExpenses} onChange={e => setTripForm({...tripForm, otherExpenses: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder={'Сумма'} />
-                <select value={tripForm.otherCurrency} onChange={e => setTripForm({...tripForm, otherCurrency: e.target.value, otherRate: e.target.value === 'AMD' ? '1' : tripForm.otherRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.otherRate} onChange={e => setTripForm({...tripForm, otherRate: e.target.value})} disabled={tripForm.otherCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder={'Курс'} />
-                <div className="flex items-center text-xs font-mono text-slate-600 pl-1">
-                  {tripForm.otherCurrency !== 'AMD' && (parseFloat(tripForm.otherExpenses) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.otherExpenses) || 0) * (parseFloat(tripForm.otherRate) || 1))) : ''}
-                </div>
-              </div>
-            </div>
-            {/* Fuel row */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-medium text-amber-600">{'Топливо'}</label>
-              <div className="grid grid-cols-4 gap-2">
-                <div className="flex gap-1">
-                  <input type="number" step="0.01" min="0" value={tripForm.fuelCost} onChange={e => setTripForm({...tripForm, fuelCost: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder={'Стоимость'} />
-                </div>
-                <select value={tripForm.fuelCurrency} onChange={e => setTripForm({...tripForm, fuelCurrency: e.target.value, fuelRate: e.target.value === 'AMD' ? '1' : tripForm.fuelRate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
-                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <input type="number" step="0.0001" min="0" value={tripForm.fuelRate} onChange={e => setTripForm({...tripForm, fuelRate: e.target.value})} disabled={tripForm.fuelCurrency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder={'Курс'} />
-                <div className="flex items-center text-xs font-mono text-amber-600 pl-1">
-                  {tripForm.fuelCurrency !== 'AMD' && (parseFloat(tripForm.fuelCost) || 0) > 0 ? fmtAmd(Math.round((parseFloat(tripForm.fuelCost) || 0) * (parseFloat(tripForm.fuelRate) || 1))) : ''}
-                </div>
-              </div>
-              <div className="mt-1">
-                <input type="number" step="0.01" min="0" value={tripForm.fuelLiters} onChange={e => setTripForm({...tripForm, fuelLiters: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-[140px]" placeholder={'Литры'} />
-              </div>
-            </div>
-            {/* Total AMD preview */}
-            {(() => {
-              const a = tripExpAmd();
-              return a.total > 0 ? (
-                <p className="text-xs text-red-600 font-bold mt-1">{'Итого расходы'}: {fmtAmd(a.total)}</p>
-              ) : null;
-            })()}
-
-            <div>
-              <label className="text-xs text-muted-foreground">{'Примечания'}</label>
-              <textarea value={tripForm.notes} onChange={e => setTripForm({...tripForm, notes: e.target.value})} rows={2} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setShowTripModal(false)} className="px-4 py-2 text-sm border rounded-lg hover:bg-muted">{'Отмена'}</button>
               <button type="button" onClick={saveTripForm} disabled={saving || !tripForm.vehicleId || !tripForm.departureDate}
                 className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : (tripForm.id ? 'Сохранить' : 'Создать')}
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Создать'}
               </button>
             </div>
           </div>
