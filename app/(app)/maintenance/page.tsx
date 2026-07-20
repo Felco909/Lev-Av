@@ -70,6 +70,21 @@ const STATUS_LABEL: Record<string, string> = {
   red: '\u0422\u0440\u0435\u0431\u0443\u0435\u0442\u0441\u044f \u0422\u041e',
 };
 
+/**
+ * \u041e\u0442\u0434\u0435\u043b\u044c\u043d\u0430\u044f \u043e\u0442 STATUS_LABEL (15%-\u043f\u043e\u0440\u043e\u0433 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0430) \u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u0430\u044f \u0448\u043a\u0430\u043b\u0430 \u043f\u043e \u0422\u0417 \u2014 \u0444\u0438\u043a\u0441\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435
+ * \u0430\u0431\u0441\u043e\u043b\u044e\u0442\u043d\u044b\u0435 \u043a\u0438\u043b\u043e\u043c\u0435\u0442\u0440\u044b \u0434\u043e \u0422\u041e, \u0430 \u043d\u0435 \u0434\u043e\u043b\u044f \u043e\u0442 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b\u0430 \u0440\u0435\u0433\u043b\u0430\u043c\u0435\u043d\u0442\u0430. \u041f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u0434\u043e\u043f. \u0431\u0435\u0439\u0434\u0436\u0435\u043c
+ * \u0440\u044f\u0434\u043e\u043c \u0441 \u043e\u0431\u044b\u0447\u043d\u044b\u043c \u0441\u0442\u0430\u0442\u0443\u0441\u043e\u043c, \u043d\u0435 \u0437\u0430\u043c\u0435\u043d\u044f\u0435\u0442 \u0435\u0433\u043e (\u043e\u0431\u044b\u0447\u043d\u044b\u0439 \u0441\u0442\u0430\u0442\u0443\u0441 \u0443\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442 \u0438 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e\u0439 \u0438\u043d\u0442\u0435\u0440\u0432\u0430\u043b
+ * \u0422\u041e, \u044d\u0442\u043e\u0442 \u2014 \u0442\u043e\u043b\u044c\u043a\u043e \u043a\u0438\u043b\u043e\u043c\u0435\u0442\u0440\u0430\u0436).
+ */
+function mileageWarningLabel(remainingKm: number | null): { text: string; cls: string } | null {
+  if (remainingKm == null) return null;
+  if (remainingKm <= 0) return { text: '\u041f\u0440\u043e\u0441\u0440\u043e\u0447\u0435\u043d\u043e', cls: 'bg-red-100 text-red-700' };
+  if (remainingKm <= 1000) return { text: `\u041e\u0441\u0442\u0430\u043b\u043e\u0441\u044c ${remainingKm.toLocaleString()} \u043a\u043c (<1000)`, cls: 'bg-red-100 text-red-700' };
+  if (remainingKm <= 2000) return { text: `\u041e\u0441\u0442\u0430\u043b\u043e\u0441\u044c ${remainingKm.toLocaleString()} \u043a\u043c (<2000)`, cls: 'bg-amber-100 text-amber-700' };
+  if (remainingKm <= 5000) return { text: `\u041e\u0441\u0442\u0430\u043b\u043e\u0441\u044c ${remainingKm.toLocaleString()} \u043a\u043c (<5000)`, cls: 'bg-amber-100 text-amber-700' };
+  return null;
+}
+
 const PAY_STATUS_MAP: Record<string, string> = { paid: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e', unpaid: '\u041d\u0435 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043e', partial: '\u0427\u0430\u0441\u0442\u0438\u0447\u043d\u043e' };
 const PAY_STATUS_COLOR: Record<string, string> = { paid: 'bg-emerald-100 text-emerald-700', unpaid: 'bg-red-100 text-red-700', partial: 'bg-amber-100 text-amber-700' };
 
@@ -646,6 +661,12 @@ export default function MaintenancePage() {
                                   )}
                                 </div>
                               </div>
+                              {(() => {
+                                const w = mileageWarningLabel(s.remainingKm);
+                                return w ? (
+                                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0 whitespace-nowrap ${w.cls}`}>{w.text}</span>
+                                ) : null;
+                              })()}
                               <button onClick={() => openNewRecord(vs.vehicle.id, s.regulation.id)} className="text-xs px-2 py-1 border rounded-md hover:bg-muted transition shrink-0" title="Записать">
                                 <Plus className="w-3 h-3" />
                               </button>

@@ -19,6 +19,25 @@ async function maybeCalculateTotals(tripId: string, departureDate: Date | null, 
   }
 }
 
+/**
+ * Обновляет Vehicle.currentMileage из пробега рейса на возврате — тот же паттерн "выше
+ * текущего — обновляем", что уже используется в app/api/fuel-records/route.ts и
+ * app/api/service-records/route.ts. Нужен, чтобы модуль ТО (calculateMaintenanceStatus)
+ * видел актуальный пробег сразу при закрытии рейса, а не только на следующей ежедневной
+ * синхронизации с Wialon (06:00, lib/wialon/syncMileage.ts).
+ */
+async function maybeSyncVehicleMileage(vehicleId: string, endMileage: number | null) {
+  if (endMileage == null) return;
+  try {
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { currentMileage: true } });
+    if (!vehicle?.currentMileage || endMileage > vehicle.currentMileage) {
+      await prisma.vehicle.update({ where: { id: vehicleId }, data: { currentMileage: endMileage } });
+    }
+  } catch (e) {
+    console.error('[vehicle-trips] обновление пробега машины (ТО) не удалось:', e);
+  }
+}
+
 export const dynamic = 'force-dynamic';
 
 /* Generate next trip number: VT-0001 ... */
@@ -139,6 +158,7 @@ export async function POST(req: NextRequest) {
   });
 
   await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+  await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
 
   return NextResponse.json(record, { status: 201 });
 }
@@ -250,6 +270,7 @@ export async function PUT(req: NextRequest) {
   });
 
   await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+  await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
 
   return NextResponse.json(record);
 }
