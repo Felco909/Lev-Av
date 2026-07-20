@@ -1,7 +1,9 @@
 /**
  * Ежедневная синхронизация пробега машин с Wialon — для Windows Task Scheduler
  * (по аналогии с scripts/pg-backup-daily.ps1 + Install-LevAv-DailyBackupTask.ps1).
- * Запуск: npx tsx --require dotenv/config scripts/wialon-sync-mileage.ts
+ * Запуск: npx tsx -r dotenv/config scripts/wialon-sync-mileage.ts dotenv_config_path=.env.local
+ * (WIALON_TOKEN лежит в .env.local, не в .env — без dotenv_config_path не подхватится;
+ * DATABASE_URL из .env подхватывает сам Prisma Client независимо от dotenv)
  * Ничего не делает, если ни у одной машины не заполнен Vehicle.wialonUnitId.
  */
 import { syncVehicleMileageFromWialon } from '../lib/wialon/syncMileage';
