@@ -942,10 +942,22 @@ function haversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
  */
 const MIN_TRACK_HOP_KM = 0.02; // 20 метров
 
-/** Суммирует пройденное расстояние по треку, отбрасывая GPS-шум ниже MIN_TRACK_HOP_KM. */
-function computeTrackMileageKm(messages: WialonMessage[]): number {
+interface TrackSummary {
+  mileageKm: number;
+  idleMinutes: number;
+}
+
+/**
+ * Суммирует пройденное расстояние и время стоянок по треку, отбрасывая GPS-шум ниже
+ * MIN_TRACK_HOP_KM. Простой — сумма промежутков времени между соседними точками, где скачок
+ * координат оказался ниже порога (т.е. машина не двигалась) — приближение: длинные пробелы
+ * без связи (не "стоянка", а "нет сигнала") тоже засчитываются как простой, отдельно не
+ * различаем (см. аналогичную оговорку у getMileageFromTrack про GPS-шум и покрытие).
+ */
+function computeTrackSummary(messages: WialonMessage[]): TrackSummary {
   let totalKm = 0;
-  let prev: { lat: number; lon: number } | null = null;
+  let idleSeconds = 0;
+  let prev: { lat: number; lon: number; t: number } | null = null;
 
   for (const msg of messages) {
     const pos = msg.pos;
@@ -954,16 +966,22 @@ function computeTrackMileageKm(messages: WialonMessage[]): number {
 
     if (prev) {
       const hopKm = haversineDistanceKm(prev.lat, prev.lon, pos.y, pos.x);
-      if (hopKm >= MIN_TRACK_HOP_KM) totalKm += hopKm;
+      if (hopKm >= MIN_TRACK_HOP_KM) {
+        totalKm += hopKm;
+      } else {
+        idleSeconds += Math.max(0, msg.t - prev.t);
+      }
     }
-    prev = { lat: pos.y, lon: pos.x };
+    prev = { lat: pos.y, lon: pos.x, t: msg.t };
   }
 
-  return Math.round(totalKm * 10) / 10;
+  return { mileageKm: Math.round(totalKm * 10) / 10, idleMinutes: Math.round(idleSeconds / 60) };
 }
 
 export interface WialonTrackMileageResult {
   mileageKm: number;
+  /** Время стоянок за интервал, минуты — см. оговорку в computeTrackSummary про пробелы связи. */
+  idleMinutes: number;
   /** Сколько сообщений с GPS-позицией реально использовано в расчёте (для отладки/доверия к числу) */
   messagesUsed: number;
   raw: any;
@@ -998,7 +1016,7 @@ export async function getMileageFromTrack(
     if (e instanceof WialonApiError) {
       if (e.code === 1001) {
         // "Нет сообщений за выбранный период" — ожидаемо, не ошибка.
-        return { mileageKm: 0, messagesUsed: 0, raw: { noData: true, reason: 'no_messages_in_interval' } };
+        return { mileageKm: 0, idleMinutes: 0, messagesUsed: 0, raw: { noData: true, reason: 'no_messages_in_interval' } };
       }
       throw new Error(`Wialon: ошибка загрузки сообщений (messages/load_interval): ${e.message}`);
     }
@@ -1006,10 +1024,11 @@ export async function getMileageFromTrack(
   }
 
   const messagesWithPos = messages.filter((m) => m.pos && typeof m.pos.y === 'number' && typeof m.pos.x === 'number');
-  const mileageKm = computeTrackMileageKm(messagesWithPos);
+  const { mileageKm, idleMinutes } = computeTrackSummary(messagesWithPos);
 
   return {
     mileageKm,
+    idleMinutes,
     messagesUsed: messagesWithPos.length,
     raw: { timeFrom, timeTo, totalMessages: messages.length, messagesWithPos: messagesWithPos.length },
   };
@@ -1031,6 +1050,11 @@ export interface WialonFuelAtDateResult {
   fuelLevelL: number | null;
   /** Время сообщения, из которого реально взято показание (может отличаться от запрошенной даты) */
   measuredAt: Date | null;
+  /** Координаты из того же сообщения, что и показание топлива — доп. запрос не нужен.
+   *  null, если у машины вообще нет топливных датчиков (сообщение для координат не искалось —
+   *  см. ограничение в описании функции) или сообщение без GPS-фикса. */
+  lat: number | null;
+  lon: number | null;
   raw: any;
 }
 
@@ -1055,7 +1079,7 @@ export async function getFuelLevelAtDate(unitId: number, date: Date): Promise<Wi
     throw new Error(`Wialon: не удалось получить датчики топлива машины: ${(e as Error).message}`);
   }
   if (sensors.length === 0) {
-    return { fuelLevelL: null, measuredAt: null, raw: { reason: 'no_fuel_sensors' } };
+    return { fuelLevelL: null, measuredAt: null, lat: null, lon: null, raw: { reason: 'no_fuel_sensors' } };
   }
 
   const targetTs = Math.floor(date.getTime() / 1000);
@@ -1069,7 +1093,7 @@ export async function getFuelLevelAtDate(unitId: number, date: Date): Promise<Wi
       throw new Error(`Wialon: ошибка загрузки сообщений (messages/load_interval): ${(e as Error).message}`);
     }
 
-    let best: { measuredAt: Date; fuelLevelL: number; diffSec: number } | null = null;
+    let best: { measuredAt: Date; fuelLevelL: number; diffSec: number; lat: number | null; lon: number | null } | null = null;
     for (const msg of messages) {
       const values: number[] = [];
       for (const sensor of sensors) {
@@ -1083,18 +1107,28 @@ export async function getFuelLevelAtDate(unitId: number, date: Date): Promise<Wi
           measuredAt: new Date(msg.t * 1000),
           fuelLevelL: Math.round(values.reduce((s, v) => s + v, 0) * 10) / 10,
           diffSec,
+          lat: typeof msg.pos?.y === 'number' ? msg.pos.y : null,
+          lon: typeof msg.pos?.x === 'number' ? msg.pos.x : null,
         };
       }
     }
 
     if (best) {
-      return { fuelLevelL: best.fuelLevelL, measuredAt: best.measuredAt, raw: { windowHours, diffSeconds: best.diffSec } };
+      return {
+        fuelLevelL: best.fuelLevelL,
+        measuredAt: best.measuredAt,
+        lat: best.lat,
+        lon: best.lon,
+        raw: { windowHours, diffSeconds: best.diffSec },
+      };
     }
   }
 
   return {
     fuelLevelL: null,
     measuredAt: null,
+    lat: null,
+    lon: null,
     raw: { reason: 'no_data_in_any_window', maxWindowHours: FUEL_LOOKUP_WINDOWS_HOURS[FUEL_LOOKUP_WINDOWS_HOURS.length - 1] },
   };
 }
@@ -1104,6 +1138,11 @@ export interface WialonFuelConsumptionResult {
   fuelConsumedL: number | null;
   startFuelL: number | null;
   endFuelL: number | null;
+  /** Координаты той же пары сообщений, что дали startFuelL/endFuelL — доп. запрос не нужен. */
+  startLat: number | null;
+  startLon: number | null;
+  endLat: number | null;
+  endLon: number | null;
   raw: any;
 }
 
@@ -1126,7 +1165,16 @@ export async function getFuelConsumedBetweenDates(
   const fuelConsumedL =
     start.fuelLevelL != null && end.fuelLevelL != null ? Math.round((start.fuelLevelL - end.fuelLevelL) * 10) / 10 : null;
 
-  return { fuelConsumedL, startFuelL: start.fuelLevelL, endFuelL: end.fuelLevelL, raw: { start, end } };
+  return {
+    fuelConsumedL,
+    startFuelL: start.fuelLevelL,
+    endFuelL: end.fuelLevelL,
+    startLat: start.lat,
+    startLon: start.lon,
+    endLat: end.lat,
+    endLon: end.lon,
+    raw: { start, end },
+  };
 }
 
 // ───────────────────────── Абсолютный пробег (одометр) на дату ─────────────────────────

@@ -72,7 +72,8 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json();
-  const { vehicleId, driverId, departureDate, startMileage, startFuel, returnDate, endMileage, endFuel, notes,
+  const { vehicleId, driverId, departureDate, departureLat, departureLon, startMileage, startFuel,
+    returnDate, returnLat, returnLon, endMileage, endFuel, notes,
     tripNumber: customTripNumber,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
@@ -106,9 +107,13 @@ export async function POST(req: NextRequest) {
       vehicleId,
       driverId: driverId || null,
       departureDate: new Date(departureDate),
+      departureLat: departureLat != null && departureLat !== '' ? parseFloat(departureLat) : null,
+      departureLon: departureLon != null && departureLon !== '' ? parseFloat(departureLon) : null,
       startMileage: startMileage ? parseInt(startMileage, 10) : null,
       startFuel: startFuel ? parseFloat(startFuel) : null,
       returnDate: returnDate ? new Date(returnDate) : null,
+      returnLat: returnLat != null && returnLat !== '' ? parseFloat(returnLat) : null,
+      returnLon: returnLon != null && returnLon !== '' ? parseFloat(returnLon) : null,
       endMileage: endMileage ? parseInt(endMileage, 10) : null,
       endFuel: endFuel ? parseFloat(endFuel) : null,
       status: returnDate ? 'completed' : 'active',
@@ -143,7 +148,8 @@ export async function PUT(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json();
-  const { id, vehicleId, driverId, departureDate, startMileage, startFuel, returnDate, endMileage, endFuel, notes, status: st,
+  const { id, vehicleId, driverId, departureDate, departureLat, departureLon, startMileage, startFuel,
+    returnDate, returnLat, returnLon, endMileage, endFuel, notes, status: st,
     tripNumber,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
@@ -158,9 +164,13 @@ export async function PUT(req: NextRequest) {
   if (vehicleId !== undefined) data.vehicleId = vehicleId;
   if (driverId !== undefined) data.driverId = driverId || null;
   if (departureDate !== undefined) data.departureDate = new Date(departureDate);
+  if (departureLat !== undefined) data.departureLat = departureLat != null && departureLat !== '' ? parseFloat(departureLat) : null;
+  if (departureLon !== undefined) data.departureLon = departureLon != null && departureLon !== '' ? parseFloat(departureLon) : null;
   if (startMileage !== undefined) data.startMileage = startMileage ? parseInt(startMileage, 10) : null;
   if (startFuel !== undefined) data.startFuel = startFuel ? parseFloat(startFuel) : null;
   if (returnDate !== undefined) data.returnDate = returnDate ? new Date(returnDate) : null;
+  if (returnLat !== undefined) data.returnLat = returnLat != null && returnLat !== '' ? parseFloat(returnLat) : null;
+  if (returnLon !== undefined) data.returnLon = returnLon != null && returnLon !== '' ? parseFloat(returnLon) : null;
   if (endMileage !== undefined) data.endMileage = endMileage ? parseInt(endMileage, 10) : null;
   if (endFuel !== undefined) data.endFuel = endFuel ? parseFloat(endFuel) : null;
   if (notes !== undefined) data.notes = notes || null;

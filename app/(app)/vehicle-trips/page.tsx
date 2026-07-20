@@ -10,9 +10,12 @@ interface Driver { id: string; fullName: string }
 interface VT {
   id: string; tripNumber: string; vehicleId: string; driverId: string | null;
   vehicle: Vehicle; driver: Driver | null;
-  departureDate: string; startMileage: number | null; startFuel: number | null;
-  returnDate: string | null; endMileage: number | null; endFuel: number | null;
+  departureDate: string; departureLat: number | null; departureLon: number | null;
+  startMileage: number | null; startFuel: number | null;
+  returnDate: string | null; returnLat: number | null; returnLon: number | null;
+  endMileage: number | null; endFuel: number | null;
   status: string; notes: string | null;
+  calculatedIdleMinutes: number | null;
   salary: number | null; perDiem: number | null; otherExpenses: number | null;
   perDiem2: number | null; perDiem3: number | null;
   salaryCurrency: string; salaryRate: number;
@@ -37,7 +40,9 @@ interface VTDetail extends VT {
 
 interface TripForm {
   id?: string; tripNumber: string; vehicleId: string; driverId: string; departureDate: string;
+  departureLat: string; departureLon: string;
   startMileage: string; startFuel: string; returnDate: string;
+  returnLat: string; returnLon: string;
   endMileage: string; endFuel: string; notes: string; status: string;
   salary: string; perDiem: string; otherExpenses: string;
   perDiem2: string; perDiem3: string;
@@ -64,8 +69,10 @@ function wialonHintText(reason?: string): string {
 }
 
 const emptyTripForm = (): TripForm => ({
-  tripNumber: '', vehicleId: '', driverId: '', departureDate: new Date().toISOString().slice(0, 10),
-  startMileage: '', startFuel: '', returnDate: '', endMileage: '', endFuel: '', notes: '', status: 'active',
+  tripNumber: '', vehicleId: '', driverId: '', departureDate: new Date().toISOString().slice(0, 16),
+  departureLat: '', departureLon: '',
+  startMileage: '', startFuel: '', returnDate: '', returnLat: '', returnLon: '',
+  endMileage: '', endFuel: '', notes: '', status: 'active',
   salary: '', perDiem: '', otherExpenses: '',
   perDiem2: '', perDiem3: '',
   salaryCurrency: 'AMD', salaryRate: '1',
@@ -82,10 +89,14 @@ function mapVtToForm(r: VT): TripForm {
   return {
     id: r.id, tripNumber: r.tripNumber || '',
     vehicleId: r.vehicleId, driverId: r.driverId || '',
-    departureDate: r.departureDate?.slice(0, 10) || '',
+    departureDate: r.departureDate?.slice(0, 16) || '',
+    departureLat: r.departureLat != null ? String(r.departureLat) : '',
+    departureLon: r.departureLon != null ? String(r.departureLon) : '',
     startMileage: r.startMileage != null ? String(r.startMileage) : '',
     startFuel: r.startFuel != null ? String(Number(r.startFuel)) : '',
-    returnDate: r.returnDate?.slice(0, 10) || '',
+    returnDate: r.returnDate?.slice(0, 16) || '',
+    returnLat: r.returnLat != null ? String(r.returnLat) : '',
+    returnLon: r.returnLon != null ? String(r.returnLon) : '',
     endMileage: r.endMileage != null ? String(r.endMileage) : '',
     endFuel: r.endFuel != null ? String(Number(r.endFuel)) : '',
     notes: r.notes || '', status: r.status || 'active',
@@ -174,13 +185,24 @@ export default function VehicleTripsPage() {
   const [returnHint, setReturnHint] = useState<string | null>(null);
   const [recalculating, setRecalculating] = useState(false);
 
+  // Живой снимок активного рейса ("Обновить сейчас") — по кнопке, НЕ постоянный автополлинг
+  // (тот — отдельная задача, Этап 6 "Онлайн-мониторинг", дублировать его здесь не стал).
+  const [liveSnapshot, setLiveSnapshot] = useState<{
+    mileageKm: number | null; fuelLevelL: number | null; lat: number | null; lon: number | null;
+    speedKmh: number | null; lastMessageAt: string | null;
+  } | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
     fetch('/api/drivers').then(r => r.json()).then(d => setDrivers(Array.isArray(d) ? d : d.drivers || []));
   }, []);
 
-  const fetchWialonSnapshot = useCallback(async (wialonUnitId: string, dateStr: string) => {
-    const datetime = new Date(`${dateStr}T12:00:00`).toISOString();
+  const fetchWialonSnapshot = useCallback(async (wialonUnitId: string, dateTimeStr: string) => {
+    // dateTimeStr — значение input[type=datetime-local] ("YYYY-MM-DDTHH:mm"), уже полный момент
+    // времени (раньше принимали только дату и подставляли фиксированные 12:00).
+    const datetime = new Date(dateTimeStr).toISOString();
     const res = await fetch(`/api/wialon/vehicle-snapshot?wialonUnitId=${encodeURIComponent(wialonUnitId)}&datetime=${encodeURIComponent(datetime)}`);
     return res.json();
   }, []);
@@ -200,6 +222,8 @@ export default function VehicleTripsPage() {
           ...prev,
           startMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
           startFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
+          departureLat: data.lat != null ? String(data.lat) : prev.departureLat,
+          departureLon: data.lon != null ? String(data.lon) : prev.departureLon,
         }));
         setDepartureHint(
           data.isApproximate
@@ -228,6 +252,8 @@ export default function VehicleTripsPage() {
           ...prev,
           endMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.endMileage,
           endFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.endFuel,
+          returnLat: data.lat != null ? String(data.lat) : prev.returnLat,
+          returnLon: data.lon != null ? String(data.lon) : prev.returnLon,
         }));
         setReturnHint(
           data.isApproximate
@@ -250,6 +276,27 @@ export default function VehicleTripsPage() {
       await fetch(`/api/vehicle-trips/${detail.id}/recalculate-fuel`, { method: 'POST' });
       await loadDetail(detail.id);
     } catch {} finally { setRecalculating(false); }
+  };
+
+  const refreshLiveSnapshot = async () => {
+    const wialonUnitId = detail?.vehicle?.wialonUnitId;
+    if (!wialonUnitId) return;
+    setLiveLoading(true);
+    setLiveError(null);
+    try {
+      const res = await fetch(`/api/wialon/vehicle-live?wialonUnitId=${encodeURIComponent(wialonUnitId)}`);
+      const data = await res.json();
+      if (data.available) {
+        setLiveSnapshot(data);
+      } else {
+        setLiveSnapshot(null);
+        setLiveError(data.error || 'Нет данных от Wialon сейчас');
+      }
+    } catch {
+      setLiveError('Wialon сейчас недоступен');
+    } finally {
+      setLiveLoading(false);
+    }
   };
 
   const load = useCallback(async () => {
@@ -308,6 +355,7 @@ export default function VehicleTripsPage() {
   const toggleExpand = (id: string) => {
     if (expandedId === id) { setExpandedId(null); setDetail(null); setDetailForm(emptyTripForm()); }
     else { setExpandedId(id); loadDetail(id); }
+    setLiveSnapshot(null); setLiveError(null);
   };
 
   const saveDetailForm = async () => {
@@ -496,8 +544,8 @@ export default function VehicleTripsPage() {
                             <p className="text-[11px] font-medium text-muted-foreground">{'Выезд'}</p>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
-                                <label className="text-[10px] text-muted-foreground">{'Дата'} *</label>
-                                <input type="date" value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                                <label className="text-[10px] text-muted-foreground">{'Дата и время'} *</label>
+                                <input type="datetime-local" value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
@@ -509,13 +557,16 @@ export default function VehicleTripsPage() {
                               </div>
                             </div>
                             {departureHint && <p className="text-[10px] text-amber-600">{departureHint}</p>}
+                            {(detailForm.departureLat || detailForm.departureLon) && (
+                              <p className="text-[10px] text-muted-foreground font-mono">{'Координаты'}: {detailForm.departureLat}, {detailForm.departureLon}</p>
+                            )}
                           </div>
                           <div className="space-y-2 bg-muted/30 rounded-lg p-2.5">
                             <p className="text-[11px] font-medium text-muted-foreground">{'Возврат'}</p>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
-                                <label className="text-[10px] text-muted-foreground">{'Дата'}</label>
-                                <input type="date" value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                                <label className="text-[10px] text-muted-foreground">{'Дата и время'}</label>
+                                <input type="datetime-local" value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
@@ -527,6 +578,9 @@ export default function VehicleTripsPage() {
                               </div>
                             </div>
                             {returnHint && <p className="text-[10px] text-amber-600">{returnHint}</p>}
+                            {(detailForm.returnLat || detailForm.returnLon) && (
+                              <p className="text-[10px] text-muted-foreground font-mono">{'Координаты'}: {detailForm.returnLat}, {detailForm.returnLon}</p>
+                            )}
                           </div>
                         </div>
 
@@ -534,6 +588,31 @@ export default function VehicleTripsPage() {
                           <p className="text-[11px] text-amber-600">
                             {'Заправлено (доп. расходы)'}: {detail.fleetExpenses.filter((e: any) => e.expenseType === 'fuel' && e.liters).reduce((s: number, e: any) => s + Number(e.liters), 0).toLocaleString('ru-RU')} {'л'}
                           </p>
+                        )}
+
+                        {/* Живой снимок активного рейса — по кнопке, не постоянный автополлинг */}
+                        {!detail.returnDate && detail.vehicle?.wialonUnitId && (
+                          <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-semibold text-blue-700 dark:text-blue-400">{'Сейчас (в рейсе)'}</p>
+                              <button onClick={refreshLiveSnapshot} disabled={liveLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                {liveLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
+                                {'Обновить сейчас'}
+                              </button>
+                            </div>
+                            {liveError && <p className="text-amber-600">{liveError}</p>}
+                            {liveSnapshot && (
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
+                                <span>{liveSnapshot.mileageKm != null ? `${liveSnapshot.mileageKm.toLocaleString('ru-RU')} км` : '—'}</span>
+                                <span>{liveSnapshot.fuelLevelL != null ? `${liveSnapshot.fuelLevelL} л` : '—'}</span>
+                                <span>{liveSnapshot.speedKmh != null ? `${liveSnapshot.speedKmh} км/ч` : '—'}</span>
+                                <span>{liveSnapshot.lat != null && liveSnapshot.lon != null ? `${liveSnapshot.lat.toFixed(4)}, ${liveSnapshot.lon.toFixed(4)}` : '—'}</span>
+                              </div>
+                            )}
+                            {liveSnapshot?.lastMessageAt && (
+                              <p className="text-[10px] text-muted-foreground">{'Последнее сообщение'}: {new Date(liveSnapshot.lastMessageAt).toLocaleString('ru-RU')}</p>
+                            )}
+                          </div>
                         )}
 
                         <div className="grid sm:grid-cols-2 gap-3">
@@ -565,6 +644,8 @@ export default function VehicleTripsPage() {
                               {detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : 'пробег не рассчитан'}
                               {', '}
                               {detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л топлива` : 'расход не рассчитан'}
+                              {', '}
+                              {detail.calculatedIdleMinutes != null ? `простой ${Math.floor(detail.calculatedIdleMinutes / 60)} ч ${Math.round(detail.calculatedIdleMinutes % 60)} мин` : 'простой не рассчитан'}
                               {detail.fuelCalcSource === 'wialon_track' && (
                                 <span className="text-emerald-600"> {'(по реальным показаниям датчика Wialon на даты выезда/возврата)'}</span>
                               )}
@@ -806,12 +887,12 @@ export default function VehicleTripsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground">{'Дата выезда'} *</label>
-                <input type="date" value={tripForm.departureDate} onChange={e => setTripForm({...tripForm, departureDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
+                <label className="text-xs text-muted-foreground">{'Дата и время выезда'} *</label>
+                <input type="datetime-local" value={tripForm.departureDate} onChange={e => setTripForm({...tripForm, departureDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">{'Дата возврата'}</label>
-                <input type="date" value={tripForm.returnDate} onChange={e => setTripForm({...tripForm, returnDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
+                <label className="text-xs text-muted-foreground">{'Дата и время возврата'}</label>
+                <input type="datetime-local" value={tripForm.returnDate} onChange={e => setTripForm({...tripForm, returnDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
             </div>
 

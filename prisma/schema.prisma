@@ -518,10 +518,14 @@ model VehicleTrip {
   vehicle        Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
   driverId       String?   @map("driver_id")
   driver         Driver?   @relation(fields: [driverId], references: [id], onDelete: SetNull)
-  departureDate  DateTime  @map("departure_date") @db.Date
+  departureDate  DateTime  @map("departure_date") // с точным временем (было @db.Date — только дата)
+  departureLat   Float?    @map("departure_lat")
+  departureLon   Float?    @map("departure_lon")
   startMileage   Int?      @map("start_mileage")
   startFuel      Decimal?  @map("start_fuel") @db.Decimal(8, 2)
-  returnDate     DateTime? @map("return_date") @db.Date
+  returnDate     DateTime? @map("return_date") // с точным временем (было @db.Date)
+  returnLat      Float?    @map("return_lat")
+  returnLon      Float?    @map("return_lon")
   endMileage     Int?      @map("end_mileage")
   endFuel        Decimal?  @map("end_fuel") @db.Decimal(8, 2)
   status         String    @default("active") // active | completed
@@ -566,7 +570,8 @@ model VehicleTrip {
   // не путать с fuelLiters/fuelCost выше (это купленное/заправленное топливо как расход).
   calculatedKm            Float?    @map("calculated_km")
   calculatedFuelConsumedL Float?    @map("calculated_fuel_consumed_l")
-  fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "odometer_diff"
+  calculatedIdleMinutes   Float?    @map("calculated_idle_minutes")
+  fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "wialon_track" | "odometer_diff"
   fuelCalcAt              DateTime? @map("fuel_calc_at")
 
   createdAt      DateTime  @default(now()) @map("created_at")

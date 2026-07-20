@@ -11,8 +11,13 @@ import { getUnitReport, getMileageFromTrack, getFuelConsumedBetweenDates } from 
 export interface TripFuelCalcResult {
   calculatedKm: number | null;
   calculatedFuelConsumedL: number | null;
+  calculatedIdleMinutes: number | null;
   fuelCalcSource: 'wialon_report' | 'wialon_track' | 'odometer_diff' | null;
   fuelCalcAt: Date;
+  departureLat: number | null;
+  departureLon: number | null;
+  returnLat: number | null;
+  returnLon: number | null;
 }
 
 /**
@@ -61,19 +66,26 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
   const result: TripFuelCalcResult = {
     calculatedKm: null,
     calculatedFuelConsumedL: null,
+    calculatedIdleMinutes: null,
     fuelCalcSource: null,
     fuelCalcAt: now,
+    departureLat: null,
+    departureLon: null,
+    returnLat: null,
+    returnLon: null,
   };
 
-  // Пробег — приоритет реальному GPS-треку (getMileageFromTrack, сумма гаверсинус-расстояний
-  // между точками маршрута за интервал выезд-возврат) — не накапливает погрешность вручную
-  // введённых/автозаполненных показаний одометра. Fallback — разница startMileage/endMileage,
-  // если у машины нет wialonUnitId или по треку вообще не нашлось GPS-сообщений за рейс.
+  // Пробег и простой — приоритет реальному GPS-треку (getMileageFromTrack, сумма гаверсинус-
+  // расстояний между точками маршрута за интервал выезд-возврат) — не накапливает погрешность
+  // вручную введённых/автозаполненных показаний одометра. Fallback пробега — разница
+  // startMileage/endMileage, если у машины нет wialonUnitId или по треку нет GPS-сообщений
+  // за рейс; для простоя fallback-а нет (без трека узнать нечем).
   if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
     try {
       const track = await getMileageFromTrack(Number(trip.vehicle.wialonUnitId), trip.departureDate, trip.returnDate);
       if (track.messagesUsed > 0) {
         result.calculatedKm = track.mileageKm;
+        result.calculatedIdleMinutes = track.idleMinutes;
       }
     } catch (e) {
       console.error('[calculateTripFuel] getMileageFromTrack failed, falling back to odometer fields:', e);
@@ -94,14 +106,20 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
   // Следующий по надёжности источник — реальные показания топливного датчика на даты
   // выезда/возврата (getFuelConsumedBetweenDates), НЕ значения, введённые в форму рейса.
   // Как и form-fallback ниже, не учитывает дозаправки в пути — см. lib/wialon/client.ts.
-  if (result.fuelCalcSource === null && trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
+  // Заодно берём координаты выезда/возврата — они приходят из тех же сообщений, что и
+  // остатки топлива, отдельный запрос к Wialon не нужен.
+  if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
     try {
       const consumption = await getFuelConsumedBetweenDates(
         Number(trip.vehicle.wialonUnitId),
         trip.departureDate,
         trip.returnDate
       );
-      if (consumption.fuelConsumedL != null && consumption.fuelConsumedL >= 0) {
+      result.departureLat = consumption.startLat;
+      result.departureLon = consumption.startLon;
+      result.returnLat = consumption.endLat;
+      result.returnLon = consumption.endLon;
+      if (result.fuelCalcSource === null && consumption.fuelConsumedL != null && consumption.fuelConsumedL >= 0) {
         result.calculatedFuelConsumedL = consumption.fuelConsumedL;
         result.fuelCalcSource = 'wialon_track';
       }
@@ -125,8 +143,13 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     data: {
       calculatedKm: result.calculatedKm,
       calculatedFuelConsumedL: result.calculatedFuelConsumedL,
+      calculatedIdleMinutes: result.calculatedIdleMinutes,
       fuelCalcSource: result.fuelCalcSource,
       fuelCalcAt: result.fuelCalcAt,
+      departureLat: result.departureLat,
+      departureLon: result.departureLon,
+      returnLat: result.returnLat,
+      returnLon: result.returnLon,
     },
   });
 

@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
       withinMileageWindow
         ? getOdometerAtDate(unitId, datetime).catch(() => ({ mileageKm: null, raw: {} }))
         : Promise.resolve({ mileageKm: null, raw: { reason: 'too_old_for_track' } }),
-      getFuelLevelAtDate(unitId, datetime).catch(() => ({ fuelLevelL: null, measuredAt: null, raw: {} })),
+      getFuelLevelAtDate(unitId, datetime).catch(() => ({ fuelLevelL: null, measuredAt: null, lat: null, lon: null, raw: {} })),
     ]);
 
     if (mileageResult.mileageKm == null && fuelResult.fuelLevelL == null) {
@@ -61,6 +61,8 @@ export async function GET(req: NextRequest) {
       available: true,
       mileageKm: mileageResult.mileageKm,
       fuelLevelL: fuelResult.fuelLevelL,
+      lat: fuelResult.lat,
+      lon: fuelResult.lon,
       measuredAt: fuelResult.measuredAt ? fuelResult.measuredAt.toISOString() : null,
       isApproximate,
     });
