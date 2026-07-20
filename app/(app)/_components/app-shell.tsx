@@ -66,6 +66,9 @@ const navGroups: NavGroup[] = [
     { href: '/maintenance', label: 'Техобслуживание', icon: Wrench },
     { href: '/expiry', label: 'Сроки документов', icon: ShieldAlert },
   ]},
+  { group: 'Телематика', items: [
+    { href: '/telematics', label: 'Wialon', icon: MapPinned },
+  ]},
   { group: 'Система', items: [
     { href: '/settings', label: 'Настройки', icon: Settings },
   ]},

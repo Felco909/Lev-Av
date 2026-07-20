@@ -26,6 +26,13 @@ export const CLIENT_GLOBAL_DOC_NUMBERING_ROLES = ['admin', 'owner', 'director', 
  */
 export const TRIP_DOC_NUMBER_ROLES = ['admin', 'owner', 'director', 'accountant', 'dispatcher'] as const;
 
+/**
+ * Настройка интеграции Wialon (сохранение/удаление API-токена, запуск синхронизации машин) —
+ * уровень конфигурации автопарка, не операционная работа. Просмотр статуса телематики
+ * (GET /api/wialon/config, /api/wialon/fleet-snapshot) доступен всем ролям без этой проверки.
+ */
+export const WIALON_CONFIG_ROLES = ['admin', 'owner', 'director'] as const;
+
 /** @deprecated Используйте CLIENT_GLOBAL_DOC_NUMBERING_ROLES или TRIP_DOC_NUMBER_ROLES по контексту. */
 export const CRITICAL_DOC_NUMBERING_ROLES = CLIENT_GLOBAL_DOC_NUMBERING_ROLES;
 

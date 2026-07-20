@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { getStoredWialonToken } from './token-store';
 
 const WIALON_ERROR_MESSAGES: Record<number, string> = {
   1: 'Недействительная или истёкшая сессия (invalid session)',
@@ -51,7 +52,7 @@ function getWialonApiUrl(): string {
  * из специального поля "Token". Сам токен — фиксированная hex-строка (~72
  * символа по документации Wialon), поэтому берём только часть до первого `&`.
  */
-function sanitizeToken(rawToken: string): string {
+export function sanitizeToken(rawToken: string): string {
   return rawToken.split('&')[0].trim();
 }
 
@@ -110,7 +111,10 @@ async function getCachedSid(): Promise<string> {
   if (cachedSession && Date.now() - cachedSession.obtainedAt < SESSION_TTL_MS) {
     return cachedSession.sid;
   }
-  const { sid } = await login();
+  // Токен из БД (настраивается в разделе «Телематика») имеет приоритет над .env — но если
+  // в БД ничего не сохранено (или чтение упало), login() сам падает обратно на WIALON_TOKEN.
+  const dbToken = await getStoredWialonToken().catch(() => null);
+  const { sid } = await login(dbToken ?? undefined);
   cachedSession = { sid, obtainedAt: Date.now() };
   return sid;
 }
@@ -1172,4 +1176,71 @@ export async function getOdometerAtDate(unitId: number, date: Date): Promise<Wia
     mileageKm: historicalKm,
     raw: { currentKm: currentMileage.mileageKm, drivenKm: driven.mileageKm, messagesUsed: driven.messagesUsed },
   };
+}
+
+// ───────────────────────── Снимок всего парка одним запросом ─────────────────────────
+// Для страницы «Телематика» (и позже — карты онлайн-мониторинга) нужен статус СРАЗУ по всем
+// машинам. Вместо getCurrentSnapshot() на каждую машину (N запросов) — один core/search_items
+// по всем avl_unit сразу с флагами lmsg+pos+sensors+counters, топливо резолвим из уже
+// пришедших sens/lmsg.p в том же ответе (без отдельного messages/load_interval на юнит).
+
+export interface WialonFleetSnapshotItem {
+  unitId: number;
+  name: string;
+  mileageKm: number | null;
+  fuelLevelL: number | null;
+  lat: number | null;
+  lon: number | null;
+  speedKmh: number | null;
+  /** Время последнего сообщения от трекера — по нему определяем "нет связи" в UI. */
+  lastMessageAt: Date | null;
+}
+
+/** flags: 1 (общие) | 0x400 (последнее сообщение + позиция) | 0x1000 (датчики) | 0x2000 (счётчики) */
+const FLEET_SNAPSHOT_FLAGS = 1 | 0x400 | 0x1000 | 0x2000;
+
+export async function getFleetSnapshot(): Promise<WialonFleetSnapshotItem[]> {
+  const sid = await getCachedSid();
+  const data = await callWialon<{ items?: any[] }>(
+    'core/search_items',
+    {
+      spec: { itemsType: 'avl_unit', propName: 'sys_name', propValueMask: '*', sortType: 'sys_name' },
+      force: 1,
+      flags: FLEET_SNAPSHOT_FLAGS,
+      from: 0,
+      to: 0,
+    },
+    sid
+  );
+
+  const items = data.items ?? [];
+  return items.map((it): WialonFleetSnapshotItem => {
+    const sensors: WialonFuelSensor[] = it.sens
+      ? Object.values(it.sens as Record<string, any>)
+          .filter((s: any) => FUEL_SENSOR_NAME_RE.test(s.n) && Array.isArray(s.tbl) && s.tbl.length > 0)
+          .map((s: any) => ({ id: s.id, name: s.n, param: s.p, table: s.tbl }))
+      : [];
+
+    let fuelLevelL: number | null = null;
+    const rawParams: Record<string, unknown> | undefined = it.lmsg?.p;
+    if (sensors.length > 0 && rawParams) {
+      const values: number[] = [];
+      for (const sensor of sensors) {
+        const raw = rawParams[sensor.param];
+        if (typeof raw === 'number') values.push(resolveSensorValue(sensor, raw));
+      }
+      if (values.length > 0) fuelLevelL = Math.round(values.reduce((s, v) => s + v, 0) * 10) / 10;
+    }
+
+    return {
+      unitId: it.id,
+      name: it.nm,
+      mileageKm: typeof it.cnm === 'number' ? it.cnm : null,
+      fuelLevelL,
+      lat: typeof it.pos?.y === 'number' ? it.pos.y : null,
+      lon: typeof it.pos?.x === 'number' ? it.pos.x : null,
+      speedKmh: typeof it.pos?.s === 'number' ? it.pos.s : null,
+      lastMessageAt: typeof it.lmsg?.t === 'number' ? new Date(it.lmsg.t * 1000) : null,
+    };
+  });
 }
