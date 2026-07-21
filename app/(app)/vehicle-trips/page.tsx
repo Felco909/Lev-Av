@@ -19,6 +19,24 @@ function formatDurationHm(ms: number): string {
   return days > 0 ? `${days} дн ${hours} ч ${minutes} мин` : `${hours} ч ${minutes} мин`;
 }
 
+const EVENT_FIELD_LABEL: Record<string, string> = {
+  departureDate: 'Дата выезда', returnDate: 'Дата возврата',
+  finalRevenueAmd: 'Итоговый доход', finalExpensesAmd: 'Итоговые расходы',
+  startMileage: 'Пробег на начало', endMileage: 'Пробег на конец',
+  startFuel: 'Топливо на начало', endFuel: 'Топливо на конец', notes: 'Комментарий',
+};
+
+/** Журнал ручных правок/закрытия/пересчёта дохода ("Доработка логики рейсов", п.7). */
+function manualEventText(ev: { action: string; field: string | null; oldValue: string | null; newValue: string | null }): string {
+  if (ev.action === 'closed') return 'Рейс закрыт';
+  if (ev.action === 'income_recalculated') return `Пересчёт дохода: ${ev.oldValue ?? '—'} → ${ev.newValue ?? '—'} AMD`;
+  if (ev.action === 'manual_edit' && ev.field) {
+    const label = EVENT_FIELD_LABEL[ev.field] || ev.field;
+    return `${label}: "${ev.oldValue ?? '—'}" → "${ev.newValue ?? '—'}"`;
+  }
+  return ev.action;
+}
+
 interface Vehicle { id: string; plateNumber: string; brand: string; model: string; wialonUnitId?: string | null }
 interface Driver { id: string; fullName: string }
 interface VT {
@@ -48,7 +66,9 @@ interface VT {
 }
 
 interface VTDetail extends VT {
-  trips: any[]; fleetExpenses: any[];
+  matchedTrips: any[]; fleetExpenses: any[];
+  isFrozen: boolean; durationMs: number | null;
+  finalRevenueAmd: number | null; finalExpensesAmd: number | null; closedAt: string | null; closedByUserId: string | null;
   revenue: number; totalExpenses: number; expensesByType: Record<string, number>; profit: number; mileage: number | null;
   directSalaryAmd: number; directPerDiemAmd: number; directOtherAmd: number; directFuelAmd: number; directTotalAmd: number; fleetExpTotal: number;
   costPerKm: number | null; fuelPer100Km: number | null; profitMarginPercent: number | null;
@@ -69,6 +89,7 @@ interface TripForm {
   otherCurrency: string; otherRate: string;
   fuelLiters: string; fuelCost: string;
   fuelCurrency: string; fuelRate: string;
+  finalRevenueAmd: string; finalExpensesAmd: string;
 }
 
 interface ExpForm {
@@ -98,6 +119,7 @@ const emptyTripForm = (): TripForm => ({
   otherCurrency: 'AMD', otherRate: '1',
   fuelLiters: '', fuelCost: '',
   fuelCurrency: 'AMD', fuelRate: '1',
+  finalRevenueAmd: '', finalExpensesAmd: '',
 });
 
 /** VT/VTDetail -> TripForm, для заполнения редактируемой формы в развёрнутой карточке. */
@@ -135,6 +157,8 @@ function mapVtToForm(r: VT): TripForm {
     fuelCost: r.fuelCost != null ? String(Number(r.fuelCost)) : '',
     fuelCurrency: r.fuelCurrency || 'AMD',
     fuelRate: r.fuelRate != null ? String(Number(r.fuelRate)) : '1',
+    finalRevenueAmd: (r as any).finalRevenueAmd != null ? String(Number((r as any).finalRevenueAmd)) : '',
+    finalExpensesAmd: (r as any).finalExpensesAmd != null ? String(Number((r as any).finalExpensesAmd)) : '',
   };
 }
 
@@ -210,8 +234,25 @@ export default function VehicleTripsPage() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
 
-  // История событий по геозонам (Этап 7)
-  const [geoEvents, setGeoEvents] = useState<Array<{ id: string; oldValue: string | null; newValue: string | null; zoneName: string | null; createdAt: string }>>([]);
+  // История событий по геозонам (Этап 7) + журнал ручных правок/закрытия/пересчёта дохода
+  // ("Доработка логики рейсов", п.7) — тот же список событий, action различается.
+  const [geoEvents, setGeoEvents] = useState<Array<{ id: string; action: string; field: string | null; oldValue: string | null; newValue: string | null; zoneName: string | null; userName: string | null; createdAt: string }>>([]);
+
+  // Закрытие рейса вручную ("Доработка логики рейсов") — кнопка "Закрыть рейс" открывает
+  // модалку выбора даты/времени, дальше сервер один раз берёт живой снимок Wialon и замораживает итоги.
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [closeDateTime, setCloseDateTime] = useState('');
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+
+  // Редактирование уже закрытого рейса — по умолчанию поля read-only (заморожены), кнопка
+  // "Редактировать рейс" разблокирует форму; после сохранения снова становится read-only.
+  const [editingClosed, setEditingClosed] = useState(false);
+
+  // Пересчёт дохода закрытого рейса после правки дат — с явным подтверждением (п.8), не
+  // автоматически. Предпросмотр показывает, что изменится, до применения.
+  const [incomePreview, setIncomePreview] = useState<{ matchedTrips: any[]; newRevenueAmd: number; oldRevenueAmd: number | null; changed: boolean } | null>(null);
+  const [recalcIncomeLoading, setRecalcIncomeLoading] = useState(false);
 
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
@@ -376,6 +417,7 @@ export default function VehicleTripsPage() {
     if (expandedId === id) { setExpandedId(null); setDetail(null); setDetailForm(emptyTripForm()); }
     else { setExpandedId(id); loadDetail(id); }
     setLiveSnapshot(null); setLiveError(null); setGeoEvents([]);
+    setEditingClosed(false); setIncomePreview(null); setShowCloseModal(false); setCloseError(null);
   };
 
   const saveDetailForm = async () => {
@@ -389,7 +431,60 @@ export default function VehicleTripsPage() {
       });
       await loadDetail(detail.id);
       await load();
+      setEditingClosed(false);
+      setIncomePreview(null);
     } finally { setDetailSaving(false); }
+  };
+
+  // --- Закрытие рейса вручную ("Доработка логики рейсов") ---
+  const openCloseModal = () => {
+    setCloseDateTime(new Date().toISOString().slice(0, 16));
+    setCloseError(null);
+    setShowCloseModal(true);
+  };
+
+  const confirmCloseTrip = async () => {
+    if (!detail || !closeDateTime) return;
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const res = await fetch(`/api/vehicle-trips/${detail.id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ returnDate: new Date(closeDateTime).toISOString() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCloseError(data.error || 'Ошибка закрытия рейса'); return; }
+      setShowCloseModal(false);
+      await loadDetail(detail.id);
+      await load();
+    } finally { setClosing(false); }
+  };
+
+  // --- Пересчёт дохода закрытого рейса после правки дат — с подтверждением (п.8) ---
+  const previewIncomeRecalc = async () => {
+    if (!detail) return;
+    setRecalcIncomeLoading(true);
+    try {
+      const res = await fetch(`/api/vehicle-trips/${detail.id}/recalculate-income`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: false }),
+      });
+      const data = await res.json();
+      if (res.ok) setIncomePreview(data);
+    } finally { setRecalcIncomeLoading(false); }
+  };
+
+  const confirmIncomeRecalc = async () => {
+    if (!detail) return;
+    setRecalcIncomeLoading(true);
+    try {
+      await fetch(`/api/vehicle-trips/${detail.id}/recalculate-income`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }),
+      });
+      setIncomePreview(null);
+      await loadDetail(detail.id);
+      await load();
+    } finally { setRecalcIncomeLoading(false); }
   };
 
   // --- Expense CRUD (additional fleet expenses) ---
@@ -584,15 +679,15 @@ export default function VehicleTripsPage() {
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground">{'Дата и время'} *</label>
-                                <input type="datetime-local" value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                                <input type="datetime-local" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" min="0" value={detailForm.startMileage} onChange={e => setDetailForm({...detailForm, startMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'нач.'} />
+                                <input type="number" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.startMileage} onChange={e => setDetailForm({...detailForm, startMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'нач.'} />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" step="0.01" min="0" value={detailForm.startFuel} onChange={e => setDetailForm({...detailForm, startFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'остаток'} />
+                                <input type="number" step="0.01" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.startFuel} onChange={e => setDetailForm({...detailForm, startFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
                               </div>
                             </div>
                             {departureHint && <p className="text-[10px] text-amber-600">{departureHint}</p>}
@@ -605,15 +700,15 @@ export default function VehicleTripsPage() {
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground">{'Дата и время'}</label>
-                                <input type="datetime-local" value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                                <input type="datetime-local" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" min="0" value={detailForm.endMileage} onChange={e => setDetailForm({...detailForm, endMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'кон.'} />
+                                <input type="number" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.endMileage} onChange={e => setDetailForm({...detailForm, endMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'кон.'} />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" step="0.01" min="0" value={detailForm.endFuel} onChange={e => setDetailForm({...detailForm, endFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" placeholder={'остаток'} />
+                                <input type="number" step="0.01" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.endFuel} onChange={e => setDetailForm({...detailForm, endFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
                               </div>
                             </div>
                             {returnHint && <p className="text-[10px] text-amber-600">{returnHint}</p>}
@@ -666,9 +761,9 @@ export default function VehicleTripsPage() {
                                 {detail.geofenceStatusAt && <span className="text-muted-foreground"> {' — '}{new Date(detail.geofenceStatusAt).toLocaleString('ru-RU')}</span>}
                               </p>
                             )}
-                            {geoEvents.length > 0 && (
+                            {geoEvents.filter(ev => ev.action === 'status_changed').length > 0 && (
                               <div className="pt-1 border-t space-y-0.5">
-                                {geoEvents.map((ev) => (
+                                {geoEvents.filter(ev => ev.action === 'status_changed').map((ev) => (
                                   <p key={ev.id} className="text-[10px] text-muted-foreground">
                                     {new Date(ev.createdAt).toLocaleString('ru-RU')}
                                     {' — '}
@@ -683,6 +778,22 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
+                        {/* Журнал ручных правок/закрытия/пересчёта дохода — п.7 */}
+                        {geoEvents.filter(ev => ev.action !== 'status_changed').length > 0 && (
+                          <div className="bg-slate-50 dark:bg-slate-900/30 rounded-lg p-3 text-xs space-y-1">
+                            <p className="font-semibold text-slate-700 dark:text-slate-300">{'Журнал изменений'}</p>
+                            <div className="space-y-1">
+                              {geoEvents.filter(ev => ev.action !== 'status_changed').map((ev) => (
+                                <p key={ev.id} className="text-[10px] text-muted-foreground">
+                                  {new Date(ev.createdAt).toLocaleString('ru-RU')}
+                                  {ev.userName && ` · ${ev.userName}`}
+                                  {' — '}{manualEventText(ev)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Продолжительность рейса — из фактических дат выезда/возврата
                             (по GPS-детекции базы компании, если рейс закрыт автоматически). */}
                         {detail.returnDate && (
@@ -692,30 +803,100 @@ export default function VehicleTripsPage() {
                           </p>
                         )}
 
+                        {/* Закрытие/редактирование рейса ("Доработка логики рейсов", финальная архитектура) —
+                            закрытие ТОЛЬКО через кнопку (дата/время выбирает диспетчер, дальше один живой
+                            снимок Wialon и заморозка итогов). Автозакрытия по возврату на базу больше нет. */}
+                        <div className="flex items-center justify-between gap-2 bg-muted/40 rounded-lg p-2.5">
+                          <div className="text-xs">
+                            {detail.status === 'completed' ? (
+                              <span>
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-400">{'Рейс закрыт'}</span>
+                                {detail.closedAt && <span className="text-muted-foreground"> {' — '}{new Date(detail.closedAt).toLocaleString('ru-RU')}</span>}
+                              </span>
+                            ) : (
+                              <span className="font-medium">{'Рейс активен'}</span>
+                            )}
+                          </div>
+                          {detail.status === 'active' && (
+                            <button onClick={openCloseModal} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">
+                              {'Закрыть рейс'}
+                            </button>
+                          )}
+                          {detail.status === 'completed' && (
+                            <button onClick={() => setEditingClosed(v => !v)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
+                              {editingClosed ? 'Отменить редактирование' : 'Редактировать рейс'}
+                            </button>
+                          )}
+                        </div>
+
                         <div className="grid sm:grid-cols-2 gap-3">
                           <div>
                             <label className="text-[11px] text-muted-foreground">{'Статус'}</label>
-                            <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
-                              <option value="active">{'В рейсе'}</option>
-                              <option value="completed">{'Завершён'}</option>
-                              <option value="archived">{'Архив'}</option>
-                            </select>
+                            {detail.status === 'completed' ? (
+                              <p className="text-xs font-medium mt-1.5">{'Завершён'}</p>
+                            ) : (
+                              <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
+                                <option value="active">{'В рейсе'}</option>
+                                <option value="archived">{'Архив'}</option>
+                              </select>
+                            )}
                           </div>
                           <div>
                             <label className="text-[11px] text-muted-foreground">{'Заметки'}</label>
-                            <input type="text" value={detailForm.notes} onChange={e => setDetailForm({...detailForm, notes: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
+                            <input type="text" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.notes} onChange={e => setDetailForm({...detailForm, notes: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
                           </div>
                         </div>
 
-                        {/* Итоги рейса — автоматический расчёт из Wialon, только для закрытых рейсов */}
+                        {/* Доход/расходы закрытого рейса — заморожены (finalRevenueAmd/finalExpensesAmd),
+                            редактируются напрямую только в режиме "Редактировать рейс". */}
+                        {detail.status === 'completed' && (
+                          <div className="grid sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-[11px] text-muted-foreground">{'Итоговый доход (AMD)'}</label>
+                              <input type="number" step="0.01" disabled={!editingClosed} value={detailForm.finalRevenueAmd} onChange={e => setDetailForm({...detailForm, finalRevenueAmd: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted font-mono" />
+                            </div>
+                            <div>
+                              <label className="text-[11px] text-muted-foreground">{'Итоговые расходы (AMD)'}</label>
+                              <input type="number" step="0.01" disabled={!editingClosed} value={detailForm.finalExpensesAmd} onChange={e => setDetailForm({...detailForm, finalExpensesAmd: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted font-mono" />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Пересчёт состава заявок/дохода после правки дат закрытого рейса — только
+                            с явным подтверждением (п.8), не автоматически. */}
+                        {detail.status === 'completed' && editingClosed && (
+                          <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 text-xs space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-amber-700 dark:text-amber-400">{'Если поменяли даты — состав заявок и доход нужно пересчитать отдельно (не автоматически).'}</p>
+                              <button onClick={previewIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 shrink-0 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                {recalcIncomeLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{'Пересчитать доход'}
+                              </button>
+                            </div>
+                            {incomePreview && (
+                              <div className="border-t pt-2 space-y-1">
+                                <p>{'Заявок по новым датам'}: {incomePreview.matchedTrips.length}, {'доход'}: {fmtAmd(incomePreview.newRevenueAmd)} {incomePreview.oldRevenueAmd != null && <span className="text-muted-foreground">({'было'} {fmtAmd(incomePreview.oldRevenueAmd)})</span>}</p>
+                                {incomePreview.changed ? (
+                                  <button onClick={confirmIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition disabled:opacity-50">
+                                    {'Подтвердить и применить'}
+                                  </button>
+                                ) : <p className="text-muted-foreground">{'Изменений нет.'}</p>}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Итоги рейса — автоматический расчёт из Wialon, только для закрытых рейсов.
+                            Заморожено: кнопка пересчёта недоступна после закрытия (см. freeze выше). */}
                         {detail.returnDate && (
                           <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 text-xs space-y-1">
                             <div className="flex items-center justify-between gap-2">
                               <p className="font-semibold text-emerald-700 dark:text-emerald-400">{'Итоги рейса'}</p>
-                              <button onClick={recalculateFuel} disabled={recalculating} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
-                                {recalculating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
-                                {'Пересчитать по Wialon'}
-                              </button>
+                              {detail.status !== 'completed' && (
+                                <button onClick={recalculateFuel} disabled={recalculating} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                  {recalculating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
+                                  {'Пересчитать по Wialon'}
+                                </button>
+                              )}
                             </div>
                             <p>
                               {detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : 'пробег не рассчитан'}
@@ -912,15 +1093,17 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
-                        {/* Linked logistics trips */}
-                        {detail.trips.length > 0 && (
+                        {/* Linked logistics trips — доход рейса живьём (или заморожен, если рейс закрыт) */}
+                        {detail.matchedTrips?.length > 0 && (
                           <div>
-                            <p className="text-xs font-semibold mb-1">{'Заявки'} ({detail.trips.length})</p>
+                            <p className="text-xs font-semibold mb-1">
+                              {'Заявки'} ({detail.matchedTrips.length}){detail.isFrozen && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">{'(зафиксировано при закрытии)'}</span>}
+                            </p>
                             <div className="space-y-1">
-                              {detail.trips.map((t: any) => (
+                              {detail.matchedTrips.map((t: any) => (
                                 <CrumbLink key={t.id} href={`/trips/${t.id}`} fromLabel="Рейсы машин" fromKey="vehicle-trips" className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors">
-                                  <span><span className="font-mono font-medium">{t.tripNumber}</span> {t.routeFrom} {'→'} {t.routeTo} <span className="text-muted-foreground">({t.client?.name})</span></span>
-                                  <span className="font-mono text-emerald-600">{fmtAmd(Number(t.clientRateAmd || t.clientRate || 0))}</span>
+                                  <span><span className="font-mono font-medium">{t.tripNumber}</span> {t.routeFrom} {'→'} {t.routeTo} <span className="text-muted-foreground">({t.clientName})</span></span>
+                                  <span className="font-mono text-emerald-600">{fmtAmd(Number(t.clientRateAmd || 0))}</span>
                                 </CrumbLink>
                               ))}
                             </div>
@@ -933,6 +1116,29 @@ export default function VehicleTripsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Close Trip Modal — ручное закрытие ("Доработка логики рейсов") */}
+      {showCloseModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => !closing && setShowCloseModal(false)}>
+          <div className="bg-card rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">{'Закрыть рейс'}</h2>
+            <p className="text-xs text-muted-foreground -mt-2">
+              {'Выберите дату и время окончания. Система один раз запросит из Wialon пробег/топливо/координаты и зафиксирует итоги — дальше они не будут меняться автоматически.'}
+            </p>
+            <div>
+              <label className="text-xs text-muted-foreground">{'Дата и время закрытия'} *</label>
+              <input type="datetime-local" value={closeDateTime} onChange={e => setCloseDateTime(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
+            </div>
+            {closeError && <p className="text-xs text-red-600">{closeError}</p>}
+            <div className="flex gap-2 justify-end pt-2">
+              <button onClick={() => setShowCloseModal(false)} disabled={closing} className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition disabled:opacity-50">{'Отмена'}</button>
+              <button onClick={confirmCloseTrip} disabled={closing || !closeDateTime} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition">
+                {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}{'Закрыть рейс'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

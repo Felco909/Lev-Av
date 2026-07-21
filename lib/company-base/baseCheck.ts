@@ -8,12 +8,11 @@
 import { prisma } from '@/lib/prisma';
 import { getFleetSnapshot } from '@/lib/wialon/client';
 import { isWithinRadius } from '@/lib/geo/distance';
-import { maybeCalculateTotals, maybeSyncVehicleMileage } from '@/lib/vehicle-trips/close-trip';
 
 export interface CompanyBaseCheckResult {
   checkedVehicles: number;
   vehiclePresenceChanges: Array<{ vehicleId: string; plateNumber: string; from: string; to: 'at_base' | 'away' }>;
-  tripTransitions: Array<{ vehicleTripId: string; tripNumber: string; type: 'departed' | 'returned' }>;
+  tripTransitions: Array<{ vehicleTripId: string; tripNumber: string; type: 'departed' }>;
   errors: string[];
 }
 
@@ -89,12 +88,16 @@ export async function runCompanyBaseCheck(): Promise<CompanyBaseCheckResult> {
     const trip = activeTripByVehicleId.get(vehicle.id);
     if (!trip) continue;
 
-    // Триггерим переход рейса ТОЛЬКО на реально наблюдаемой смене присутствия
+    // Триггерим начало рейса ТОЛЬКО на реально наблюдаемой смене присутствия
     // (wasAtBase -> nowAtBase), а не просто "сейчас machine вне базы" — иначе вторая
     // подряд проверка (когда presence не менялся) снова бы переписывала departureDate
-    // на "сейчас" (это и был второй слой того же бага, пойман тестом live).
+    // на "сейчас" (это и был баг, пойман тестом live, см. историю чата).
+    //
+    // Автозакрытие рейса по возврату на базу УБРАНО ("Доработка логики рейсов" — финальная
+    // архитектура): закрытие теперь только вручную, через POST /api/vehicle-trips/[id]/close
+    // (кнопка "Закрыть рейс" — диспетчер сам выбирает дату/время, система один раз берёт
+    // живой снимок Wialon и замораживает итоги). Здесь остаётся ТОЛЬКО детект выезда.
     const justDeparted = wasAtBase === true && nowAtBase === false;
-    const justReturned = wasAtBase === false && nowAtBase === true;
 
     try {
       if (justDeparted && !trip.departureConfirmedByGps) {
@@ -107,19 +110,6 @@ export async function runCompanyBaseCheck(): Promise<CompanyBaseCheckResult> {
           data: { vehicleTripId: trip.id, action: 'status_changed', field: 'geofenceStatus', oldValue: null, newValue: 'away', zoneName: null },
         });
         tripTransitions.push({ vehicleTripId: trip.id, tripNumber: trip.tripNumber, type: 'departed' });
-      } else if (justReturned && trip.departureConfirmedByGps && !trip.returnDate) {
-        // Возврат на базу после подтверждённого выезда — закрываем рейс.
-        const updated = await prisma.vehicleTrip.update({
-          where: { id: trip.id },
-          data: { returnDate: now, status: 'completed', geofenceStatus: 'at_base', geofenceStatusAt: now, currentZoneId: matchedZone!.id },
-        });
-        await prisma.vehicleTripEvent.create({
-          data: { vehicleTripId: trip.id, action: 'status_changed', field: 'geofenceStatus', oldValue: 'away', newValue: 'at_base', zoneName: matchedZone!.name },
-        });
-        tripTransitions.push({ vehicleTripId: trip.id, tripNumber: trip.tripNumber, type: 'returned' });
-
-        await maybeCalculateTotals(updated.id, updated.departureDate, updated.returnDate);
-        await maybeSyncVehicleMileage(updated.vehicleId, updated.endMileage);
       }
     } catch (e) {
       errors.push(`Рейс ${trip.tripNumber}: ${(e as Error).message}`);

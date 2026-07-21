@@ -132,11 +132,12 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = (session.user as any)?.id as string | undefined;
 
   const body = await req.json();
   const { id, vehicleId, driverId, departureDate, departureLat, departureLon, startMileage, startFuel,
     returnDate, returnLat, returnLon, endMileage, endFuel, notes, status: st,
-    tripNumber,
+    tripNumber, finalRevenueAmd, finalExpensesAmd,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
     perDiem2, perDiem2Currency, perDiem2Rate,
@@ -145,6 +146,10 @@ export async function PUT(req: NextRequest) {
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
   if (!id) return NextResponse.json({ error: 'ID \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u0435\u043d' }, { status: 400 });
+
+  const before = await prisma.vehicleTrip.findUnique({ where: { id } });
+  if (!before) return NextResponse.json({ error: '\u0420\u0435\u0439\u0441 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d' }, { status: 404 });
+  const wasClosed = before.status === 'completed';
 
   const data: any = {};
   if (vehicleId !== undefined) data.vehicleId = vehicleId;
@@ -160,9 +165,18 @@ export async function PUT(req: NextRequest) {
   if (endMileage !== undefined) data.endMileage = endMileage ? parseInt(endMileage, 10) : null;
   if (endFuel !== undefined) data.endFuel = endFuel ? parseFloat(endFuel) : null;
   if (notes !== undefined) data.notes = notes || null;
+  // Автоматическое "returnDate задан -> status=completed" убрано ("Доработка логики рейсов" —
+  // финальная архитектура): закрытие рейса теперь ТОЛЬКО через POST .../close (кнопка
+  // "Закрыть рейс" — там же живой снимок Wialon и заморозка итогов). Обычный PUT может
+  // менять статус явно (например, в архив), но не переводит сам в "completed".
   if (st !== undefined) data.status = st;
   if (tripNumber !== undefined) data.tripNumber = tripNumber.trim();
-  if (data.returnDate && !st) data.status = 'completed';
+
+  // Доход/расходы редактируются напрямую ТОЛЬКО у уже закрытого рейса (заморожены при
+  // закрытии) — правки логируются ниже. Для активного рейса эти поля live-считаются
+  // (см. GET-роут), сохранять их незачем.
+  if (wasClosed && finalRevenueAmd !== undefined) data.finalRevenueAmd = finalRevenueAmd === '' || finalRevenueAmd == null ? null : parseFloat(finalRevenueAmd);
+  if (wasClosed && finalExpensesAmd !== undefined) data.finalExpensesAmd = finalExpensesAmd === '' || finalExpensesAmd == null ? null : parseFloat(finalExpensesAmd);
 
   // Per-expense AMD calc helper
   const toAmd = (v: any, cur: string, rate: number) => {
@@ -235,10 +249,44 @@ export async function PUT(req: NextRequest) {
     },
   });
 
-  await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
-  await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
+  // Заморозка: у уже закрытого рейса — никакого авто-пересчёта по Wialon (это ровно то,
+  // что "Доработка логики рейсов" запрещает, п.5/п.6), только журнал ручных правок ниже.
+  // Для активного рейса — прежнее поведение без изменений.
+  if (!wasClosed) {
+    await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+    await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
+  } else {
+    await logClosedTripEdits(id, userId, before, record);
+  }
 
   return NextResponse.json(record);
+}
+
+/** Поля закрытого рейса, правки которых логируются (п.7 — журнал изменений). */
+const LOGGED_FIELDS = [
+  'departureDate', 'returnDate', 'finalRevenueAmd', 'finalExpensesAmd',
+  'startMileage', 'endMileage', 'startFuel', 'endFuel', 'notes',
+] as const;
+
+function formatLogValue(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  return String(v);
+}
+
+async function logClosedTripEdits(vehicleTripId: string, userId: string | undefined, before: any, after: any) {
+  const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
+  for (const field of LOGGED_FIELDS) {
+    const oldValue = formatLogValue(before[field]);
+    const newValue = formatLogValue(after[field]);
+    if (oldValue !== newValue) changes.push({ field, oldValue, newValue });
+  }
+  if (changes.length === 0) return;
+  await prisma.vehicleTripEvent.createMany({
+    data: changes.map((c) => ({
+      vehicleTripId, action: 'manual_edit', field: c.field, oldValue: c.oldValue, newValue: c.newValue, userId: userId ?? null,
+    })),
+  });
 }
 
 export async function DELETE(req: NextRequest) {

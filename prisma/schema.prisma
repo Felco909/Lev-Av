@@ -593,6 +593,18 @@ model VehicleTrip {
   // последующей проверке).
   departureConfirmedByGps Boolean   @default(false) @map("departure_confirmed_by_gps")
 
+  // Заморозка при ручном закрытии рейса ("Доработка логики рейсов", финальная архитектура).
+  // Пока рейс активен (status="active") — доход считается live-джойном по датам (см.
+  // lib/vehicle-trips/revenue.ts), эти поля пустые. При закрытии (POST .../close) — считаются
+  // один раз и больше НИКОГДА не пересчитываются автоматически (ни синком Wialon, ни PUT).
+  // Правка админом — только через отдельное ручное редактирование с логированием в
+  // VehicleTripEvent; пересчёт состава заявок после правки дат — только через отдельный
+  // эндпоинт recalculate-income с explicit-подтверждением (не автоматически).
+  finalRevenueAmd  Decimal?  @map("final_revenue_amd") @db.Decimal(14, 2)
+  finalExpensesAmd Decimal?  @map("final_expenses_amd") @db.Decimal(14, 2)
+  closedAt         DateTime? @map("closed_at")
+  closedByUserId   String?   @map("closed_by_user_id")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   trips         Trip[]
@@ -633,11 +645,14 @@ model VehicleTripEvent {
   id            String      @id @default(cuid())
   vehicleTripId String      @map("vehicle_trip_id")
   vehicleTrip   VehicleTrip @relation(fields: [vehicleTripId], references: [id], onDelete: Cascade)
-  action        String // status_changed
-  field         String? // geofenceStatus
+  action        String // status_changed | manual_edit | closed | income_recalculated
+  field         String? // geofenceStatus | departureDate | finalRevenueAmd | ...
   oldValue      String?     @map("old_value")
   newValue      String?     @map("new_value")
   zoneName      String?     @map("zone_name")
+  // Кто внёс изменение (Этап "Доработка логики рейсов", п.7 — журнал изменений).
+  // Null для автоматических системных событий (детект базы), заполнено для ручных правок.
+  userId        String?     @map("user_id")
   createdAt     DateTime    @default(now()) @map("created_at")
 
   @@index([vehicleTripId])

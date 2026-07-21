@@ -38,3 +38,29 @@ export async function maybeSyncVehicleMileage(vehicleId: string, endMileage: num
     console.error('[vehicle-trips] обновление пробега машины (ТО) не удалось:', e);
   }
 }
+
+interface VehicleTripExpenseFields {
+  salaryAmd: unknown;
+  perDiemAmd: unknown;
+  perDiem2Amd: unknown;
+  perDiem3Amd: unknown;
+  otherExpensesAmd: unknown;
+  fuelCostAmd: unknown;
+  fleetExpenses: Array<{ amountAmd: unknown }>;
+}
+
+/**
+ * Прямые расходы рейса (зарплата + суточные×3 + прочее + топливо) + FleetExpense —
+ * та же формула, что уже была продублирована в GET /api/vehicle-trips/[id],
+ * /api/vehicles/[id]/economics и /api/vehicle-analytics (см. CLAUDE.md — эти места
+ * не путать с формулой прибыли по заявке в lib/finance/formulas.ts, это другой модуль).
+ * Вынесено сюда, чтобы закрытие рейса (POST .../close) считало точно так же, не заново.
+ */
+export function computeVehicleTripExpensesAmd(vt: VehicleTripExpenseFields): number {
+  const directSalaryAmd = Number(vt.salaryAmd) || 0;
+  const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0);
+  const directOtherAmd = Number(vt.otherExpensesAmd) || 0;
+  const directFuelAmd = Number(vt.fuelCostAmd) || 0;
+  const fleetExpTotal = vt.fleetExpenses.reduce((s, e) => s + (Number(e.amountAmd) || 0), 0);
+  return directSalaryAmd + directPerDiemAmd + directOtherAmd + directFuelAmd + fleetExpTotal;
+}
