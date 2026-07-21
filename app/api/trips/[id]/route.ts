@@ -148,6 +148,7 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
         carrierRate: carrierRateVal != null ? new Decimal(carrierRateVal) : null,
         status: body?.status ?? 'new',
         tripDate: new Date(body?.tripDate ?? new Date()),
+        unloadDate: body?.unloadDate ? new Date(body.unloadDate) : (body?.unloadDate === null ? null : undefined),
         paymentDueDate: body?.paymentDueDate ? new Date(body.paymentDueDate) : (body?.paymentDueDate === null ? null : undefined),
         basisText: body?.basisText !== undefined ? (body.basisText || null) : undefined,
         clientInvoiceSeries: body?.clientInvoiceSeries !== undefined ? (body.clientInvoiceSeries || null) : undefined,

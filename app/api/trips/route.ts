@@ -260,6 +260,7 @@ export async function POST(req: Request) {
         carrierRate: carrierRateVal != null ? new Decimal(carrierRateVal) : null,
         status: body?.status ?? 'new',
         tripDate: new Date(body?.tripDate ?? new Date()),
+        unloadDate: body?.unloadDate ? new Date(body.unloadDate) : null,
         paymentDueDate: body?.paymentDueDate ? new Date(body.paymentDueDate) : null,
         basisText: body?.basisText || null,
         clientInvoiceSeries: body?.clientInvoiceSeries || null,
