@@ -1,11 +1,11 @@
 generator client {
-    provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -20,30 +20,30 @@ model User {
 }
 
 model Client {
-  id            String   @id @default(cuid())
-  name          String
-  contactPerson String?  @map("contact_person")
-  phone         String?
-  email         String?
-  inn           String?
-  address       String?
-  invoiceTemplatePath String? @map("invoice_template_path")
-  invoiceTemplateName String? @map("invoice_template_name")
-  actTemplatePath     String? @map("act_template_path")
-  actTemplateName     String? @map("act_template_name")
-  lastInvoiceNum      Int     @default(0) @map("last_invoice_num")
-  lastActNum          Int     @default(0) @map("last_act_num")
-  invoicePrefix       String  @default("\u0421\u0427") @map("invoice_prefix")
-  actPrefix           String  @default("\u0410\u041A\u0422") @map("act_prefix")
-  numberFormat        String  @default("{prefix}-{number}") @map("number_format")
-  resetNumberingYearly Boolean @default(false) @map("reset_numbering_yearly")
-  lastResetYear       Int?    @map("last_reset_year")
-  paymentTermsDays    Int?    @map("payment_terms_days")
-  contractFile        String? @map("contract_file")
-  contractFileName    String? @map("contract_file_name")
-  createdAt     DateTime @default(now()) @map("created_at")
-  trips         Trip[]
-  contacts      ClientContact[]
+  id                   String          @id @default(cuid())
+  name                 String
+  contactPerson        String?         @map("contact_person")
+  phone                String?
+  email                String?
+  inn                  String?
+  address              String?
+  invoiceTemplatePath  String?         @map("invoice_template_path")
+  invoiceTemplateName  String?         @map("invoice_template_name")
+  actTemplatePath      String?         @map("act_template_path")
+  actTemplateName      String?         @map("act_template_name")
+  lastInvoiceNum       Int             @default(0) @map("last_invoice_num")
+  lastActNum           Int             @default(0) @map("last_act_num")
+  invoicePrefix        String          @default("\u0421\u0427") @map("invoice_prefix")
+  actPrefix            String          @default("\u0410\u041A\u0422") @map("act_prefix")
+  numberFormat         String          @default("{prefix}-{number}") @map("number_format")
+  resetNumberingYearly Boolean         @default(false) @map("reset_numbering_yearly")
+  lastResetYear        Int?            @map("last_reset_year")
+  paymentTermsDays     Int?            @map("payment_terms_days")
+  contractFile         String?         @map("contract_file")
+  contractFileName     String?         @map("contract_file_name")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  trips                Trip[]
+  contacts             ClientContact[]
 
   @@map("clients")
 }
@@ -57,47 +57,52 @@ model ClientContact {
   email     String?
   createdAt DateTime @default(now()) @map("created_at")
 
-  trips     Trip[]   @relation("TripContact")
+  trips Trip[] @relation("TripContact")
 
   @@index([clientId])
   @@map("client_contacts")
 }
 
 model Vehicle {
-  id             String   @id @default(cuid())
-  plateNumber    String   @map("plate_number")
-  brand          String
-  model          String
-  status         String   @default("active")
-  currentMileage Int?     @map("current_mileage")
-  currentMileageUpdatedAt DateTime? @map("current_mileage_updated_at")
-  wialonUnitId   String?  @map("wialon_unit_id")
-  driverId       String?  @map("driver_id")
-  driver         Driver?  @relation("VehicleDriver", fields: [driverId], references: [id], onDelete: SetNull)
-  createdAt      DateTime @default(now()) @map("created_at")
-  trips          Trip[]
-  maintenances   Maintenance[]
-  serviceRecords ServiceRecord[]
-  fuelRecords    FuelRecord[]
-  tireSets       TireSet[]
-  driverHistory  DriverVehicleHistory[]
-  partPurchases  PartPurchase[]
-  fleetExpenses  FleetExpense[]
-  vehicleTrips   VehicleTrip[]
+  id                      String                 @id @default(cuid())
+  plateNumber             String                 @map("plate_number")
+  brand                   String
+  model                   String
+  status                  String                 @default("active")
+  currentMileage          Int?                   @map("current_mileage")
+  currentMileageUpdatedAt DateTime?              @map("current_mileage_updated_at")
+  wialonUnitId            String?                @map("wialon_unit_id")
+  driverId                String?                @map("driver_id")
+  driver                  Driver?                @relation("VehicleDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  // Присутствие на базе компании (собственная зона TMS, см. модель CompanyZone) — не Wialon-геозона.
+  // Обновляется фоновой проверкой lib/company-base/baseCheck.ts каждые 5 минут по живым GPS
+  // из Wialon API. atBase=null означает "ещё не проверялось" (например, у машины нет wialonUnitId).
+  atBase                  Boolean?               @default(true) @map("at_base")
+  atBaseChangedAt         DateTime?              @map("at_base_changed_at")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  trips                   Trip[]
+  maintenances            Maintenance[]
+  serviceRecords          ServiceRecord[]
+  fuelRecords             FuelRecord[]
+  tireSets                TireSet[]
+  driverHistory           DriverVehicleHistory[]
+  partPurchases           PartPurchase[]
+  fleetExpenses           FleetExpense[]
+  vehicleTrips            VehicleTrip[]
 
   @@index([driverId])
   @@map("vehicles")
 }
 
 model Driver {
-  id            String   @id @default(cuid())
-  fullName      String   @map("full_name")
-  phone         String?
-  licenseNumber String?  @map("license_number")
-  status        String   @default("active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  trips         Trip[]
-  vehicles      Vehicle[] @relation("VehicleDriver")
+  id             String                 @id @default(cuid())
+  fullName       String                 @map("full_name")
+  phone          String?
+  licenseNumber  String?                @map("license_number")
+  status         String                 @default("active")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  trips          Trip[]
+  vehicles       Vehicle[]              @relation("VehicleDriver")
   vehicleHistory DriverVehicleHistory[]
   vehicleTrips   VehicleTrip[]
 
@@ -120,85 +125,85 @@ model Carrier {
 }
 
 model Trip {
-  id          String    @id @default(cuid())
-  tripNumber  String    @unique @map("trip_number")
-  clientId    String    @map("client_id")
-  client      Client    @relation(fields: [clientId], references: [id])
-  contactId   String?   @map("contact_id")
-  contact     ClientContact? @relation("TripContact", fields: [contactId], references: [id], onDelete: SetNull)
-  routeFrom   String    @map("route_from")
-  routeTo     String    @map("route_to")
-  distance    Int?      // km
-  cargoWeight Decimal?  @map("cargo_weight") @db.Decimal(10, 2) // tonnes
-  tripType    String    @map("trip_type") // own_transport | expedition
-  clientRate  Decimal   @default(0) @map("client_rate") @db.Decimal(12, 2)
-  vehicleId   String?   @map("vehicle_id")
-  vehicle     Vehicle?  @relation(fields: [vehicleId], references: [id])
-  driverId    String?   @map("driver_id")
-  driver      Driver?   @relation(fields: [driverId], references: [id])
-  carrierId   String?   @map("carrier_id")
-  carrier     Carrier?  @relation(fields: [carrierId], references: [id])
-  carrierRate Decimal?  @map("carrier_rate") @db.Decimal(12, 2)
-  status      String    @default("new") // new | in_progress | unloaded | paid | completed
-  tripDate    DateTime  @map("trip_date") @db.Date
-  profit      Decimal   @default(0) @db.Decimal(12, 2)
+  id                   String           @id @default(cuid())
+  tripNumber           String           @unique @map("trip_number")
+  clientId             String           @map("client_id")
+  client               Client           @relation(fields: [clientId], references: [id])
+  contactId            String?          @map("contact_id")
+  contact              ClientContact?   @relation("TripContact", fields: [contactId], references: [id], onDelete: SetNull)
+  routeFrom            String           @map("route_from")
+  routeTo              String           @map("route_to")
+  distance             Int? // km
+  cargoWeight          Decimal?         @map("cargo_weight") @db.Decimal(10, 2) // tonnes
+  tripType             String           @map("trip_type") // own_transport | expedition
+  clientRate           Decimal          @default(0) @map("client_rate") @db.Decimal(12, 2)
+  vehicleId            String?          @map("vehicle_id")
+  vehicle              Vehicle?         @relation(fields: [vehicleId], references: [id])
+  driverId             String?          @map("driver_id")
+  driver               Driver?          @relation(fields: [driverId], references: [id])
+  carrierId            String?          @map("carrier_id")
+  carrier              Carrier?         @relation(fields: [carrierId], references: [id])
+  carrierRate          Decimal?         @map("carrier_rate") @db.Decimal(12, 2)
+  status               String           @default("new") // new | in_progress | unloaded | paid | completed
+  tripDate             DateTime         @map("trip_date") @db.Date
+  profit               Decimal          @default(0) @db.Decimal(12, 2)
   // Currency fields
-  currency      String    @default("AMD") // AMD, USD, EUR, RUB, GEL
-  exchangeRate  Decimal   @default(1) @map("exchange_rate") @db.Decimal(12, 4) // курс к AMD
-  clientRateAmd Decimal   @default(0) @map("client_rate_amd") @db.Decimal(14, 2) // ставка клиента в AMD
-  carrierCurrency    String?   @map("carrier_currency") // валюта расхода (AMD, USD, EUR, RUB, GEL)
-  carrierExchangeRate Decimal? @map("carrier_exchange_rate") @db.Decimal(12, 4) // курс расхода к AMD
-  carrierRateAmd Decimal? @map("carrier_rate_amd") @db.Decimal(14, 2) // ставка перевозчика в AMD
-  profitAmd     Decimal   @default(0) @map("profit_amd") @db.Decimal(14, 2) // прибыль в AMD
-  originalRate  Decimal   @default(1) @map("original_rate") @db.Decimal(12, 4) // первоначальный курс
-  exchangeDiff  Decimal   @default(0) @map("exchange_diff") @db.Decimal(14, 2) // курсовая разница
-  contractNumber String?   @map("contract_number") // номер договора
-  requestNumber  String?   @map("request_number")  // номер заявки
-  contractDate   String?   @map("contract_date")   // дата договора
-  basisText      String?   @map("basis_text") @db.Text // текст основания для счёта/акта
-  paymentDueDate DateTime? @map("payment_due_date") @db.Date // дата оплаты (дедлайн)
+  currency             String           @default("AMD") // AMD, USD, EUR, RUB, GEL
+  exchangeRate         Decimal          @default(1) @map("exchange_rate") @db.Decimal(12, 4) // курс к AMD
+  clientRateAmd        Decimal          @default(0) @map("client_rate_amd") @db.Decimal(14, 2) // ставка клиента в AMD
+  carrierCurrency      String?          @map("carrier_currency") // валюта расхода (AMD, USD, EUR, RUB, GEL)
+  carrierExchangeRate  Decimal?         @map("carrier_exchange_rate") @db.Decimal(12, 4) // курс расхода к AMD
+  carrierRateAmd       Decimal?         @map("carrier_rate_amd") @db.Decimal(14, 2) // ставка перевозчика в AMD
+  profitAmd            Decimal          @default(0) @map("profit_amd") @db.Decimal(14, 2) // прибыль в AMD
+  originalRate         Decimal          @default(1) @map("original_rate") @db.Decimal(12, 4) // первоначальный курс
+  exchangeDiff         Decimal          @default(0) @map("exchange_diff") @db.Decimal(14, 2) // курсовая разница
+  contractNumber       String?          @map("contract_number") // номер договора
+  requestNumber        String?          @map("request_number") // номер заявки
+  contractDate         String?          @map("contract_date") // дата договора
+  basisText            String?          @map("basis_text") @db.Text // текст основания для счёта/акта
+  paymentDueDate       DateTime?        @map("payment_due_date") @db.Date // дата оплаты (дедлайн)
   // Client payment tracking
-  clientPaymentStatus  String @default("not_paid") @map("client_payment_status") // not_paid | partially_paid | paid
-  clientPaidAmount     Decimal @default(0) @map("client_paid_amount") @db.Decimal(14, 2)
-  clientPaidAmountAmd  Decimal @default(0) @map("client_paid_amount_amd") @db.Decimal(14, 2)
+  clientPaymentStatus  String           @default("not_paid") @map("client_payment_status") // not_paid | partially_paid | paid
+  clientPaidAmount     Decimal          @default(0) @map("client_paid_amount") @db.Decimal(14, 2)
+  clientPaidAmountAmd  Decimal          @default(0) @map("client_paid_amount_amd") @db.Decimal(14, 2)
   // Carrier payment tracking
-  carrierPaymentStatus String @default("not_paid") @map("carrier_payment_status") // not_paid | partially_paid | paid
-  carrierPaidAmount    Decimal @default(0) @map("carrier_paid_amount") @db.Decimal(14, 2) // сумма оплаченная перевозчику
-  carrierPaidAmountAmd Decimal @default(0) @map("carrier_paid_amount_amd") @db.Decimal(14, 2)
-  carrierPaymentDate   DateTime? @map("carrier_payment_date") @db.Date
-  carrierPaymentNote   String? @map("carrier_payment_note") @db.Text
-  invoiceSeries        String? @map("invoice_series") // deprecated, kept for migration
-  clientInvoiceSeries  String? @map("client_invoice_series") // серия счёта клиента
-  carrierInvoiceSeries String? @map("carrier_invoice_series") // серия счёта перевозчика
-  notes        String?  @db.Text // внутренние заметки (не попадают в документы)
+  carrierPaymentStatus String           @default("not_paid") @map("carrier_payment_status") // not_paid | partially_paid | paid
+  carrierPaidAmount    Decimal          @default(0) @map("carrier_paid_amount") @db.Decimal(14, 2) // сумма оплаченная перевозчику
+  carrierPaidAmountAmd Decimal          @default(0) @map("carrier_paid_amount_amd") @db.Decimal(14, 2)
+  carrierPaymentDate   DateTime?        @map("carrier_payment_date") @db.Date
+  carrierPaymentNote   String?          @map("carrier_payment_note") @db.Text
+  invoiceSeries        String?          @map("invoice_series") // deprecated, kept for migration
+  clientInvoiceSeries  String?          @map("client_invoice_series") // серия счёта клиента
+  carrierInvoiceSeries String?          @map("carrier_invoice_series") // серия счёта перевозчика
+  notes                String?          @db.Text // внутренние заметки (не попадают в документы)
   // Document number fields (exist in DB)
-  invoiceDocNumber  String?   @map("invoice_doc_number")
-  actDocNumber      String?   @map("act_doc_number")
-  invoiceDocDate    DateTime? @map("invoice_doc_date") @db.Date
-  actDocDate        DateTime? @map("act_doc_date") @db.Date
-  unloadDate        DateTime? @map("unload_date") @db.Date
-  taxCode           String?   @map("tax_code")
-  docTransportText  String?   @map("doc_transport_text") @db.Text
-  clientExpenses    Json?     @map("client_expenses")
-  carrierExpenses   Json?     @map("carrier_expenses")
+  invoiceDocNumber     String?          @map("invoice_doc_number")
+  actDocNumber         String?          @map("act_doc_number")
+  invoiceDocDate       DateTime?        @map("invoice_doc_date") @db.Date
+  actDocDate           DateTime?        @map("act_doc_date") @db.Date
+  unloadDate           DateTime?        @map("unload_date") @db.Date
+  taxCode              String?          @map("tax_code")
+  docTransportText     String?          @map("doc_transport_text") @db.Text
+  clientExpenses       Json?            @map("client_expenses")
+  carrierExpenses      Json?            @map("carrier_expenses")
   // Carrier request document fields
-  customsDeparture   String?  @map("customs_departure")
-  customsDestination String?  @map("customs_destination")
-  cargoName          String?  @map("cargo_name")
-  cargoValue         Decimal? @map("cargo_value") @db.Decimal(14, 2)
-  truckType          String?  @map("truck_type")
-  loadingAddress     String?  @map("loading_address")
-  unloadingAddress   String?  @map("unloading_address")
-  trailerPlate       String?  @map("trailer_plate")
-  additionalTerms    String?  @map("additional_terms") @db.Text
-  vehicleTripId String?  @map("vehicle_trip_id")
-  vehicleTrip   VehicleTrip? @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  expenses    Expense[]
-  payments    Payment[]
-  attachments TripAttachment[]
-  history     TripHistory[]
+  customsDeparture     String?          @map("customs_departure")
+  customsDestination   String?          @map("customs_destination")
+  cargoName            String?          @map("cargo_name")
+  cargoValue           Decimal?         @map("cargo_value") @db.Decimal(14, 2)
+  truckType            String?          @map("truck_type")
+  loadingAddress       String?          @map("loading_address")
+  unloadingAddress     String?          @map("unloading_address")
+  trailerPlate         String?          @map("trailer_plate")
+  additionalTerms      String?          @map("additional_terms") @db.Text
+  vehicleTripId        String?          @map("vehicle_trip_id")
+  vehicleTrip          VehicleTrip?     @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+  expenses             Expense[]
+  payments             Payment[]
+  attachments          TripAttachment[]
+  history              TripHistory[]
 
   @@index([tripDate])
   @@index([status])
@@ -210,16 +215,16 @@ model Trip {
 }
 
 model Expense {
-  id            String   @id @default(cuid())
-  tripId        String   @map("trip_id")
-  trip          Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  expenseType   String   @map("expense_type") // fuel | toll | ferry | other
-  amount        Decimal  @db.Decimal(12, 2)
-  currency      String   @default("AMD") // AMD, USD, EUR, RUB, GEL
-  exchangeRate  Decimal  @default(1) @map("exchange_rate") @db.Decimal(12, 4)
-  amountAmd     Decimal  @default(0) @map("amount_amd") @db.Decimal(14, 2)
-  description   String?
-  createdAt     DateTime @default(now()) @map("created_at")
+  id           String   @id @default(cuid())
+  tripId       String   @map("trip_id")
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  expenseType  String   @map("expense_type") // fuel | toll | ferry | other
+  amount       Decimal  @db.Decimal(12, 2)
+  currency     String   @default("AMD") // AMD, USD, EUR, RUB, GEL
+  exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(12, 4)
+  amountAmd    Decimal  @default(0) @map("amount_amd") @db.Decimal(14, 2)
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([tripId])
   @@map("expenses")
@@ -234,32 +239,32 @@ model Setting {
 }
 
 model TripAttachment {
-  id                String   @id @default(cuid())
-  tripId            String   @map("trip_id")
-  trip              Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  fileName          String   @map("file_name")
-  fileType          String   @map("file_type") // e.g. application/pdf, image/jpeg
-  cloudStoragePath  String   @map("cloud_storage_path")
-  isPublic          Boolean  @default(false) @map("is_public")
-  description       String?
-  uploadedAt        DateTime @default(now()) @map("uploaded_at")
+  id               String   @id @default(cuid())
+  tripId           String   @map("trip_id")
+  trip             Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fileName         String   @map("file_name")
+  fileType         String   @map("file_type") // e.g. application/pdf, image/jpeg
+  cloudStoragePath String   @map("cloud_storage_path")
+  isPublic         Boolean  @default(false) @map("is_public")
+  description      String?
+  uploadedAt       DateTime @default(now()) @map("uploaded_at")
 
   @@index([tripId])
   @@map("trip_attachments")
 }
 
 model Maintenance {
-  id          String   @id @default(cuid())
-  vehicleId   String   @map("vehicle_id")
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  type        String   // oil_change | tire_change | brake_service | engine_service | inspection | other
+  id          String    @id @default(cuid())
+  vehicleId   String    @map("vehicle_id")
+  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  type        String // oil_change | tire_change | brake_service | engine_service | inspection | other
   description String?
-  date        DateTime @db.Date
+  date        DateTime  @db.Date
   nextDate    DateTime? @map("next_date") @db.Date
-  cost        Decimal  @default(0) @db.Decimal(12, 2)
+  cost        Decimal   @default(0) @db.Decimal(12, 2)
   mileage     Int?
   notes       String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([vehicleId])
   @@index([nextDate])
@@ -267,32 +272,32 @@ model Maintenance {
 }
 
 model RouteTemplate {
-  id           String   @id @default(cuid())
-  routeFrom    String   @map("route_from")
-  routeTo      String   @map("route_to")
-  distance     Int?     // km
-  defaultRate  Decimal? @map("default_rate") @db.Decimal(12, 2)
-  currency     String   @default("AMD") // AMD, USD, EUR, RUB, GEL
-  vehicleType  String?  @map("vehicle_type") // tent | ref | flatbed | etc
-  notes        String?
-  createdAt    DateTime @default(now()) @map("created_at")
+  id          String   @id @default(cuid())
+  routeFrom   String   @map("route_from")
+  routeTo     String   @map("route_to")
+  distance    Int? // km
+  defaultRate Decimal? @map("default_rate") @db.Decimal(12, 2)
+  currency    String   @default("AMD") // AMD, USD, EUR, RUB, GEL
+  vehicleType String?  @map("vehicle_type") // tent | ref | flatbed | etc
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("route_templates")
 }
 
 model Payment {
-  id          String   @id @default(cuid())
-  tripId      String   @map("trip_id")
-  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  type        String   @default("client") // client | carrier
-  amount      Decimal  @db.Decimal(14, 2)
-  amountAmd   Decimal  @default(0) @map("amount_amd") @db.Decimal(14, 2)
+  id           String   @id @default(cuid())
+  tripId       String   @map("trip_id")
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  type         String   @default("client") // client | carrier
+  amount       Decimal  @db.Decimal(14, 2)
+  amountAmd    Decimal  @default(0) @map("amount_amd") @db.Decimal(14, 2)
   currency     String   @default("AMD")
   exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(12, 4)
   paymentDate  DateTime @map("payment_date") @db.Date
-  method      String   @default("bank_transfer") // bank_transfer | cash | card | other
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  method       String   @default("bank_transfer") // bank_transfer | cash | card | other
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([tripId])
   @@index([tripId, type])
@@ -305,8 +310,8 @@ model TripHistory {
   trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
   userId    String?  @map("user_id")
   userName  String?  @map("user_name")
-  action    String   // created | updated | status_changed | deleted
-  field     String?  // which field changed
+  action    String // created | updated | status_changed | deleted
+  field     String? // which field changed
   oldValue  String?  @map("old_value")
   newValue  String?  @map("new_value")
   createdAt DateTime @default(now()) @map("created_at")
@@ -317,24 +322,24 @@ model TripHistory {
 }
 
 model DocumentTemplate {
-  id                String   @id @default(cuid())
-  documentType      String   @unique @map("document_type")
-  fileName          String   @map("file_name")
-  cloudStoragePath  String   @map("cloud_storage_path")
-  isPublic          Boolean  @default(false) @map("is_public")
-  uploadedAt        DateTime @default(now()) @map("uploaded_at")
+  id               String   @id @default(cuid())
+  documentType     String   @unique @map("document_type")
+  fileName         String   @map("file_name")
+  cloudStoragePath String   @map("cloud_storage_path")
+  isPublic         Boolean  @default(false) @map("is_public")
+  uploadedAt       DateTime @default(now()) @map("uploaded_at")
 
   @@map("document_templates")
 }
 
 model ServiceRegulation {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   name            String
   description     String?
-  vehicleModel    String?  @map("vehicle_model") // null = общий норматив для всех моделей техники
-  mileageInterval Int?     @map("mileage_interval")
-  monthsInterval  Int?     @map("months_interval")
-  createdAt       DateTime @default(now()) @map("created_at")
+  vehicleModel    String?         @map("vehicle_model") // null = общий норматив для всех моделей техники
+  mileageInterval Int?            @map("mileage_interval")
+  monthsInterval  Int?            @map("months_interval")
+  createdAt       DateTime        @default(now()) @map("created_at")
   serviceRecords  ServiceRecord[]
 
   @@map("service_regulations")
@@ -396,7 +401,7 @@ model TireSet {
   vehicle        Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   brand          String
   size           String
-  position       String?   // front_left | front_right | rear_left_outer | etc | warehouse
+  position       String? // front_left | front_right | rear_left_outer | etc | warehouse
   installDate    DateTime? @map("install_date") @db.Date
   installMileage Int?      @map("install_mileage")
   removeDate     DateTime? @map("remove_date") @db.Date
@@ -410,32 +415,32 @@ model TireSet {
 }
 
 model Supplier {
-  id            String   @id @default(cuid())
+  id            String         @id @default(cuid())
   name          String
-  contactPerson String?  @map("contact_person")
+  contactPerson String?        @map("contact_person")
   phone         String?
-  paymentTerms  String?  @map("payment_terms")
-  createdAt     DateTime @default(now()) @map("created_at")
+  paymentTerms  String?        @map("payment_terms")
+  createdAt     DateTime       @default(now()) @map("created_at")
   partPurchases PartPurchase[]
 
   @@map("suppliers")
 }
 
 model PartPurchase {
-  id            String   @id @default(cuid())
-  vehicleId     String   @map("vehicle_id")
-  vehicle       Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  supplierId    String?  @map("supplier_id")
-  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  date          DateTime @db.Date
-  partName      String   @map("part_name")
-  quantity      Decimal  @default(1) @db.Decimal(10, 2)
-  unitPrice     Decimal  @default(0) @map("unit_price") @db.Decimal(12, 2)
-  totalAmount   Decimal  @default(0) @map("total_amount") @db.Decimal(14, 2)
-  paidAmount    Decimal  @default(0) @map("paid_amount") @db.Decimal(14, 2)
-  paymentStatus String   @default("unpaid") @map("payment_status") // paid | unpaid | partial
+  id            String           @id @default(cuid())
+  vehicleId     String           @map("vehicle_id")
+  vehicle       Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  supplierId    String?          @map("supplier_id")
+  supplier      Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  date          DateTime         @db.Date
+  partName      String           @map("part_name")
+  quantity      Decimal          @default(1) @db.Decimal(10, 2)
+  unitPrice     Decimal          @default(0) @map("unit_price") @db.Decimal(12, 2)
+  totalAmount   Decimal          @default(0) @map("total_amount") @db.Decimal(14, 2)
+  paidAmount    Decimal          @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  paymentStatus String           @default("unpaid") @map("payment_status") // paid | unpaid | partial
   notes         String?
-  createdAt     DateTime @default(now()) @map("created_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
   payments      PartPayment[]
   attachments   PartAttachment[]
 
@@ -489,20 +494,20 @@ model DriverVehicleHistory {
 }
 
 model FleetExpense {
-  id             String       @id @default(cuid())
-  date           DateTime     @db.Date
-  vehicleId      String       @map("vehicle_id")
-  vehicle        Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  vehicleTripId  String?      @map("vehicle_trip_id")
-  vehicleTrip    VehicleTrip? @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
-  expenseType    String       @map("expense_type") // salary | fuel | per_diem | other
-  liters         Decimal?     @db.Decimal(10, 2) // only for fuel expenses
-  amount         Decimal      @db.Decimal(12, 2)
-  currency       String       @default("AMD") // AMD, RUB, USD
-  exchangeRate   Decimal      @default(1) @map("exchange_rate") @db.Decimal(12, 4)
-  amountAmd      Decimal      @default(0) @map("amount_amd") @db.Decimal(14, 2)
-  comment        String?      @db.Text
-  createdAt      DateTime     @default(now()) @map("created_at")
+  id            String       @id @default(cuid())
+  date          DateTime     @db.Date
+  vehicleId     String       @map("vehicle_id")
+  vehicle       Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleTripId String?      @map("vehicle_trip_id")
+  vehicleTrip   VehicleTrip? @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
+  expenseType   String       @map("expense_type") // salary | fuel | per_diem | other
+  liters        Decimal?     @db.Decimal(10, 2) // only for fuel expenses
+  amount        Decimal      @db.Decimal(12, 2)
+  currency      String       @default("AMD") // AMD, RUB, USD
+  exchangeRate  Decimal      @default(1) @map("exchange_rate") @db.Decimal(12, 4)
+  amountAmd     Decimal      @default(0) @map("amount_amd") @db.Decimal(14, 2)
+  comment       String?      @db.Text
+  createdAt     DateTime     @default(now()) @map("created_at")
 
   @@index([vehicleId])
   @@index([vehicleTripId])
@@ -512,59 +517,59 @@ model FleetExpense {
 }
 
 model VehicleTrip {
-  id             String    @id @default(cuid())
-  tripNumber     String    @map("trip_number") // авто-номер рейса
-  vehicleId      String    @map("vehicle_id")
-  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  driverId       String?   @map("driver_id")
-  driver         Driver?   @relation(fields: [driverId], references: [id], onDelete: SetNull)
-  departureDate  DateTime  @map("departure_date") // с точным временем (было @db.Date — только дата)
-  departureLat   Float?    @map("departure_lat")
-  departureLon   Float?    @map("departure_lon")
-  startMileage   Int?      @map("start_mileage")
-  startFuel      Decimal?  @map("start_fuel") @db.Decimal(8, 2)
-  returnDate     DateTime? @map("return_date") // с точным временем (было @db.Date)
-  returnLat      Float?    @map("return_lat")
-  returnLon      Float?    @map("return_lon")
-  endMileage     Int?      @map("end_mileage")
-  endFuel        Decimal?  @map("end_fuel") @db.Decimal(8, 2)
-  status         String    @default("active") // active | completed
-  notes          String?   @db.Text
+  id            String    @id @default(cuid())
+  tripNumber    String    @map("trip_number") // авто-номер рейса
+  vehicleId     String    @map("vehicle_id")
+  vehicle       Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driverId      String?   @map("driver_id")
+  driver        Driver?   @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  departureDate DateTime  @map("departure_date") // с точным временем (было @db.Date — только дата)
+  departureLat  Float?    @map("departure_lat")
+  departureLon  Float?    @map("departure_lon")
+  startMileage  Int?      @map("start_mileage")
+  startFuel     Decimal?  @map("start_fuel") @db.Decimal(8, 2)
+  returnDate    DateTime? @map("return_date") // с точным временем (было @db.Date)
+  returnLat     Float?    @map("return_lat")
+  returnLon     Float?    @map("return_lon")
+  endMileage    Int?      @map("end_mileage")
+  endFuel       Decimal?  @map("end_fuel") @db.Decimal(8, 2)
+  status        String    @default("active") // active | completed
+  notes         String?   @db.Text
 
   // Direct expense fields — each with its own currency/rate
-  salary              Decimal?  @db.Decimal(12, 2)
-  salaryCurrency      String    @default("AMD") @map("salary_currency")
-  salaryRate          Decimal   @default(1) @map("salary_rate") @db.Decimal(12, 4)
-  salaryAmd           Decimal?  @map("salary_amd") @db.Decimal(14, 2)
+  salary         Decimal? @db.Decimal(12, 2)
+  salaryCurrency String   @default("AMD") @map("salary_currency")
+  salaryRate     Decimal  @default(1) @map("salary_rate") @db.Decimal(12, 4)
+  salaryAmd      Decimal? @map("salary_amd") @db.Decimal(14, 2)
 
-  perDiem             Decimal?  @map("per_diem") @db.Decimal(12, 2)
-  perDiemCurrency     String    @default("AMD") @map("per_diem_currency")
-  perDiemRate         Decimal   @default(1) @map("per_diem_rate") @db.Decimal(12, 4)
-  perDiemAmd          Decimal?  @map("per_diem_amd") @db.Decimal(14, 2)
+  perDiem         Decimal? @map("per_diem") @db.Decimal(12, 2)
+  perDiemCurrency String   @default("AMD") @map("per_diem_currency")
+  perDiemRate     Decimal  @default(1) @map("per_diem_rate") @db.Decimal(12, 4)
+  perDiemAmd      Decimal? @map("per_diem_amd") @db.Decimal(14, 2)
 
   // Суточные №2 и №3 — маршрут может проходить через несколько стран, суточные
   // по каждой считаются отдельно (своя сумма/валюта/курс). Слот №1 — поля perDiem*
   // выше (не переименованы, чтобы не терять исторические данные без миграции).
-  perDiem2            Decimal?  @map("per_diem_2") @db.Decimal(12, 2)
-  perDiem2Currency    String    @default("AMD") @map("per_diem_2_currency")
-  perDiem2Rate        Decimal   @default(1) @map("per_diem_2_rate") @db.Decimal(12, 4)
-  perDiem2Amd         Decimal?  @map("per_diem_2_amd") @db.Decimal(14, 2)
+  perDiem2         Decimal? @map("per_diem_2") @db.Decimal(12, 2)
+  perDiem2Currency String   @default("AMD") @map("per_diem_2_currency")
+  perDiem2Rate     Decimal  @default(1) @map("per_diem_2_rate") @db.Decimal(12, 4)
+  perDiem2Amd      Decimal? @map("per_diem_2_amd") @db.Decimal(14, 2)
 
-  perDiem3            Decimal?  @map("per_diem_3") @db.Decimal(12, 2)
-  perDiem3Currency    String    @default("AMD") @map("per_diem_3_currency")
-  perDiem3Rate        Decimal   @default(1) @map("per_diem_3_rate") @db.Decimal(12, 4)
-  perDiem3Amd         Decimal?  @map("per_diem_3_amd") @db.Decimal(14, 2)
+  perDiem3         Decimal? @map("per_diem_3") @db.Decimal(12, 2)
+  perDiem3Currency String   @default("AMD") @map("per_diem_3_currency")
+  perDiem3Rate     Decimal  @default(1) @map("per_diem_3_rate") @db.Decimal(12, 4)
+  perDiem3Amd      Decimal? @map("per_diem_3_amd") @db.Decimal(14, 2)
 
-  otherExpenses       Decimal?  @map("other_expenses") @db.Decimal(12, 2)
-  otherCurrency       String    @default("AMD") @map("other_currency")
-  otherRate           Decimal   @default(1) @map("other_rate") @db.Decimal(12, 4)
-  otherExpensesAmd    Decimal?  @map("other_expenses_amd") @db.Decimal(14, 2)
+  otherExpenses    Decimal? @map("other_expenses") @db.Decimal(12, 2)
+  otherCurrency    String   @default("AMD") @map("other_currency")
+  otherRate        Decimal  @default(1) @map("other_rate") @db.Decimal(12, 4)
+  otherExpensesAmd Decimal? @map("other_expenses_amd") @db.Decimal(14, 2)
 
-  fuelLiters          Decimal?  @map("fuel_liters") @db.Decimal(10, 2)
-  fuelCost            Decimal?  @map("fuel_cost") @db.Decimal(12, 2)
-  fuelCurrency        String    @default("AMD") @map("fuel_currency")
-  fuelRate            Decimal   @default(1) @map("fuel_rate") @db.Decimal(12, 4)
-  fuelCostAmd         Decimal?  @map("fuel_cost_amd") @db.Decimal(14, 2)
+  fuelLiters   Decimal? @map("fuel_liters") @db.Decimal(10, 2)
+  fuelCost     Decimal? @map("fuel_cost") @db.Decimal(12, 2)
+  fuelCurrency String   @default("AMD") @map("fuel_currency")
+  fuelRate     Decimal  @default(1) @map("fuel_rate") @db.Decimal(12, 4)
+  fuelCostAmd  Decimal? @map("fuel_cost_amd") @db.Decimal(14, 2)
 
   // Автоматический расчёт итогов рейса из Wialon (пробег/расход топлива за выезд-возврат) —
   // не путать с fuelLiters/fuelCost выше (это купленное/заправленное топливо как расход).
@@ -574,21 +579,25 @@ model VehicleTrip {
   fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "wialon_track" | "odometer_diff"
   fuelCalcAt              DateTime? @map("fuel_calc_at")
 
-  // Геозоны (Этап 7) — статус ПО ГЕОЗОНАМ, отдельно от status выше (active/completed/archived),
-  // который используют фильтры списка и синхронизация пробега — не трогаем его семантику.
-  // geofenceStatus: departed | arrived_loading | loading | in_transit | arrived_unloading |
-  // unloaded | returned_to_garage (см. lib/geo/geofenceStateMachine.ts).
-  geofenceStatus   String?   @map("geofence_status")
-  geofenceStatusAt DateTime? @map("geofence_status_at")
-  // Zone id (Wialon), в которой машина находится ПРЯМО СЕЙЧАС, по последней проверке — служебное
+  // База компании (пересмотрено с Wialon-геозон на собственные зоны TMS, см. CompanyZone) —
+  // статус ПО БАЗЕ, отдельно от status выше (active/completed/archived), который используют
+  // фильтры списка и синхронизация пробега — не трогаем его семантику.
+  // geofenceStatus: 'at_base' | 'away' (см. lib/company-base/baseCheck.ts).
+  geofenceStatus          String?   @map("geofence_status")
+  geofenceStatusAt        DateTime? @map("geofence_status_at")
+  // Id CompanyZone, в которой машина находится ПРЯМО СЕЙЧАС (null, если "away") — служебное
   // поле для определения въезда/выезда, не для показа пользователю напрямую.
-  currentZoneId    String?   @map("current_zone_id")
+  currentZoneId           String?   @map("current_zone_id")
+  // GPS-выезд с базы уже зафиксирован для этого рейса (departureDate перезаписывается фоновой
+  // проверкой РОВНО ОДИН РАЗ — при первом реальном выезде после создания рейса, не на каждой
+  // последующей проверке).
+  departureConfirmedByGps Boolean   @default(false) @map("departure_confirmed_by_gps")
 
-  createdAt      DateTime  @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
-  trips          Trip[]
-  fleetExpenses  FleetExpense[]
-  events         VehicleTripEvent[]
+  trips         Trip[]
+  fleetExpenses FleetExpense[]
+  events        VehicleTripEvent[]
 
   @@index([vehicleId])
   @@index([driverId])
@@ -597,27 +606,35 @@ model VehicleTrip {
   @@map("vehicle_trips")
 }
 
-/** Роль Wialon-геозоны в TMS (гараж/погрузка/выгрузка) — у самой зоны в Wialon такого
- *  смысла нет, только имя и геометрия, поэтому сопоставление хранится здесь. */
-model WialonZoneRole {
+/**
+ * Собственная зона TMS (не Wialon-геозона) — сейчас только "база компании" (kind="base"),
+ * архитектура рассчитана на добавление других видов зон позже (например, склады клиентов)
+ * без изменения механизма проверки (lib/company-base/baseCheck.ts, lib/geo/distance.ts).
+ */
+model CompanyZone {
   id           String   @id @default(cuid())
-  wialonZoneId String   @unique @map("wialon_zone_id")
-  zoneName     String   @map("zone_name") // кэш имени зоны из Wialon — для отображения без лишнего запроса
-  role         String   // garage | loading | unloading
+  name         String
+  kind         String   @default("base") // base | (в будущем — другие виды зон)
+  lat          Float
+  lon          Float
+  radiusMeters Int      @map("radius_meters")
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  @@map("wialon_zone_roles")
+  @@map("company_zones")
 }
 
-/** История событий по геозонам на рейсе — по образцу уже существующей TripHistory
- *  (тот же стиль action/field/oldValue/newValue), только для VehicleTrip. */
+/**
+ * История событий по базе компании на рейсе — по образцу уже существующей TripHistory
+ * (тот же стиль action/field/oldValue/newValue), только для VehicleTrip.
+ */
 model VehicleTripEvent {
   id            String      @id @default(cuid())
   vehicleTripId String      @map("vehicle_trip_id")
   vehicleTrip   VehicleTrip @relation(fields: [vehicleTripId], references: [id], onDelete: Cascade)
-  action        String      // status_changed
-  field         String?     // geofenceStatus
+  action        String // status_changed
+  field         String? // geofenceStatus
   oldValue      String?     @map("old_value")
   newValue      String?     @map("new_value")
   zoneName      String?     @map("zone_name")

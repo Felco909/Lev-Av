@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-  Runs the geofence check (scripts/wialon-geofence-check.ts) for Windows Task Scheduler,
-  same pattern as wialon-sync-mileage-daily.ps1 - just a different trigger (every 5 min,
-  not once a day).
+  Runs the company-base presence check (scripts/company-base-check.ts) for Windows Task
+  Scheduler, same pattern as wialon-sync-mileage-daily.ps1 - just a different trigger
+  (every 5 min, not once a day). Replaces wialon-geofence-check-run.ps1 (Wialon geofences,
+  Phase 7 revised - see lib/company-base/baseCheck.ts for why).
 
 .DESCRIPTION
-  - Runs scripts/wialon-geofence-check.ts via npx tsx (explicitly loads WIALON_TOKEN
+  - Runs scripts/company-base-check.ts via npx tsx (explicitly loads WIALON_TOKEN
     from .env.local - Prisma Client picks up DATABASE_URL from .env on its own)
-  - Log: <ProjectDir>\logs\wialon_geofence_check.log
+  - Log: <ProjectDir>\logs\company_base_check.log
 #>
 param(
   [string]$ProjectDir = ''
@@ -20,7 +21,7 @@ if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
 }
 
 $logDir = Join-Path $ProjectDir 'logs'
-$logFile = Join-Path $logDir 'wialon_geofence_check.log'
+$logFile = Join-Path $logDir 'company_base_check.log'
 
 function Write-Log([string]$Message) {
   if (-not (Test-Path -LiteralPath $logDir)) {
@@ -30,14 +31,14 @@ function Write-Log([string]$Message) {
   Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
 }
 
-Write-Log 'START wialon-geofence-check'
+Write-Log 'START company-base-check'
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$outTemp = Join-Path $env:TEMP "levav_geofence_check_out_$stamp.txt"
-$errTemp = Join-Path $env:TEMP "levav_geofence_check_err_$stamp.txt"
+$outTemp = Join-Path $env:TEMP "levav_base_check_out_$stamp.txt"
+$errTemp = Join-Path $env:TEMP "levav_base_check_err_$stamp.txt"
 Remove-Item $outTemp, $errTemp -ErrorAction SilentlyContinue
 
-$argList = @('tsx', '-r', 'dotenv/config', 'scripts/wialon-geofence-check.ts', 'dotenv_config_path=.env.local')
+$argList = @('tsx', '-r', 'dotenv/config', 'scripts/company-base-check.ts', 'dotenv_config_path=.env.local')
 
 try {
   $p = Start-Process -FilePath 'npx.cmd' -ArgumentList $argList -WorkingDirectory $ProjectDir -Wait -PassThru -NoNewWindow `
@@ -60,9 +61,9 @@ if (Test-Path -LiteralPath $errTemp) {
 Remove-Item $outTemp, $errTemp -ErrorAction SilentlyContinue
 
 if ($p.ExitCode -ne 0) {
-  Write-Log "END wialon-geofence-check FAILED (exit code $($p.ExitCode))"
+  Write-Log "END company-base-check FAILED (exit code $($p.ExitCode))"
   exit $p.ExitCode
 }
 
-Write-Log 'END wialon-geofence-check OK'
+Write-Log 'END company-base-check OK'
 exit 0

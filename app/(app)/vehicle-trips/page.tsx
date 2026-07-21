@@ -4,7 +4,20 @@ import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive } from 'lucide-react';
 import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
-import { GEOFENCE_STATUS_LABEL, type GeofenceStatus } from '@/lib/geo/geofenceStateMachine';
+
+function baseStatusLabel(status: string | null): string {
+  if (!status) return '—';
+  return status === 'at_base' ? 'На базе' : status === 'away' ? 'В рейсе (вне базы)' : status;
+}
+
+function formatDurationHm(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const totalMinutes = Math.round(ms / 60000);
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  return days > 0 ? `${days} дн ${hours} ч ${minutes} мин` : `${hours} ч ${minutes} мин`;
+}
 
 interface Vehicle { id: string; plateNumber: string; brand: string; model: string; wialonUnitId?: string | null }
 interface Driver { id: string; fullName: string }
@@ -641,14 +654,15 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
-                        {/* Статус по геозонам (Этап 7) — меняется автоматически фоновой проверкой
-                            каждые 5 минут, не по клику. История — журнал всех переходов. */}
+                        {/* Статус по базе компании (собственная зона TMS, не Wialon-геозона) —
+                            меняется автоматически фоновой проверкой каждые 5 минут, не по клику.
+                            История — журнал переходов "на базе" / "в рейсе". */}
                         {(detail.geofenceStatus || geoEvents.length > 0) && (
                           <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 text-xs space-y-1.5">
-                            <p className="font-semibold text-purple-700 dark:text-purple-400">{'Статус по геозонам'}</p>
+                            <p className="font-semibold text-purple-700 dark:text-purple-400">{'Статус по базе компании'}</p>
                             {detail.geofenceStatus && (
                               <p>
-                                {GEOFENCE_STATUS_LABEL[detail.geofenceStatus as GeofenceStatus] || detail.geofenceStatus}
+                                {baseStatusLabel(detail.geofenceStatus)}
                                 {detail.geofenceStatusAt && <span className="text-muted-foreground"> {' — '}{new Date(detail.geofenceStatusAt).toLocaleString('ru-RU')}</span>}
                               </p>
                             )}
@@ -658,15 +672,24 @@ export default function VehicleTripsPage() {
                                   <p key={ev.id} className="text-[10px] text-muted-foreground">
                                     {new Date(ev.createdAt).toLocaleString('ru-RU')}
                                     {' — '}
-                                    {ev.oldValue ? (GEOFENCE_STATUS_LABEL[ev.oldValue as GeofenceStatus] || ev.oldValue) : 'начало'}
+                                    {ev.oldValue ? baseStatusLabel(ev.oldValue) : 'начало'}
                                     {' → '}
-                                    {GEOFENCE_STATUS_LABEL[ev.newValue as GeofenceStatus] || ev.newValue}
+                                    {baseStatusLabel(ev.newValue)}
                                     {ev.zoneName && ` (${ev.zoneName})`}
                                   </p>
                                 ))}
                               </div>
                             )}
                           </div>
+                        )}
+
+                        {/* Продолжительность рейса — из фактических дат выезда/возврата
+                            (по GPS-детекции базы компании, если рейс закрыт автоматически). */}
+                        {detail.returnDate && (
+                          <p className="text-xs text-muted-foreground">
+                            {'Продолжительность рейса: '}
+                            <span className="font-medium text-foreground">{formatDurationHm(new Date(detail.returnDate).getTime() - new Date(detail.departureDate).getTime())}</span>
+                          </p>
                         )}
 
                         <div className="grid sm:grid-cols-2 gap-3">

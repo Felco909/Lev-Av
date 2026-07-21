@@ -4,9 +4,74 @@ import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import {
   ArrowDownRight, ArrowUpRight, AlertTriangle, Users, Building2, TrendingUp,
-  ChevronDown, ChevronUp, Download, Clock, ShieldAlert, Trophy, Truck, Fuel, Banknote,
+  ChevronDown, ChevronUp, Download, Clock, ShieldAlert, Trophy, Truck, Fuel, Banknote, MapPin,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+
+/* ── Автопарк: на базе / в рейсе (собственная зона TMS, см. lib/company-base/baseCheck.ts) ── */
+interface FleetPresenceItem {
+  id: string; plateNumber: string; brand: string; model: string;
+  atBase: boolean | null; atBaseChangedAt: string | null; activeTripNumber: string | null;
+}
+
+function formatAwaySince(iso: string | null): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  const totalMinutes = Math.max(0, Math.round(ms / 60000));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  return days > 0 ? `${days} дн ${hours} ч` : `${hours} ч ${minutes} мин`;
+}
+
+function FleetPresenceWidget() {
+  const [items, setItems] = useState<FleetPresenceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/company-base/status')
+      .then((r) => r.json())
+      .then((d) => setItems(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading || items.length === 0) return null;
+
+  const atBase = items.filter((i) => i.atBase === true);
+  const away = items.filter((i) => i.atBase === false);
+
+  return (
+    <div className="bg-card rounded-xl p-5 shadow-sm border border-border space-y-4">
+      <div className="flex items-center gap-2">
+        <MapPin className="w-5 h-5 text-emerald-600" />
+        <h3 className="text-sm font-bold text-foreground">{'Автопарк: на базе / в рейсе'}</h3>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+          <p className="text-xs text-emerald-600 mb-1">{'На базе'}</p>
+          <p className="text-lg font-bold font-mono text-emerald-700 dark:text-emerald-400">{atBase.length}</p>
+        </div>
+        <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+          <p className="text-xs text-blue-600 mb-1">{'В рейсе'}</p>
+          <p className="text-lg font-bold font-mono text-blue-700 dark:text-blue-400">{away.length}</p>
+        </div>
+      </div>
+      {away.length > 0 && (
+        <div className="space-y-1.5 pt-2 border-t">
+          {away.map((i) => (
+            <div key={i.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium">{i.plateNumber} <span className="text-muted-foreground font-normal">{i.brand} {i.model}</span></span>
+              <span className="text-muted-foreground font-mono">
+                {i.activeTripNumber && `${i.activeTripNumber} · `}{'отсутствует '}{formatAwaySince(i.atBaseChangedAt)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── Types ── */
 interface KPI { totalClientDebt: number; totalCarrierDebt: number; totalProfit: number; totalCashGap: number; }
@@ -255,6 +320,8 @@ export default function DashboardPage() {
           </div>
         );
       })()}
+
+      <FleetPresenceWidget />
 
       {/* Alerts row: Reminders + Expiring Docs + Top Debtors */}
       {(hasReminders || hasExpiringDocs || (data?.topDebtors?.length ?? 0) > 0) && (
