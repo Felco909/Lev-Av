@@ -1292,3 +1292,43 @@ export async function getFleetSnapshot(): Promise<WialonFleetSnapshotItem[]> {
     };
   });
 }
+
+// ───────────────────────── Геозоны (Этап 7) ─────────────────────────
+// resource/get_zone_data — единственный API-путь во всей этой интеграции, который сразу
+// отработал без ошибок прав (проверено вживую: вернул [] на пустом аккаунте, не error 7).
+// Автосмена статуса рейса реализована СВОИМ расчётом "точка внутри зоны" (lib/geo/), а не
+// через Wialon Notifications — см. явное требование не использовать их как основной механизм.
+
+export type WialonZoneType = 1 | 2 | 3; // 1=линия, 2=полигон, 3=круг
+
+export interface WialonZonePoint {
+  x: number; // долгота
+  y: number; // широта
+  r?: number; // радиус (для круга, метры)
+}
+
+export interface WialonZone {
+  id: number;
+  name: string;
+  type: WialonZoneType;
+  points: WialonZonePoint[];
+}
+
+/** Геозоны ресурса — все зоны аккаунта, если resourceId не передан явно (авто-определение
+ *  ресурса — та же логика, что уже используется для inline-отчётов). */
+export async function getZones(resourceId?: number): Promise<WialonZone[]> {
+  const sid = await getCachedSid();
+  const rid = resourceId ?? (await resolveDefaultResourceId(sid));
+  const data = await callWialon<any[]>(
+    'resource/get_zone_data',
+    { itemId: rid, col: [], flags: 0x1c },
+    sid
+  );
+  const zones = Array.isArray(data) ? data : [];
+  return zones.map((z) => ({
+    id: z.id,
+    name: z.n,
+    type: z.t,
+    points: Array.isArray(z.p) ? z.p.map((p: any) => ({ x: p.x, y: p.y, r: p.r })) : [],
+  }));
+}

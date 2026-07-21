@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Route, Users, Car, UserCheck, Building2,
   Menu, X, LogOut, ChevronRight, ChevronDown, BarChart3, Settings, FolderOpen,
   CalendarDays, PieChart, Wrench, MapPinned, Fuel, ShieldAlert, UserCog, Bell,
-  Search, Wallet, TrendingUp, Bot, Radar,
+  Search, Wallet, TrendingUp, Bot, Radar, MapPin,
 } from 'lucide-react';
 
 function BrandMark({ variant }: { variant?: 'sidebar' | 'compact' }) {
@@ -69,6 +69,7 @@ const navGroups: NavGroup[] = [
   { group: 'Телематика', items: [
     { href: '/telematics', label: 'Wialon', icon: MapPinned },
     { href: '/telematics/monitoring', label: 'Онлайн-мониторинг', icon: Radar },
+    { href: '/telematics/zones', label: 'Геозоны', icon: MapPin },
   ]},
   { group: 'Система', items: [
     { href: '/settings', label: 'Настройки', icon: Settings },

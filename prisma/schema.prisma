@@ -574,14 +574,56 @@ model VehicleTrip {
   fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "wialon_track" | "odometer_diff"
   fuelCalcAt              DateTime? @map("fuel_calc_at")
 
+  // Геозоны (Этап 7) — статус ПО ГЕОЗОНАМ, отдельно от status выше (active/completed/archived),
+  // который используют фильтры списка и синхронизация пробега — не трогаем его семантику.
+  // geofenceStatus: departed | arrived_loading | loading | in_transit | arrived_unloading |
+  // unloaded | returned_to_garage (см. lib/geo/geofenceStateMachine.ts).
+  geofenceStatus   String?   @map("geofence_status")
+  geofenceStatusAt DateTime? @map("geofence_status_at")
+  // Zone id (Wialon), в которой машина находится ПРЯМО СЕЙЧАС, по последней проверке — служебное
+  // поле для определения въезда/выезда, не для показа пользователю напрямую.
+  currentZoneId    String?   @map("current_zone_id")
+
   createdAt      DateTime  @default(now()) @map("created_at")
 
   trips          Trip[]
   fleetExpenses  FleetExpense[]
+  events         VehicleTripEvent[]
 
   @@index([vehicleId])
   @@index([driverId])
   @@index([departureDate])
   @@index([status])
   @@map("vehicle_trips")
+}
+
+/** Роль Wialon-геозоны в TMS (гараж/погрузка/выгрузка) — у самой зоны в Wialon такого
+ *  смысла нет, только имя и геометрия, поэтому сопоставление хранится здесь. */
+model WialonZoneRole {
+  id           String   @id @default(cuid())
+  wialonZoneId String   @unique @map("wialon_zone_id")
+  zoneName     String   @map("zone_name") // кэш имени зоны из Wialon — для отображения без лишнего запроса
+  role         String   // garage | loading | unloading
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("wialon_zone_roles")
+}
+
+/** История событий по геозонам на рейсе — по образцу уже существующей TripHistory
+ *  (тот же стиль action/field/oldValue/newValue), только для VehicleTrip. */
+model VehicleTripEvent {
+  id            String      @id @default(cuid())
+  vehicleTripId String      @map("vehicle_trip_id")
+  vehicleTrip   VehicleTrip @relation(fields: [vehicleTripId], references: [id], onDelete: Cascade)
+  action        String      // status_changed
+  field         String?     // geofenceStatus
+  oldValue      String?     @map("old_value")
+  newValue      String?     @map("new_value")
+  zoneName      String?     @map("zone_name")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([vehicleTripId])
+  @@index([createdAt])
+  @@map("vehicle_trip_events")
 }

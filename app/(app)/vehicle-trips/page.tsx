@@ -4,6 +4,7 @@ import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive } from 'lucide-react';
 import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
+import { GEOFENCE_STATUS_LABEL, type GeofenceStatus } from '@/lib/geo/geofenceStateMachine';
 
 interface Vehicle { id: string; plateNumber: string; brand: string; model: string; wialonUnitId?: string | null }
 interface Driver { id: string; fullName: string }
@@ -16,6 +17,7 @@ interface VT {
   endMileage: number | null; endFuel: number | null;
   status: string; notes: string | null;
   calculatedIdleMinutes: number | null;
+  geofenceStatus: string | null; geofenceStatusAt: string | null;
   salary: number | null; perDiem: number | null; otherExpenses: number | null;
   perDiem2: number | null; perDiem3: number | null;
   salaryCurrency: string; salaryRate: number;
@@ -195,6 +197,9 @@ export default function VehicleTripsPage() {
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
 
+  // История событий по геозонам (Этап 7)
+  const [geoEvents, setGeoEvents] = useState<Array<{ id: string; oldValue: string | null; newValue: string | null; zoneName: string | null; createdAt: string }>>([]);
+
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
     fetch('/api/drivers').then(r => r.json()).then(d => setDrivers(Array.isArray(d) ? d : d.drivers || []));
@@ -351,12 +356,13 @@ export default function VehicleTripsPage() {
     setDetail(data);
     setDetailForm(mapVtToForm(data));
     setDetailLoading(false);
+    fetch(`/api/vehicle-trips/${id}/events`).then(r => r.json()).then(d => setGeoEvents(Array.isArray(d) ? d : [])).catch(() => setGeoEvents([]));
   };
 
   const toggleExpand = (id: string) => {
     if (expandedId === id) { setExpandedId(null); setDetail(null); setDetailForm(emptyTripForm()); }
     else { setExpandedId(id); loadDetail(id); }
-    setLiveSnapshot(null); setLiveError(null);
+    setLiveSnapshot(null); setLiveError(null); setGeoEvents([]);
   };
 
   const saveDetailForm = async () => {
@@ -631,6 +637,34 @@ export default function VehicleTripsPage() {
                             )}
                             {liveSnapshot?.lastMessageAt && (
                               <p className="text-[10px] text-muted-foreground">{'Последнее сообщение'}: {new Date(liveSnapshot.lastMessageAt).toLocaleString('ru-RU')}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Статус по геозонам (Этап 7) — меняется автоматически фоновой проверкой
+                            каждые 5 минут, не по клику. История — журнал всех переходов. */}
+                        {(detail.geofenceStatus || geoEvents.length > 0) && (
+                          <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3 text-xs space-y-1.5">
+                            <p className="font-semibold text-purple-700 dark:text-purple-400">{'Статус по геозонам'}</p>
+                            {detail.geofenceStatus && (
+                              <p>
+                                {GEOFENCE_STATUS_LABEL[detail.geofenceStatus as GeofenceStatus] || detail.geofenceStatus}
+                                {detail.geofenceStatusAt && <span className="text-muted-foreground"> {' — '}{new Date(detail.geofenceStatusAt).toLocaleString('ru-RU')}</span>}
+                              </p>
+                            )}
+                            {geoEvents.length > 0 && (
+                              <div className="pt-1 border-t space-y-0.5">
+                                {geoEvents.map((ev) => (
+                                  <p key={ev.id} className="text-[10px] text-muted-foreground">
+                                    {new Date(ev.createdAt).toLocaleString('ru-RU')}
+                                    {' — '}
+                                    {ev.oldValue ? (GEOFENCE_STATUS_LABEL[ev.oldValue as GeofenceStatus] || ev.oldValue) : 'начало'}
+                                    {' → '}
+                                    {GEOFENCE_STATUS_LABEL[ev.newValue as GeofenceStatus] || ev.newValue}
+                                    {ev.zoneName && ` (${ev.zoneName})`}
+                                  </p>
+                                ))}
+                              </div>
                             )}
                           </div>
                         )}
