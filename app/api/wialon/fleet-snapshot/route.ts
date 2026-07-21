@@ -13,7 +13,16 @@ export async function GET() {
 
   const vehicles = await prisma.vehicle.findMany({
     where: { wialonUnitId: { not: null } },
-    select: { id: true, plateNumber: true, brand: true, model: true, wialonUnitId: true, driver: { select: { fullName: true } } },
+    select: {
+      id: true, plateNumber: true, brand: true, model: true, wialonUnitId: true,
+      driver: { select: { fullName: true } },
+      vehicleTrips: {
+        where: { status: 'active' },
+        select: { id: true, tripNumber: true, departureDate: true },
+        orderBy: { departureDate: 'desc' },
+        take: 1,
+      },
+    },
   });
 
   if (vehicles.length === 0) {
@@ -26,6 +35,7 @@ export async function GET() {
 
     const result = vehicles.map((v) => {
       const s = v.wialonUnitId ? byUnitId.get(v.wialonUnitId) : undefined;
+      const activeTrip = v.vehicleTrips[0] ?? null;
       return {
         vehicleId: v.id,
         plateNumber: v.plateNumber,
@@ -39,6 +49,7 @@ export async function GET() {
         lon: s?.lon ?? null,
         speedKmh: s?.speedKmh ?? null,
         lastMessageAt: s?.lastMessageAt ? s.lastMessageAt.toISOString() : null,
+        activeTripNumber: activeTrip?.tripNumber ?? null,
       };
     });
 

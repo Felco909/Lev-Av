@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { Satellite, Loader2, CheckCircle2, XCircle, RefreshCw, Trash2, Eye, EyeOff, WifiOff } from 'lucide-react';
+import { getVehicleActivityStatus } from '@/lib/wialon/status';
 
 interface ConfigStatus {
   configured: boolean;
@@ -36,7 +37,6 @@ interface FleetVehicle {
   lastMessageAt: string | null;
 }
 
-const STALE_MS = 30 * 60 * 1000; // нет сообщений >30 мин — считаем "нет связи"
 
 function fmtAgo(iso: string | null): string {
   if (!iso) return '—';
@@ -254,8 +254,9 @@ export default function TelematicsPage() {
               </thead>
               <tbody>
                 {fleet.map((v) => {
-                  const stale = !v.lastMessageAt || Date.now() - new Date(v.lastMessageAt).getTime() > STALE_MS;
-                  const moving = !stale && (v.speedKmh ?? 0) > 3;
+                  const activity = getVehicleActivityStatus(v.speedKmh, v.lastMessageAt);
+                  const stale = activity === 'no_signal';
+                  const moving = activity === 'moving';
                   return (
                     <tr key={v.vehicleId} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="py-1.5 px-3">
