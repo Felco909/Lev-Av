@@ -57,8 +57,20 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   const profit = revenue - totalExpenses;
   const mileage = (vt.endMileage && vt.startMileage) ? vt.endMileage - vt.startMileage : null;
 
+  // Производные показатели рейса (Этап 4) — считаются на лету из уже посчитанных выше сумм,
+  // ничего дополнительно не хранится. Пробег — предпочитаем calculatedKm (реальный GPS-трек,
+  // см. Этап 2), а не разницу startMileage/endMileage, если она доступна.
+  const kmBasis = vt.calculatedKm ?? mileage;
+  const costPerKm = kmBasis && kmBasis > 0 ? Math.round((totalExpenses / kmBasis) * 100) / 100 : null;
+  const fuelPer100Km =
+    kmBasis && kmBasis > 0 && vt.calculatedFuelConsumedL != null
+      ? Math.round((vt.calculatedFuelConsumedL / kmBasis) * 100 * 10) / 10
+      : null;
+  const profitMarginPercent = revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : null;
+
   return NextResponse.json({
     ...vt, revenue, totalExpenses, expensesByType, profit, mileage,
     directSalaryAmd, directPerDiemAmd, directOtherAmd, directFuelAmd, directTotalAmd, fleetExpTotal,
+    costPerKm, fuelPer100Km, profitMarginPercent,
   });
 }

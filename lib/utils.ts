@@ -58,11 +58,19 @@ export const EXPENSE_TYPE_MAP: Record<string, string> = {
   other: 'Прочее',
 };
 
-// Fleet (standalone) expense types — not tied to trips
+// Fleet (standalone) expense types — not tied to trips. Ключи toll/ferry/repair специально
+// совпадают с EXPENSE_TYPE_MAP выше (та же терминология для похожих категорий в других местах
+// приложения) — advance/fine/customs новые, аналогов там нет.
 export const FLEET_EXPENSE_TYPE_MAP: Record<string, string> = {
   salary: 'Зарплата водителю',
   fuel: 'Топливо',
   per_diem: 'Суточные',
+  advance: 'Аванс',
+  toll: 'Платные дороги',
+  ferry: 'Паром',
+  repair: 'Ремонт в дороге',
+  fine: 'Штраф',
+  customs: 'Таможенные расходы',
   other: 'Прочее',
 };
 
@@ -71,7 +79,7 @@ export const EXPENSE_REPORT_GROUPS: Record<string, { label: string; types: strin
   salary: { label: 'Зарплата', types: ['salary'] },
   fuel: { label: 'Топливо', types: ['fuel'] },
   per_diem: { label: 'Суточные / дорожные', types: ['per_diem'] },
-  other: { label: 'Прочие расходы', types: ['toll', 'ferry', 'repair', 'parking', 'insurance', 'other'] },
+  other: { label: 'Прочие расходы', types: ['advance', 'toll', 'ferry', 'repair', 'fine', 'customs', 'parking', 'insurance', 'other'] },
 };
 
 // Maps legacy/null statuses to canonical workflow status strings.

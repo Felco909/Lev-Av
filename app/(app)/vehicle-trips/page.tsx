@@ -36,6 +36,7 @@ interface VTDetail extends VT {
   trips: any[]; fleetExpenses: any[];
   revenue: number; totalExpenses: number; expensesByType: Record<string, number>; profit: number; mileage: number | null;
   directSalaryAmd: number; directPerDiemAmd: number; directOtherAmd: number; directFuelAmd: number; directTotalAmd: number; fleetExpTotal: number;
+  costPerKm: number | null; fuelPer100Km: number | null; profitMarginPercent: number | null;
 }
 
 interface TripForm {
@@ -535,6 +536,25 @@ export default function VehicleTripsPage() {
                           <div className={`rounded-lg p-3 ${detail.profit >= 0 ? 'bg-green-50 dark:bg-green-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
                             <p className={`text-[10px] ${detail.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{'Прибыль'}</p>
                             <p className={`text-base font-bold font-mono ${detail.profit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{fmtAmd(detail.profit)}</p>
+                          </div>
+                        </div>
+
+                        {/* Производные показатели — считаются на сервере из revenue/totalExpenses/
+                            profit/calculatedKm/calculatedFuelConsumedL, ничего нового не хранится */}
+                        <div className="grid grid-cols-3 gap-3 text-xs">
+                          <div className="bg-muted/40 rounded-lg p-2">
+                            <p className="text-[10px] text-muted-foreground">{'Стоимость км'}</p>
+                            <p className="font-medium font-mono">{detail.costPerKm != null ? `${fmtAmd(detail.costPerKm)}/км` : '—'}</p>
+                          </div>
+                          <div className="bg-muted/40 rounded-lg p-2">
+                            <p className="text-[10px] text-muted-foreground">{'Расход топлива'}</p>
+                            <p className="font-medium font-mono">{detail.fuelPer100Km != null ? `${detail.fuelPer100Km} л/100км` : '—'}</p>
+                          </div>
+                          <div className="bg-muted/40 rounded-lg p-2">
+                            <p className="text-[10px] text-muted-foreground">{'Рентабельность'}</p>
+                            <p className={`font-medium font-mono ${detail.profitMarginPercent != null && detail.profitMarginPercent < 0 ? 'text-red-600' : ''}`}>
+                              {detail.profitMarginPercent != null ? `${detail.profitMarginPercent}%` : '—'}
+                            </p>
                           </div>
                         </div>
 
