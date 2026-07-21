@@ -63,6 +63,7 @@ const navGroups: NavGroup[] = [
     { href: '/vehicles', label: 'Машины', icon: Car },
     { href: '/drivers', label: 'Водители', icon: UserCheck },
     { href: '/vehicle-trips', label: 'Рейсы машин', icon: TrendingUp },
+    { href: '/vehicle-analytics', label: 'Аналитика машин', icon: BarChart3 },
     { href: '/maintenance', label: 'Техобслуживание', icon: Wrench },
     { href: '/expiry', label: 'Сроки документов', icon: ShieldAlert },
   ]},

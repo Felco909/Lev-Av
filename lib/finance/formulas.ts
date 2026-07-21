@@ -112,3 +112,16 @@ export function computeOverdueFlag(
 export function roundMoney(value: number): number {
   return round2(value);
 }
+
+/**
+ * Стоимость 1 км пробега машины (Этап 8, /api/vehicle-analytics) — не путать с
+ * computeTripProfitAmd/computeExpeditionProfitAmd (это расходы по заявке, а не по машине).
+ */
+export function computeCostPerKmAmd(totalExpensesAmd: number, totalMileageKm: number): number {
+  return totalMileageKm > 0 ? round2((Number(totalExpensesAmd) || 0) / totalMileageKm) : 0;
+}
+
+/** Рентабельность машины, % (прибыль / доход × 100), Этап 8. */
+export function computeProfitabilityRatio(profitAmd: number, totalRevenueAmd: number): number {
+  return totalRevenueAmd > 0 ? round2(((Number(profitAmd) || 0) / totalRevenueAmd) * 100) : 0;
+}
