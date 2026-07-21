@@ -10,7 +10,7 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
-    const c = await prisma.carrier.update({ where: { id: params?.id }, data: { name: body?.name, contactPerson: body?.contactPerson ?? null, phone: body?.phone ?? null, email: body?.email ?? null, inn: body?.inn ?? null } });
+    const c = await prisma.carrier.update({ where: { id: params?.id }, data: { name: body?.name, contactPerson: body?.contactPerson ?? null, phone: body?.phone ?? null, email: body?.email ?? null, inn: body?.inn ?? null, address: body?.address ?? null, bankDetails: body?.bankDetails ?? null } });
     return NextResponse.json(c);
   } catch (e: any) {
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

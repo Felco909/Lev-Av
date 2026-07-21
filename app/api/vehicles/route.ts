@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
     if (!body?.plateNumber || !body?.brand || !body?.model) return NextResponse.json({ error: 'Заполните все поля' }, { status: 400 });
-    const v = await prisma.vehicle.create({ data: { plateNumber: body.plateNumber, brand: body.brand, model: body.model, status: body?.status ?? 'active' } });
+    const v = await prisma.vehicle.create({ data: { plateNumber: body.plateNumber, brand: body.brand, model: body.model, status: body?.status ?? 'active', driverId: body?.driverId || null } });
     return NextResponse.json(v);
   } catch (e: any) {
     console.error(e);

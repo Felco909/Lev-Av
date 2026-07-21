@@ -10,10 +10,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const { id } = await params;
     const body = await req.json();
-    const { docType, docName, expiryDate, description } = body;
+    const { entityType, entityId, docType, docName, expiryDate, description } = body;
     const item = await prisma.documentExpiry.update({
       where: { id },
-      data: { docType, docName, expiryDate: new Date(expiryDate), description: description || null },
+      data: { entityType, entityId, docType, docName, expiryDate: new Date(expiryDate), description: description || null },
     });
     return NextResponse.json(item);
   } catch (e: any) {

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
     if (!body?.name) return NextResponse.json({ error: 'Укажите название' }, { status: 400 });
-    const c = await prisma.carrier.create({ data: { name: body.name, contactPerson: body?.contactPerson ?? null, phone: body?.phone ?? null, email: body?.email ?? null, inn: body?.inn ?? null } });
+    const c = await prisma.carrier.create({ data: { name: body.name, contactPerson: body?.contactPerson ?? null, phone: body?.phone ?? null, email: body?.email ?? null, inn: body?.inn ?? null, address: body?.address ?? null, bankDetails: body?.bankDetails ?? null } });
     return NextResponse.json(c);
   } catch (e: any) {
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

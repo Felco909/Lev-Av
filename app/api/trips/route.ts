@@ -265,6 +265,7 @@ export async function POST(req: Request) {
         basisText: body?.basisText || null,
         clientInvoiceSeries: body?.clientInvoiceSeries || null,
         carrierInvoiceSeries: body?.carrierInvoiceSeries || null,
+        taxCode: body?.taxCode || null,
         notes: body?.notes || null,
         customsDeparture: body?.customsDeparture || null,
         customsDestination: body?.customsDestination || null,
