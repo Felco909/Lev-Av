@@ -125,3 +125,8 @@ export function computeCostPerKmAmd(totalExpensesAmd: number, totalMileageKm: nu
 export function computeProfitabilityRatio(profitAmd: number, totalRevenueAmd: number): number {
   return totalRevenueAmd > 0 ? round2(((Number(profitAmd) || 0) / totalRevenueAmd) * 100) : 0;
 }
+
+/** Прибыль на 1 км пробега машины ("Финальная доработка логики рейсов и аналитики"). */
+export function computeProfitPerKmAmd(profitAmd: number, totalMileageKm: number): number {
+  return totalMileageKm > 0 ? round2((Number(profitAmd) || 0) / totalMileageKm) : 0;
+}

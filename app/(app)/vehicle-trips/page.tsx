@@ -422,6 +422,14 @@ export default function VehicleTripsPage() {
 
   const saveDetailForm = async () => {
     if (!detail) return;
+    // Если рейс уже закрыт и меняются даты — после сохранения система САМА предлагает
+    // пересчёт состава заявок/дохода (предпросмотр + подтверждение), а не ждёт, что
+    // диспетчер сам заметит отдельную кнопку ("Доработка логики рейсов", п.6).
+    const wasClosed = detail.status === 'completed';
+    const datesChanged = wasClosed && (
+      detailForm.departureDate !== (detail.departureDate?.slice(0, 16) || '') ||
+      detailForm.returnDate !== (detail.returnDate?.slice(0, 16) || '')
+    );
     setDetailSaving(true);
     try {
       await fetch('/api/vehicle-trips', {
@@ -431,8 +439,13 @@ export default function VehicleTripsPage() {
       });
       await loadDetail(detail.id);
       await load();
-      setEditingClosed(false);
-      setIncomePreview(null);
+      if (datesChanged) {
+        await previewIncomeRecalc();
+        // editingClosed остаётся true — предпросмотр показывается только в этом режиме.
+      } else {
+        setEditingClosed(false);
+        setIncomePreview(null);
+      }
     } finally { setDetailSaving(false); }
   };
 
@@ -862,24 +875,33 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
-                        {/* Пересчёт состава заявок/дохода после правки дат закрытого рейса — только
-                            с явным подтверждением (п.8), не автоматически. */}
+                        {/* Пересчёт состава заявок/дохода после правки дат закрытого рейса — система
+                            САМА предлагает пересчёт сразу после сохранения новых дат (см. saveDetailForm),
+                            но применяется только с явным подтверждением (п.6/п.8), не автоматически.
+                            Кнопка ниже — для случая, если предпросмотр закрыли и хотят вызвать снова. */}
                         {detail.status === 'completed' && editingClosed && (
                           <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 text-xs space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-amber-700 dark:text-amber-400">{'Если поменяли даты — состав заявок и доход нужно пересчитать отдельно (не автоматически).'}</p>
-                              <button onClick={previewIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 shrink-0 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
-                                {recalcIncomeLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{'Пересчитать доход'}
-                              </button>
-                            </div>
-                            {incomePreview && (
-                              <div className="border-t pt-2 space-y-1">
-                                <p>{'Заявок по новым датам'}: {incomePreview.matchedTrips.length}, {'доход'}: {fmtAmd(incomePreview.newRevenueAmd)} {incomePreview.oldRevenueAmd != null && <span className="text-muted-foreground">({'было'} {fmtAmd(incomePreview.oldRevenueAmd)})</span>}</p>
+                            {incomePreview ? (
+                              <>
+                                <p className="font-semibold text-amber-700 dark:text-amber-400">{'Пересчитать состав заявок и финансовые показатели рейса?'}</p>
+                                <p>{'По новым датам в рейс войдёт заявок'}: {incomePreview.matchedTrips.length}, {'доход'}: {fmtAmd(incomePreview.newRevenueAmd)} {incomePreview.oldRevenueAmd != null && <span className="text-muted-foreground">({'сейчас'} {fmtAmd(incomePreview.oldRevenueAmd)})</span>}</p>
                                 {incomePreview.changed ? (
-                                  <button onClick={confirmIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition disabled:opacity-50">
-                                    {'Подтвердить и применить'}
-                                  </button>
+                                  <div className="flex gap-2">
+                                    <button onClick={confirmIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition disabled:opacity-50">
+                                      {'Да, пересчитать'}
+                                    </button>
+                                    <button onClick={() => setIncomePreview(null)} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                      {'Нет, оставить как есть'}
+                                    </button>
+                                  </div>
                                 ) : <p className="text-muted-foreground">{'Изменений нет.'}</p>}
+                              </>
+                            ) : (
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-amber-700 dark:text-amber-400">{'Если меняли даты — можно пересчитать состав заявок и доход отдельно (не автоматически).'}</p>
+                                <button onClick={previewIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 shrink-0 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                  {recalcIncomeLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{'Пересчитать доход'}
+                                </button>
                               </div>
                             )}
                           </div>

@@ -12,7 +12,9 @@ interface VehicleAnalytics {
   profit: number;
   totalFuelLiters: number;
   totalFuelCost: number;
+  avgRevenuePerTrip: number;
   costPerKm: number;
+  profitPerKm: number;
   profitability: number;
   months: { month: string; trips: number; mileage: number; profit: number }[];
 }
@@ -33,8 +35,11 @@ export default function VehicleAnalyticsPage() {
   useEffect(() => { load(); }, [load]);
 
   const totalTrips = data.reduce((s, v) => s + v.tripsCount, 0);
+  const totalRevenue = data.reduce((s, v) => s + v.totalRevenue, 0);
+  const totalExpenses = data.reduce((s, v) => s + v.totalExpenses, 0);
   const totalProfit = data.reduce((s, v) => s + v.profit, 0);
   const totalMileage = data.reduce((s, v) => s + v.totalMileage, 0);
+  const avgRevenuePerTrip = totalTrips > 0 ? Math.round(totalRevenue / totalTrips) : 0;
 
   const monthLabel = (m: string) => {
     const [y, mo] = m.split('-');
@@ -52,14 +57,26 @@ export default function VehicleAnalyticsPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-card rounded-xl p-4 shadow-sm">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><Route className="w-3.5 h-3.5" />Всего рейсов</div>
           <p className="text-xl font-bold font-mono">{totalTrips}</p>
         </div>
         <div className="bg-card rounded-xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><DollarSign className="w-3.5 h-3.5" />Общий доход</div>
+          <p className="text-xl font-bold font-mono">{formatCurrency(totalRevenue)}</p>
+        </div>
+        <div className="bg-card rounded-xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><DollarSign className="w-3.5 h-3.5" />Общие расходы</div>
+          <p className="text-xl font-bold font-mono">{formatCurrency(totalExpenses)}</p>
+        </div>
+        <div className="bg-card rounded-xl p-4 shadow-sm">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><DollarSign className="w-3.5 h-3.5" />Общая прибыль</div>
           <p className="text-xl font-bold font-mono">{formatCurrency(totalProfit)}</p>
+        </div>
+        <div className="bg-card rounded-xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><DollarSign className="w-3.5 h-3.5" />Средний доход/рейс</div>
+          <p className="text-xl font-bold font-mono">{formatCurrency(avgRevenuePerTrip)}</p>
         </div>
         <div className="bg-card rounded-xl p-4 shadow-sm">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1"><Gauge className="w-3.5 h-3.5" />Общий пробег</div>
@@ -113,6 +130,10 @@ export default function VehicleAnalyticsPage() {
                         <div className="text-xs text-muted-foreground flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Прибыль</div>
                         <p className="text-sm font-bold font-mono mt-0.5">{formatCurrency(va.profit)}</p>
                       </div>
+                      <div className="bg-muted/50 rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground">Средний доход/рейс</div>
+                        <p className="text-sm font-bold font-mono mt-0.5">{formatCurrency(va.avgRevenuePerTrip)}</p>
+                      </div>
                       <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-3">
                         <div className="text-xs text-muted-foreground flex items-center gap-1"><Percent className="w-3 h-3" /> Рентабельность</div>
                         <p className="text-sm font-bold font-mono mt-0.5">{va.profitability}%</p>
@@ -139,6 +160,10 @@ export default function VehicleAnalyticsPage() {
                       <div className="bg-muted/50 rounded-lg p-3">
                         <div className="text-xs text-muted-foreground">Стоимость 1 км</div>
                         <p className="text-sm font-bold font-mono mt-0.5">{formatCurrency(va.costPerKm)}</p>
+                      </div>
+                      <div className="bg-green-50 dark:bg-green-950/20 rounded-lg p-3">
+                        <div className="text-xs text-muted-foreground flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Прибыль на км</div>
+                        <p className="text-sm font-bold font-mono mt-0.5">{formatCurrency(va.profitPerKm)}</p>
                       </div>
                     </div>
 

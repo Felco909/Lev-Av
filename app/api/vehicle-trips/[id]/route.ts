@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { findMatchingTrips, sumRevenueAmd } from '@/lib/vehicle-trips/revenue';
-import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
+import { findMatchingTrips, computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,26 +37,26 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
 
   if (!vt) return NextResponse.json({ error: 'Не найден' }, { status: 404 });
 
-  const isFrozen = vt.finalRevenueAmd != null;
+  // matchedTrips — для отображения списка заявок. Закрытый рейс: список зафиксирован
+  // (Trip.vehicleTripId проставлен при закрытии). Активный: live-подбор по датам.
+  const matchedTrips = vt.finalRevenueAmd != null
+    ? await prisma.trip.findMany({
+        where: { vehicleTripId: vt.id },
+        select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
+        orderBy: { tripDate: 'asc' },
+      }).then((rows) => rows.map((t) => ({
+        id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
+        clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
+      })))
+    : await findMatchingTrips(vt.vehicleId, vt.departureDate, vt.returnDate ?? new Date());
 
-  let revenue: number;
-  let matchedTrips: Awaited<ReturnType<typeof findMatchingTrips>> = [];
-  if (isFrozen) {
-    revenue = Number(vt.finalRevenueAmd);
-    matchedTrips = await prisma.trip.findMany({
-      where: { vehicleTripId: vt.id },
-      select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
-      orderBy: { tripDate: 'asc' },
-    }).then((rows) => rows.map((t) => ({
-      id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
-      clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
-    })));
-  } else {
-    matchedTrips = await findMatchingTrips(vt.vehicleId, vt.departureDate, vt.returnDate ?? new Date());
-    revenue = sumRevenueAmd(matchedTrips);
-  }
+  // ЕДИНЫЙ источник дохода/расходов/прибыли (lib/vehicle-trips/revenue.ts) — та же функция,
+  // что использует /api/vehicles/[id]/economics и /api/vehicle-analytics, чтобы карточка
+  // рейса, экономика машины и аналитика никогда не расходились в цифрах.
+  const { revenue, totalExpenses, profit, isFrozen } = computeVehicleTripFinancials(vt, matchedTrips);
 
-  // Direct expense fields (on VehicleTrip itself) + FleetExpense — заморожено, если рейс закрыт.
+  // Direct expense fields (on VehicleTrip itself) + FleetExpense — для разбивки по категориям
+  // в UI (не влияет на totalExpenses выше — та уже учитывает заморозку).
   const directSalaryAmd = Number(vt.salaryAmd) || 0;
   const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0);
   const directOtherAmd = Number(vt.otherExpensesAmd) || 0;
@@ -72,8 +71,6 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
     fleetExpTotal += amt;
   }
 
-  const totalExpenses = isFrozen ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt);
-  const profit = revenue - totalExpenses;
   const mileage = (vt.endMileage != null && vt.startMileage != null) ? vt.endMileage - vt.startMileage : null;
 
   // Производные показатели рейса (Этап 4) — считаются на лету из уже посчитанных выше сумм,

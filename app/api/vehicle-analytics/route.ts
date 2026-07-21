@@ -3,12 +3,17 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { computeCostPerKmAmd, computeProfitabilityRatio } from '@/lib/finance/formulas';
+import { computeCostPerKmAmd, computeProfitabilityRatio, computeProfitPerKmAmd } from '@/lib/finance/formulas';
+import { matchTripsInRange, computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
 
 /**
- * GET /api/vehicle-analytics — аналитика по каждой машине (Этап 8).
- * Доход/расходы/прибыль — ТА ЖЕ формула, что в app/api/vehicles/[id]/economics/route.ts
- * (см. комментарий там), просто по всем машинам сразу, плюс пробег/топливо/помесячно.
+ * GET /api/vehicle-analytics — аналитика по каждой машине (Этап 8, пересмотрено —
+ * "Финальная доработка логики рейсов и аналитики"). Доход/расходы/прибыль — ЕДИНЫЙ
+ * источник computeVehicleTripFinancials (lib/vehicle-trips/revenue.ts), та же функция,
+ * что у карточки рейса и /api/vehicles/[id]/economics. Раньше здесь была отдельная копия
+ * сломанной формулы (Trip.vehicleTripId нигде не заполнялся) — доход всегда был 0, из-за
+ * чего аналитика расходилась с (тоже сломанной) карточкой рейса. Теперь обе точки — одна
+ * и та же функция, расхождение архитектурно исключено.
  * Не путать с computeExpeditionProfitAmd/computeOwnTransportProfitAmd (другой модуль, см. CLAUDE.md).
  */
 export async function GET() {
@@ -20,12 +25,17 @@ export async function GET() {
 
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       select: {
-        vehicleId: true, departureDate: true, startMileage: true, endMileage: true,
+        vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true,
+        finalRevenueAmd: true, finalExpensesAmd: true,
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
-        trips: { select: { clientRateAmd: true, clientRate: true } },
         fleetExpenses: { select: { amountAmd: true } },
       },
+    });
+
+    // Заявки всех машин — один запрос (не N+1), сопоставление в памяти per-рейс.
+    const allTrips = await prisma.trip.findMany({
+      select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, vehicleId: true, client: { select: { name: true } } },
     });
 
     // Топливо (заправки) по машине — тот же приём, что в driver-analytics/route.ts.
@@ -43,50 +53,41 @@ export async function GET() {
       let totalRevenue = 0;
       let totalExpenses = 0;
       let totalMileage = 0;
-      for (const vt of vTrips) {
-        const revenue = vt.trips.reduce((s, t) => s + Number(t.clientRateAmd || t.clientRate || 0), 0);
-        const directSalaryAmd = Number(vt.salaryAmd) || 0;
-        const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0);
-        const directOtherAmd = Number(vt.otherExpensesAmd) || 0;
-        const directFuelAmd = Number(vt.fuelCostAmd) || 0;
-        const fleetExpTotal = vt.fleetExpenses.reduce((s, e) => s + Number(e.amountAmd), 0);
+      // Финансы каждого рейса считаем один раз (используются и в итоге, и в помесячной разбивке).
+      const perTrip = vTrips.map((vt) => {
+        const matched = vt.finalRevenueAmd == null
+          ? matchTripsInRange(allTrips, vehicle.id, vt.departureDate, vt.returnDate ?? new Date())
+          : [];
+        const financials = computeVehicleTripFinancials(vt, matched);
+        const mileage = (vt.startMileage != null && vt.endMileage != null && vt.endMileage >= vt.startMileage)
+          ? vt.endMileage - vt.startMileage : 0;
+        return { vt, financials, mileage };
+      });
 
-        totalRevenue += revenue;
-        totalExpenses += directSalaryAmd + directPerDiemAmd + directOtherAmd + directFuelAmd + fleetExpTotal;
-
-        if (vt.startMileage != null && vt.endMileage != null && vt.endMileage >= vt.startMileage) {
-          totalMileage += vt.endMileage - vt.startMileage;
-        }
+      for (const { financials, mileage } of perTrip) {
+        totalRevenue += financials.revenue;
+        totalExpenses += financials.totalExpenses;
+        totalMileage += mileage;
       }
       const profit = totalRevenue - totalExpenses;
 
       const fuel = fuelByVehicle[vehicle.id] ?? { liters: 0, cost: 0 };
 
-      // Помесячно, последние 6 месяцев (та же схема, что в driver-analytics/route.ts).
+      // Помесячно, последние 6 месяцев (та же схема, что в driver-analytics/route.ts) —
+      // рейс целиком относится к месяцу своей даты выезда (не разбивается по месяцам,
+      // даже если сам рейс длиннее месяца — та же логика, что была раньше).
       const months: { month: string; trips: number; mileage: number; profit: number }[] = [];
       for (let i = 5; i >= 0; i--) {
         const d = new Date();
         d.setMonth(d.getMonth() - i);
         const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        const mTrips = vTrips.filter((vt) => {
+        const inMonth = perTrip.filter(({ vt }) => {
           const dd = new Date(vt.departureDate);
           return `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, '0')}` === ym;
         });
-        let mMileage = 0;
-        let mProfit = 0;
-        for (const vt of mTrips) {
-          if (vt.startMileage != null && vt.endMileage != null && vt.endMileage >= vt.startMileage) {
-            mMileage += vt.endMileage - vt.startMileage;
-          }
-          const revenue = vt.trips.reduce((s, t) => s + Number(t.clientRateAmd || t.clientRate || 0), 0);
-          const expenses =
-            (Number(vt.salaryAmd) || 0) +
-            (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0) +
-            (Number(vt.otherExpensesAmd) || 0) + (Number(vt.fuelCostAmd) || 0) +
-            vt.fleetExpenses.reduce((s, e) => s + Number(e.amountAmd), 0);
-          mProfit += revenue - expenses;
-        }
-        months.push({ month: ym, trips: mTrips.length, mileage: mMileage, profit: mProfit });
+        const mMileage = inMonth.reduce((s, { mileage }) => s + mileage, 0);
+        const mProfit = inMonth.reduce((s, { financials }) => s + financials.profit, 0);
+        months.push({ month: ym, trips: inMonth.length, mileage: mMileage, profit: mProfit });
       }
 
       return {
@@ -98,7 +99,9 @@ export async function GET() {
         profit,
         totalFuelLiters: Math.round(fuel.liters * 10) / 10,
         totalFuelCost: fuel.cost,
+        avgRevenuePerTrip: vTrips.length > 0 ? Math.round(totalRevenue / vTrips.length) : 0,
         costPerKm: computeCostPerKmAmd(totalExpenses, totalMileage),
+        profitPerKm: computeProfitPerKmAmd(profit, totalMileage),
         profitability: computeProfitabilityRatio(profit, totalRevenue),
         months,
       };
