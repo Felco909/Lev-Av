@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter, Info } from 'lucide-react';
 
 interface Driver { id: string; fullName: string; phone?: string | null; }
 interface VehicleItem {
@@ -229,6 +230,9 @@ export default function VehiclesPage() {
               </div>
 
               <div className="flex gap-1 justify-end">
+                <Link href={`/vehicles/${v.id}`} className="p-1.5 hover:bg-muted rounded-md transition" title="Карточка машины">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                </Link>
                 <button onClick={() => openHistory(v)} className="p-1.5 hover:bg-muted rounded-md transition" title="История водителей">
                   <History className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
