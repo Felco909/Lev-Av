@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
-import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive, AlertTriangle } from 'lucide-react';
 import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
 
 function baseStatusLabel(status: string | null): string {
@@ -216,6 +216,30 @@ export default function VehicleTripsPage() {
   const [detailForm, setDetailForm] = useState<TripForm>(emptyTripForm());
   const [detailSaving, setDetailSaving] = useState(false);
 
+  // Привязка заявок к рейсу (Этап 2 архитектуры "заявка → рейс") — счётчик
+  // "ожидают привязки" в шапке, предложение после создания рейса, пикер добавления
+  // в развёрнутой карточке, предупреждение при закрытии.
+  const [unattachedCount, setUnattachedCount] = useState(0);
+  const [suggestTrips, setSuggestTrips] = useState<Array<{ id: string; tripNumber: string; tripDate: string; routeFrom: string; routeTo: string; clientRateAmd: number; clientName: string | null }>>([]);
+  const [suggestForVehicleTripId, setSuggestForVehicleTripId] = useState<string | null>(null);
+  const [suggestSelected, setSuggestSelected] = useState<Set<string>>(new Set());
+  const [suggestSaving, setSuggestSaving] = useState(false);
+  const [closeUnattached, setCloseUnattached] = useState<typeof suggestTrips>([]);
+  const [closeUnattachedSelected, setCloseUnattachedSelected] = useState<Set<string>>(new Set());
+  const [unattachedOverview, setUnattachedOverview] = useState<Array<{ id: string; tripNumber: string; tripDate: string; routeFrom: string; routeTo: string; clientRateAmd: number; vehicleId: string }> | null>(null);
+
+  const loadUnattachedCount = useCallback(async () => {
+    const res = await fetch('/api/trips/unattached');
+    const data = await res.json().catch(() => null);
+    setUnattachedCount(typeof data?.count === 'number' ? data.count : 0);
+  }, []);
+
+  const openUnattachedOverview = async () => {
+    const res = await fetch('/api/trips/unattached');
+    const data = await res.json().catch(() => null);
+    setUnattachedOverview(Array.isArray(data?.trips) ? data.trips : []);
+  };
+
   // Expense modal (for additional fleet expenses)
   const [showExpModal, setShowExpModal] = useState(false);
   const [expForm, setExpForm] = useState<ExpForm>(emptyExpForm());
@@ -388,6 +412,7 @@ export default function VehicleTripsPage() {
   }, [filterVehicle, filterStatus, showArchived]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadUnattachedCount(); }, [loadUnattachedCount]);
 
   // --- Trip CRUD ---
   // Создание — только машина/водитель/даты (см. план). Всё остальное редактируется
@@ -409,7 +434,53 @@ export default function VehicleTripsPage() {
     setShowTripModal(false); load();
     // Сразу разворачиваем карточку нового рейса — дальше пробег/топливо/расходы
     // заполняются прямо там, не нужно искать отдельную форму редактирования.
-    if (created?.id) { setExpandedId(created.id); loadDetail(created.id); }
+    if (created?.id) {
+      setExpandedId(created.id); loadDetail(created.id);
+      // Предложить привязать уже существующие непривязанные заявки этой машины
+      // (см. архитектуру "заявка → рейс") — без фильтра по датам, они просто
+      // отсортированы по дате, диспетчер сам решает, что относится к новому рейсу.
+      const unRes = await fetch(`/api/trips/unattached?vehicleId=${created.vehicleId}`);
+      const unData = await unRes.json().catch(() => null);
+      const candidates = Array.isArray(unData?.trips) ? unData.trips : [];
+      if (candidates.length > 0) {
+        setSuggestTrips(candidates);
+        setSuggestForVehicleTripId(created.id);
+        setSuggestSelected(new Set());
+      }
+    }
+  };
+
+  // --- Привязка заявок к рейсу (Этап 2) ---
+  const openAddTripsPicker = async (vehicleTripId: string, vehicleId: string) => {
+    const res = await fetch(`/api/trips/unattached?vehicleId=${vehicleId}`);
+    const data = await res.json().catch(() => null);
+    setSuggestTrips(Array.isArray(data?.trips) ? data.trips : []);
+    setSuggestForVehicleTripId(vehicleTripId);
+    setSuggestSelected(new Set());
+  };
+
+  const toggleSuggestSelected = (id: string) => {
+    setSuggestSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const confirmSuggestAttach = async () => {
+    if (!suggestForVehicleTripId || suggestSelected.size === 0) { setSuggestTrips([]); setSuggestForVehicleTripId(null); return; }
+    setSuggestSaving(true);
+    try {
+      await fetch(`/api/vehicle-trips/${suggestForVehicleTripId}/attach-trips`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tripIds: Array.from(suggestSelected) }),
+      });
+      await loadUnattachedCount();
+      if (expandedId === suggestForVehicleTripId) await loadDetail(suggestForVehicleTripId);
+    } finally {
+      setSuggestSaving(false);
+      setSuggestTrips([]); setSuggestForVehicleTripId(null); setSuggestSelected(new Set());
+    }
   };
 
   const deleteTrip = async (id: string) => {
@@ -479,10 +550,11 @@ export default function VehicleTripsPage() {
   const openCloseModal = () => {
     setCloseDateTime(new Date().toISOString().slice(0, 16));
     setCloseError(null);
+    setCloseUnattached([]); setCloseUnattachedSelected(new Set());
     setShowCloseModal(true);
   };
 
-  const confirmCloseTrip = async () => {
+  const confirmCloseTrip = async (force?: boolean) => {
     if (!detail || !closeDateTime) return;
     setClosing(true);
     setCloseError(null);
@@ -490,13 +562,44 @@ export default function VehicleTripsPage() {
       const res = await fetch(`/api/vehicle-trips/${detail.id}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ returnDate: new Date(closeDateTime).toISOString() }),
+        body: JSON.stringify({ returnDate: new Date(closeDateTime).toISOString(), force: !!force }),
       });
       const data = await res.json();
+      if (res.status === 409 && data?.needsConfirmation) {
+        // Непривязанные заявки машины за период рейса — не блокируем закрытие
+        // навсегда, показываем список: привязать выбранные или закрыть как есть
+        // (см. архитектуру "заявка → рейс").
+        setCloseUnattached(Array.isArray(data.unattachedTrips) ? data.unattachedTrips : []);
+        setCloseUnattachedSelected(new Set());
+        return;
+      }
       if (!res.ok) { setCloseError(data.error || 'Ошибка закрытия рейса'); return; }
       setShowCloseModal(false);
+      setCloseUnattached([]);
       await loadDetail(detail.id);
       await load();
+      await loadUnattachedCount();
+    } finally { setClosing(false); }
+  };
+
+  const toggleCloseUnattachedSelected = (id: string) => {
+    setCloseUnattachedSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const attachSelectedAndRetryClose = async () => {
+    if (!detail || closeUnattachedSelected.size === 0) return;
+    setClosing(true);
+    try {
+      await fetch(`/api/vehicle-trips/${detail.id}/attach-trips`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tripIds: Array.from(closeUnattachedSelected) }),
+      });
+      setCloseUnattached([]); setCloseUnattachedSelected(new Set());
+      await confirmCloseTrip();
     } finally { setClosing(false); }
   };
 
@@ -584,6 +687,11 @@ export default function VehicleTripsPage() {
         <div>
           <h1 className="text-xl font-bold">{'Рейсы машин'}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{'Учёт рейсов, пробега, топлива и расходов'}</p>
+          {unattachedCount > 0 && (
+            <button type="button" onClick={openUnattachedOverview} className="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/40 transition">
+              <AlertTriangle className="w-3 h-3" /> {`Есть ${unattachedCount} ${unattachedCount === 1 ? 'заявка' : 'заявки'} собственного транспорта, не привязанных ни к одному рейсу`}
+            </button>
+          )}
         </div>
         <button type="button" onClick={openNewTrip} className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white text-sm rounded-lg hover:bg-primary/90 transition-colors">
           <Plus className="w-4 h-4" /> {'Новый рейс'}
@@ -857,9 +965,14 @@ export default function VehicleTripsPage() {
                             )}
                           </div>
                           {detail.status === 'active' && (
-                            <button onClick={openCloseModal} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">
-                              {'Закрыть рейс'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => openAddTripsPicker(detail.id, detail.vehicleId)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
+                                {'Добавить заявки'}
+                              </button>
+                              <button onClick={openCloseModal} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">
+                                {'Закрыть рейс'}
+                              </button>
+                            </div>
                           )}
                           {detail.status === 'completed' && (
                             <button onClick={() => setEditingClosed(v => !v)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
@@ -1178,10 +1291,87 @@ export default function VehicleTripsPage() {
               <input type="datetime-local" value={closeDateTime} onChange={e => setCloseDateTime(e.target.value)} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
             </div>
             {closeError && <p className="text-xs text-red-600">{closeError}</p>}
+            {closeUnattached.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                  {'Найдены непривязанные заявки этой машины за период рейса — привязать к этому рейсу или оставить как есть?'}
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {closeUnattached.map(t => (
+                    <label key={t.id} className="flex items-center gap-2 text-xs">
+                      <input type="checkbox" checked={closeUnattachedSelected.has(t.id)} onChange={() => toggleCloseUnattachedSelected(t.id)} />
+                      <span className="font-mono">{t.tripNumber}</span>
+                      <span className="text-muted-foreground">{formatDate(t.tripDate)}</span>
+                      <span className="font-mono ml-auto">{fmtAmd(t.clientRateAmd)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end pt-1">
+                  <button onClick={() => confirmCloseTrip(true)} disabled={closing} className="px-3 py-1.5 text-xs rounded-lg border hover:bg-muted transition disabled:opacity-50">{'Закрыть как есть'}</button>
+                  <button onClick={attachSelectedAndRetryClose} disabled={closing || closeUnattachedSelected.size === 0} className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-50">{'Привязать выбранные'}</button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 justify-end pt-2">
               <button onClick={() => setShowCloseModal(false)} disabled={closing} className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition disabled:opacity-50">{'Отмена'}</button>
-              <button onClick={confirmCloseTrip} disabled={closing || !closeDateTime} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition">
+              <button onClick={() => confirmCloseTrip()} disabled={closing || !closeDateTime || closeUnattached.length > 0} className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition">
                 {closing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}{'Закрыть рейс'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Обзор "Ожидают привязки к рейсу" — только просмотр, привязка через карточку рейса */}
+      {unattachedOverview && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setUnattachedOverview(null)}>
+          <div className="bg-card rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">{'Заявки, ожидающие привязки к рейсу'}</h2>
+            <p className="text-xs text-muted-foreground -mt-1">{'Машина назначена, но рейс ещё не привязан — привязать можно из карточки нужного рейса кнопкой «Добавить заявки».'}</p>
+            <div className="max-h-96 overflow-y-auto divide-y">
+              {unattachedOverview.map(t => {
+                const v = vehicles.find(vv => vv.id === t.vehicleId);
+                return (
+                  <div key={t.id} className="flex items-center gap-2 py-2 text-xs">
+                    <span className="font-mono font-medium">{t.tripNumber}</span>
+                    <span className="text-muted-foreground">{v?.plateNumber || t.vehicleId}</span>
+                    <span className="text-muted-foreground">{formatDate(t.tripDate)}</span>
+                    <span className="font-mono ml-auto">{fmtAmd(t.clientRateAmd)}</span>
+                  </div>
+                );
+              })}
+              {unattachedOverview.length === 0 && <p className="text-xs text-muted-foreground py-6 text-center">{'Нет непривязанных заявок'}</p>}
+            </div>
+            <div className="flex justify-end pt-2">
+              <button onClick={() => setUnattachedOverview(null)} className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition">{'Закрыть'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Пикер массовой привязки заявок к рейсу — предложение после создания рейса
+          и кнопка "Добавить заявки" в развёрнутой карточке */}
+      {suggestForVehicleTripId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => { setSuggestTrips([]); setSuggestForVehicleTripId(null); }}>
+          <div className="bg-card rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">{'Привязать заявки к рейсу'}</h2>
+            <p className="text-xs text-muted-foreground -mt-1">{'Непривязанные заявки этой машины (отсортированы по дате) — отметьте нужные.'}</p>
+            <div className="max-h-96 overflow-y-auto divide-y">
+              {suggestTrips.map(t => (
+                <label key={t.id} className="flex items-center gap-2 py-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={suggestSelected.has(t.id)} onChange={() => toggleSuggestSelected(t.id)} />
+                  <span className="font-mono font-medium">{t.tripNumber}</span>
+                  <span className="text-muted-foreground">{formatDate(t.tripDate)}</span>
+                  <span className="text-muted-foreground truncate">{t.routeFrom} → {t.routeTo}</span>
+                  <span className="font-mono ml-auto">{fmtAmd(t.clientRateAmd)}</span>
+                </label>
+              ))}
+              {suggestTrips.length === 0 && <p className="text-xs text-muted-foreground py-6 text-center">{'Нет непривязанных заявок этой машины'}</p>}
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <button onClick={() => { setSuggestTrips([]); setSuggestForVehicleTripId(null); }} disabled={suggestSaving} className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition disabled:opacity-50">{'Отмена'}</button>
+              <button onClick={confirmSuggestAttach} disabled={suggestSaving || suggestSelected.size === 0} className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-60 transition">
+                {suggestSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}{'Привязать выбранные'}
               </button>
             </div>
           </div>

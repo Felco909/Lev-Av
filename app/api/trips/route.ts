@@ -8,6 +8,7 @@ import { recordTripHistory } from '@/lib/trip-history';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertInitialTripWorkflowStatus } from '@/lib/trip-workflow-guards';
+import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
 
 export async function GET(req: Request) {
   try {
@@ -243,9 +244,22 @@ export async function POST(req: Request) {
     // profit — та же величина в валюте клиента (обратный пересчёт по курсу).
     profit = Math.round((profitAmd / incomeRate) * 100) / 100;
 
+    // Привязка к рейсу машины (Этап 2 архитектуры "заявка → рейс") — автоматически,
+    // только если у машины ровно один открытый рейс; рейс сам не создаётся никогда.
+    const linkResult = await resolveVehicleTripLink({
+      tripType: body?.tripType ?? 'own_transport',
+      vehicleId: body?.vehicleId || null,
+      vehicleTripIdProvided: Object.prototype.hasOwnProperty.call(body ?? {}, 'vehicleTripId'),
+      explicitVehicleTripId: body?.vehicleTripId ?? null,
+    });
+    if (linkResult.error) {
+      return NextResponse.json({ error: linkResult.error }, { status: 400 });
+    }
+
     const trip = await prisma.trip.create({
       data: {
         tripNumber,
+        vehicleTripId: linkResult.vehicleTripId,
         clientId: body.clientId,
         contactId: body.contactId || null,
         routeFrom: body.routeFrom ?? '',

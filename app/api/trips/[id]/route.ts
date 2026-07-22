@@ -9,6 +9,7 @@ import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, comput
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 import { assertDirectWorkflowStatusChange } from '@/lib/trip-workflow-guards';
+import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
 
 function serializeTrip(trip: any) {
   return {
@@ -131,9 +132,26 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
       : profitAmd;
     const exchangeDiff = Math.round((profitAmd - origProfitAmd) * 100) / 100;
 
+    // Привязка к рейсу машины (Этап 2 архитектуры "заявка → рейс") — если машина не
+    // менялась, существующая связь не трогается; если изменилась/назначена впервые —
+    // автопривязка только при ровно одном открытом рейсе новой машины; рейс никогда
+    // не создаётся автоматически.
+    const linkResult = await resolveVehicleTripLink({
+      tripType: body?.tripType ?? 'own_transport',
+      vehicleId: body?.vehicleId || null,
+      vehicleTripIdProvided: Object.prototype.hasOwnProperty.call(body ?? {}, 'vehicleTripId'),
+      explicitVehicleTripId: body?.vehicleTripId ?? null,
+      previousVehicleId: oldTrip?.vehicleId ?? null,
+      previousVehicleTripId: (oldTrip as any)?.vehicleTripId ?? null,
+    });
+    if (linkResult.error) {
+      return NextResponse.json({ error: linkResult.error }, { status: 400 });
+    }
+
     const trip = await prisma.trip.update({
       where: { id: params?.id },
       data: {
+        vehicleTripId: linkResult.vehicleTripId,
         clientId: body.clientId,
         contactId: body.contactId !== undefined ? (body.contactId || null) : undefined,
         routeFrom: body?.routeFrom ?? '',

@@ -66,6 +66,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [tripType, setTripType] = useState('own_transport');
   const [clientRate, setClientRate] = useState(0);
   const [vehicleId, setVehicleId] = useState('');
+  // Открытые рейсы выбранной машины — для привязки заявки к рейсу (см. архитектуру
+  // "заявка → рейс"). Один открытый — привязка автоматическая (на сервере), несколько —
+  // диспетчер выбирает явно, ни одного — заявка будет ждать привязки после создания рейса.
+  const [openVehicleTrips, setOpenVehicleTrips] = useState<Array<{ id: string; tripNumber: string }>>([]);
+  const [selectedVehicleTripId, setSelectedVehicleTripId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [carrierId, setCarrierId] = useState('');
   const [carrierRate, setCarrierRate] = useState(0);
@@ -338,6 +343,18 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       .then(data => setBusyVehicleIds(Array.isArray(data?.busyVehicleIds) ? data.busyVehicleIds : []))
       .catch(() => {});
   }, [tripDate, tripId]);
+
+  // Открытые рейсы выбранной машины (см. архитектуру "заявка → рейс") — если их
+  // несколько, покажем выбор ниже; если один — сервер привяжет сам, если ни одного —
+  // заявка будет ждать привязки. Только для собственного транспорта.
+  useEffect(() => {
+    setSelectedVehicleTripId('');
+    if (tripType !== 'own_transport' || !vehicleId) { setOpenVehicleTrips([]); return; }
+    fetch(`/api/vehicle-trips?vehicleId=${vehicleId}&status=active`)
+      .then(r => r.json())
+      .then(data => setOpenVehicleTrips(Array.isArray(data) ? data.map((v: any) => ({ id: v.id, tripNumber: v.tripNumber })) : []))
+      .catch(() => setOpenVehicleTrips([]));
+  }, [tripType, vehicleId]);
 
   // Load trip data if editing or copying
   useEffect(() => {
@@ -804,6 +821,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (tripType === 'own_transport') {
       if (!vehicleId) { appToast.error('Выберите машину для собственного транспорта'); return; }
       if (!driverId) { appToast.error('Выберите водителя'); return; }
+      if (openVehicleTrips.length > 1 && !selectedVehicleTripId) { appToast.error('У машины несколько открытых рейсов — выберите нужный'); return; }
     }
 
     // Check for potential duplicates
@@ -823,6 +841,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     try {
       const body: any = {
         clientId, contactId: contactId || null, routeFrom, routeTo, tripType, clientRate, status, tripDate,
+        // vehicleTripId шлём только если диспетчер сделал явный выбор (несколько
+        // открытых рейсов машины) — иначе сервер сам разрешит привязку (см.
+        // lib/vehicle-trips/attach-service.ts): один открытый рейс — привяжет
+        // автоматически, ни одного — заявка будет ждать привязки.
+        ...(tripType === 'own_transport' && selectedVehicleTripId ? { vehicleTripId: selectedVehicleTripId } : {}),
         unloadDate: unloadDate || null,
         paymentDueDate: paymentDueDate || null,
         basisText: basisText || null,
@@ -1193,6 +1216,23 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 </select>
                 {vehicleId && busyVehicleIds.includes(vehicleId) && (
                   <p className="text-xs text-amber-600 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Эта машина уже назначена на эту дату</p>
+                )}
+                {vehicleId && openVehicleTrips.length === 1 && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Будет привязана к рейсу №{openVehicleTrips[0].tripNumber}</p>
+                )}
+                {vehicleId && openVehicleTrips.length > 1 && (
+                  <div className="mt-1.5">
+                    <label className="text-xs text-muted-foreground mb-1 block">Рейс машины *</label>
+                    <select value={selectedVehicleTripId} onChange={(e) => setSelectedVehicleTripId(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
+                      <option value="">Выберите рейс…</option>
+                      {openVehicleTrips.map(vt => <option key={vt.id} value={vt.id}>№{vt.tripNumber}</option>)}
+                    </select>
+                    <p className="text-[11px] text-amber-600 mt-1">У машины несколько открытых рейсов — уточните, к какому относится заявка</p>
+                  </div>
+                )}
+                {vehicleId && openVehicleTrips.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Открытого рейса у машины пока нет — заявка будет ждать привязки в разделе «Ожидают привязки»</p>
                 )}
               </div>
               <div>

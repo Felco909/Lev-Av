@@ -6,19 +6,22 @@ import { prisma } from '@/lib/prisma';
 import { getFleetSnapshot } from '@/lib/wialon/client';
 import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
 import { maybeSyncVehicleMileage, computeVehicleTripExpensesAmd, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
-import { findMatchingTrips, sumRevenueAmd } from '@/lib/vehicle-trips/revenue';
+import { getUnattachedOwnTrips } from '@/lib/vehicle-trips/attach-service';
 
 /**
- * POST /api/vehicle-trips/[id]/close — ручное закрытие рейса ("Доработка логики рейсов",
- * финальная архитектура). Автозакрытие по возврату на базу убрано — теперь диспетчер сам
- * выбирает дату/время окончания, и в этот момент:
- * 1) один раз берётся живой снимок Wialon (getFleetSnapshot — существующая функция, тот же
- *    источник, что и кнопка "Обновить сейчас" — интеграция не меняется);
+ * POST /api/vehicle-trips/[id]/close — ручное закрытие рейса. Диспетчер выбирает
+ * дату/время окончания, и в этот момент:
+ * 0) если у машины есть НЕпривязанные заявки, чья дата попадает в период рейса —
+ *    без body.force возвращаем 409 с их списком (см. lib/vehicle-trips/attach-service.ts) —
+ *    фронт предлагает привязать или закрыть как есть (не блокируем НАВСЕГДА, только
+ *    предупреждаем один раз за попытку закрытия);
+ * 1) один раз берётся живой снимок Wialon (getFleetSnapshot — тот же источник, что и
+ *    кнопка "Обновить сейчас");
  * 2) один раз вызывается существующий calculateVehicleTripTotals (GPS-трек выезд-возврат);
- * 3) фиксируется набор заявок этой машины за период рейса (простановка Trip.vehicleTripId —
- *    это поле раньше нигде не заполнялось) и замораживается доход/расходы.
- * После этого — status=completed, дальше ничего из этого не пересчитывается автоматически
- * (см. заморозку в PUT/maybeCalculateTotals).
+ * 3) замораживается доход по уже ЯВНО привязанным заявкам (Trip.vehicleTripId = этот
+ *    рейс) — состав определяется связью, проставленной за время жизни рейса (автопривязка
+ *    при создании заявки, массовое "Добавить заявки", ручной перенос), НЕ датами.
+ * После этого — status=completed, дальше ничего из этого не пересчитывается автоматически.
  */
 export async function POST(req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = await paramsPromise;
@@ -27,7 +30,7 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
   const userId = (session.user as any)?.id as string | undefined;
 
   const body = await req.json().catch(() => ({}));
-  const { returnDate } = body;
+  const { returnDate, force } = body;
   if (!returnDate) return NextResponse.json({ error: 'Укажите дату и время закрытия' }, { status: 400 });
   const closeDate = new Date(returnDate);
   if (Number.isNaN(closeDate.getTime())) return NextResponse.json({ error: 'Некорректная дата' }, { status: 400 });
@@ -46,6 +49,22 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
 
   const overlapError = await validateNoOverlappingVehicleTripDates(trip.vehicleId, trip.departureDate, closeDate, trip.id);
   if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
+
+  // Заявки этой же машины, ещё не привязанные ни к одному рейсу, чья дата попадает
+  // в период закрываемого рейса — не блокируем закрытие, а предупреждаем и даём
+  // выбор (см. Этап 2 архитектуры "заявка → рейс": закрытие рейса с "подтверждением,
+  // что не относится" не делаем — либо диспетчер привязывает сейчас, либо оставляет
+  // как есть и рейс закрывается, заявки остаются в "Ожидают привязки").
+  if (!force) {
+    const unattached = await getUnattachedOwnTrips(trip.vehicleId);
+    const candidates = unattached.filter((t) => {
+      const d = new Date(t.tripDate).getTime();
+      return d >= trip.departureDate.getTime() && d <= closeDate.getTime();
+    });
+    if (candidates.length > 0) {
+      return NextResponse.json({ needsConfirmation: true, unattachedTrips: candidates }, { status: 409 });
+    }
+  }
 
   // 1) Живой снимок Wialon — один раз, тот же источник, что и "Обновить сейчас".
   let liveSnapshotError: string | null = null;
@@ -84,15 +103,15 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     calcError = `Не удалось рассчитать пробег/топливо по GPS-треку: ${(e as Error).message}`;
   }
 
-  // 3) Фиксируем набор заявок за период рейса и замораживаем доход/расходы.
-  const matched = await findMatchingTrips(trip.vehicleId, trip.departureDate, closeDate);
-  if (matched.length > 0) {
-    await prisma.trip.updateMany({
-      where: { id: { in: matched.map((t) => t.id) } },
-      data: { vehicleTripId: trip.id },
-    });
-  }
-  const finalRevenueAmd = sumRevenueAmd(matched);
+  // 3) Замораживаем доход по уже ЯВНО привязанным заявкам (Trip.vehicleTripId = этот
+  // рейс) — состав больше не определяется по датам на закрытии (см. Этап 2/3
+  // архитектуры "заявка → рейс"): что было привязано за время жизни рейса (вручную,
+  // автопривязкой при создании заявки, массовым "Добавить заявки"), то и замораживаем.
+  const matched = await prisma.trip.findMany({
+    where: { vehicleTripId: trip.id },
+    select: { clientRateAmd: true, clientRate: true },
+  });
+  const finalRevenueAmd = matched.reduce((s, t) => s + Number(t.clientRateAmd ?? t.clientRate ?? 0), 0);
   const finalExpensesAmd = computeVehicleTripExpensesAmd(trip);
 
   const closed = await prisma.vehicleTrip.update({
