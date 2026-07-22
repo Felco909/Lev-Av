@@ -80,6 +80,42 @@ export async function validateOdometerValues(
   return null;
 }
 
+function fmtDateRu(d: Date): string {
+  return d.toLocaleDateString('ru-RU');
+}
+
+/**
+ * Проверка на пересечение периодов рейсов ОДНОЙ машины при создании/редактировании рейса —
+ * без неё два рейса одной машины могут получить перекрывающиеся [departureDate, returnDate],
+ * и заявки, попадающие в пересечение, задваиваются в расчёте дохода (см. разбор по 521DF61 —
+ * там ошибка уже была в данных, эта проверка не пускает её повториться при вводе новых рейсов).
+ * Рейс без returnDate (ещё в пути) считается открытым до бесконечности.
+ */
+export async function validateNoOverlappingVehicleTripDates(
+  vehicleId: string,
+  departureDate: Date,
+  returnDate: Date | null,
+  excludeId?: string
+): Promise<string | null> {
+  const FAR_FUTURE = new Date(8640000000000000);
+  const newEnd = returnDate ?? FAR_FUTURE;
+
+  const others = await prisma.vehicleTrip.findMany({
+    where: { vehicleId, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true, tripNumber: true, departureDate: true, returnDate: true },
+  });
+
+  for (const other of others) {
+    const otherEnd = other.returnDate ?? FAR_FUTURE;
+    const overlaps = other.departureDate.getTime() <= newEnd.getTime() && otherEnd.getTime() >= departureDate.getTime();
+    if (overlaps) {
+      const otherRange = `${fmtDateRu(other.departureDate)} → ${other.returnDate ? fmtDateRu(other.returnDate) : 'ещё в пути'}`;
+      return `Даты пересекаются с рейсом №${other.tripNumber} (${otherRange}) той же машины — исправьте даты выезда/возврата`;
+    }
+  }
+  return null;
+}
+
 interface VehicleTripExpenseFields {
   salaryAmd: unknown;
   perDiemAmd: unknown;

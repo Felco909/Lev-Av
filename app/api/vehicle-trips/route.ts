@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +77,13 @@ export async function POST(req: NextRequest) {
     endMileage ? parseInt(endMileage, 10) : null
   );
   if (odometerError) return NextResponse.json({ error: odometerError }, { status: 400 });
+
+  const overlapError = await validateNoOverlappingVehicleTripDates(
+    vehicleId,
+    new Date(departureDate),
+    returnDate ? new Date(returnDate) : null
+  );
+  if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
 
   const tripNumber = customTripNumber?.trim() || await nextTripNumber();
 
@@ -163,6 +170,13 @@ export async function PUT(req: NextRequest) {
     const effectiveEndMileage = endMileage !== undefined ? (endMileage ? parseInt(endMileage, 10) : null) : before.endMileage;
     const odometerError = await validateOdometerValues(vehicleId ?? before.vehicleId, effectiveStartMileage, effectiveEndMileage);
     if (odometerError) return NextResponse.json({ error: odometerError }, { status: 400 });
+  }
+
+  if (departureDate !== undefined || returnDate !== undefined || vehicleId !== undefined) {
+    const effectiveDepartureDate = departureDate !== undefined ? new Date(departureDate) : before.departureDate;
+    const effectiveReturnDate = returnDate !== undefined ? (returnDate ? new Date(returnDate) : null) : before.returnDate;
+    const overlapError = await validateNoOverlappingVehicleTripDates(vehicleId ?? before.vehicleId, effectiveDepartureDate, effectiveReturnDate, id);
+    if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
   }
 
   const data: any = {};

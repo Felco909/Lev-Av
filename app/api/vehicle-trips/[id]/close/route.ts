@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { getFleetSnapshot } from '@/lib/wialon/client';
 import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
-import { maybeSyncVehicleMileage, computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
+import { maybeSyncVehicleMileage, computeVehicleTripExpensesAmd, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
 import { findMatchingTrips, sumRevenueAmd } from '@/lib/vehicle-trips/revenue';
 
 /**
@@ -43,6 +43,9 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
   if (closeDate.getTime() < trip.departureDate.getTime()) {
     return NextResponse.json({ error: 'Дата закрытия не может быть раньше даты выезда' }, { status: 400 });
   }
+
+  const overlapError = await validateNoOverlappingVehicleTripDates(trip.vehicleId, trip.departureDate, closeDate, trip.id);
+  if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
 
   // 1) Живой снимок Wialon — один раз, тот же источник, что и "Обновить сейчас".
   let liveSnapshotError: string | null = null;
