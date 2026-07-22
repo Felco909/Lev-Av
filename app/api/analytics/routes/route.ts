@@ -44,7 +44,7 @@ export async function GET() {
       lastTrip: m.lastTrip?.toISOString().slice(0, 10) ?? null,
     })).sort((a, b) => b.totalProfit - a.totalProfit);
 
-    return NextResponse.json(rows);
+    return NextResponse.json({ rows });
   } catch (e: any) {
     console.error('Route analytics error:', e);
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

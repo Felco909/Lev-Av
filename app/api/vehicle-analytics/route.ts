@@ -25,7 +25,7 @@ export async function GET() {
 
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       select: {
-        vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true,
+        vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true, calculatedKm: true,
         finalRevenueAmd: true, finalExpensesAmd: true,
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
@@ -59,8 +59,10 @@ export async function GET() {
           ? matchTripsInRange(allTrips, vehicle.id, vt.departureDate, vt.returnDate ?? new Date())
           : [];
         const financials = computeVehicleTripFinancials(vt, matched);
-        const mileage = (vt.startMileage != null && vt.endMileage != null && vt.endMileage >= vt.startMileage)
-          ? vt.endMileage - vt.startMileage : 0;
+        // Пробег — только официальный отчёт Wialon (calculatedKm), тот же источник, что и
+        // "Итоги рейса" в карточке (см. lib/wialon/calculateTripFuel.ts) — без fallback на
+        // разницу одометра, иначе аналитика расходится с карточкой рейса и с самим Wialon.
+        const mileage = vt.calculatedKm != null ? Number(vt.calculatedKm) : 0;
         return { vt, financials, mileage };
       });
 

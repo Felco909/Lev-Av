@@ -38,21 +38,25 @@ export async function GET(req: Request) {
 
     const rows = payments.map(p => ({
       id: p.id,
-      tripId: p.trip?.id,
-      tripNumber: p.trip?.tripNumber ?? '',
       type: p.type,
-      counterparty: p.type === 'client' ? (p.trip?.client?.name ?? '') : (p.trip?.carrier?.name ?? ''),
-      route: `${p.trip?.routeFrom ?? ''} → ${p.trip?.routeTo ?? ''}`,
-      amount: Number(p.amountAmd ?? p.amount ?? 0),
+      amount: Number(p.amount),
+      amountAmd: Number(p.amountAmd),
       currency: p.currency,
+      exchangeRate: Number(p.exchangeRate),
       paymentDate: p.paymentDate,
+      method: p.method,
       description: p.description,
+      trip: {
+        id: p.trip?.id ?? '',
+        tripNumber: p.trip?.tripNumber ?? '',
+        routeFrom: p.trip?.routeFrom ?? '',
+        routeTo: p.trip?.routeTo ?? '',
+        client: p.trip?.client ?? null,
+        carrier: p.trip?.carrier ?? null,
+      },
     }));
 
-    const totalClient = rows.filter(r => r.type === 'client').reduce((s, r) => s + r.amount, 0);
-    const totalCarrier = rows.filter(r => r.type === 'carrier').reduce((s, r) => s + r.amount, 0);
-
-    return NextResponse.json({ rows, totalClient, totalCarrier });
+    return NextResponse.json({ payments: rows });
   } catch (e: any) {
     console.error('Payment history error:', e);
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

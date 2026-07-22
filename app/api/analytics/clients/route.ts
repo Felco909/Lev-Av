@@ -6,8 +6,8 @@ import { authOptions } from '@/lib/auth-options';
 
 type ClientRow = { id: string; name: string; phone: string | null };
 type AnalyticsRow = {
-  id: string;
-  name: string;
+  clientId: string;
+  clientName: string;
   phone: string | null;
   tripCount: number;
   revenue: number;
@@ -67,7 +67,7 @@ export async function GET() {
     const rows: AnalyticsRow[] = (clients as ClientRow[]).map((c: ClientRow) => {
       const m = map[c.id] || { tripCount: 0, revenue: 0, profit: 0, unpaidCount: 0, totalCount: 0, debt: 0, firstTrip: null, lastTrip: null };
       return {
-        id: c.id, name: c.name, phone: c.phone,
+        clientId: c.id, clientName: c.name, phone: c.phone,
         tripCount: m.tripCount,
         revenue: m.revenue,
         profit: m.profit,
@@ -79,7 +79,7 @@ export async function GET() {
       };
     }).filter((r: AnalyticsRow) => r.tripCount > 0).sort((a: AnalyticsRow, b: AnalyticsRow) => b.revenue - a.revenue);
 
-    return NextResponse.json(rows);
+    return NextResponse.json({ rows });
   } catch (e: any) {
     console.error('Client analytics error:', e);
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });
