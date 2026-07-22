@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues } from '@/lib/vehicle-trips/close-trip';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +70,13 @@ export async function POST(req: NextRequest) {
   if (!vehicleId || !departureDate) {
     return NextResponse.json({ error: '\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u043b\u044f: \u043c\u0430\u0448\u0438\u043d\u0430, \u0434\u0430\u0442\u0430 \u0432\u044b\u0435\u0437\u0434\u0430' }, { status: 400 });
   }
+
+  const odometerError = await validateOdometerValues(
+    vehicleId,
+    startMileage ? parseInt(startMileage, 10) : null,
+    endMileage ? parseInt(endMileage, 10) : null
+  );
+  if (odometerError) return NextResponse.json({ error: odometerError }, { status: 400 });
 
   const tripNumber = customTripNumber?.trim() || await nextTripNumber();
 
@@ -150,6 +157,13 @@ export async function PUT(req: NextRequest) {
   const before = await prisma.vehicleTrip.findUnique({ where: { id } });
   if (!before) return NextResponse.json({ error: '\u0420\u0435\u0439\u0441 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d' }, { status: 404 });
   const wasClosed = before.status === 'completed';
+
+  if (startMileage !== undefined || endMileage !== undefined) {
+    const effectiveStartMileage = startMileage !== undefined ? (startMileage ? parseInt(startMileage, 10) : null) : before.startMileage;
+    const effectiveEndMileage = endMileage !== undefined ? (endMileage ? parseInt(endMileage, 10) : null) : before.endMileage;
+    const odometerError = await validateOdometerValues(vehicleId ?? before.vehicleId, effectiveStartMileage, effectiveEndMileage);
+    if (odometerError) return NextResponse.json({ error: odometerError }, { status: 400 });
+  }
 
   const data: any = {};
   if (vehicleId !== undefined) data.vehicleId = vehicleId;

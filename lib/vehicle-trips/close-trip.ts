@@ -39,6 +39,47 @@ export async function maybeSyncVehicleMileage(vehicleId: string, endMileage: num
   }
 }
 
+const MIN_ODOMETER_KM = 0;
+const MAX_ODOMETER_KM = 3_000_000; // с запасом выше любого реального пробега грузовика за весь срок службы
+const ODOMETER_DRIFT_TOLERANCE_KM = 100_000; // насколько введённое значение может отличаться от Vehicle.currentMileage, не считаясь опечаткой
+
+/**
+ * Sanity-проверка одометра при ручном вводе (POST/PUT /api/vehicle-trips) — раньше её не было
+ * вообще, из-за чего опечатка (лишняя цифра) спокойно уходила в БД и молча портила "Пробег"
+ * в карточке рейса. Проверяем: диапазон 0..MAX_ODOMETER_KM, конец >= начала, и отклонение от
+ * известного Vehicle.currentMileage не более ODOMETER_DRIFT_TOLERANCE_KM (машина могла давно
+ * не синхронизироваться — берём щедрый запас, а не точное совпадение).
+ */
+export async function validateOdometerValues(
+  vehicleId: string,
+  startMileage: number | null,
+  endMileage: number | null
+): Promise<string | null> {
+  const fields: Array<[string, number | null]> = [
+    ['Пробег на начало', startMileage],
+    ['Пробег на конец', endMileage],
+  ];
+  for (const [label, v] of fields) {
+    if (v == null) continue;
+    if (!Number.isFinite(v) || v < MIN_ODOMETER_KM || v > MAX_ODOMETER_KM) {
+      return `${label}: ${v} км — нереалистичное значение одометра`;
+    }
+  }
+  if (startMileage != null && endMileage != null && endMileage < startMileage) {
+    return `Пробег на конец (${endMileage} км) меньше пробега на начало (${startMileage} км)`;
+  }
+
+  const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { currentMileage: true } });
+  if (vehicle?.currentMileage) {
+    for (const [label, v] of fields) {
+      if (v != null && Math.abs(v - vehicle.currentMileage) > ODOMETER_DRIFT_TOLERANCE_KM) {
+        return `${label}: ${v} км сильно отличается от известного пробега машины (${vehicle.currentMileage} км) — проверьте значение`;
+      }
+    }
+  }
+  return null;
+}
+
 interface VehicleTripExpenseFields {
   salaryAmd: unknown;
   perDiemAmd: unknown;

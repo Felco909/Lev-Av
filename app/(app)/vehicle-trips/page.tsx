@@ -244,6 +244,8 @@ export default function VehicleTripsPage() {
   const [closeDateTime, setCloseDateTime] = useState('');
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
+  const [tripFormError, setTripFormError] = useState<string | null>(null);
+  const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
 
   // Редактирование уже закрытого рейса — по умолчанию поля read-only (заморожены), кнопка
   // "Редактировать рейс" разблокирует форму; после сохранения снова становится read-only.
@@ -376,18 +378,21 @@ export default function VehicleTripsPage() {
   // --- Trip CRUD ---
   // Создание — только машина/водитель/даты (см. план). Всё остальное редактируется
   // в развёрнутой карточке (detailForm) после создания, не в этой модалке.
-  const openNewTrip = () => { setTripForm(emptyTripForm()); setShowTripModal(true); };
+  const openNewTrip = () => { setTripForm(emptyTripForm()); setTripFormError(null); setShowTripModal(true); };
 
   const saveTripForm = async () => {
     if (!tripForm.vehicleId || !tripForm.departureDate) return;
     setSaving(true);
+    setTripFormError(null);
     const res = await fetch('/api/vehicle-trips', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(tripForm),
     });
     const created = await res.json().catch(() => null);
-    setSaving(false); setShowTripModal(false); load();
+    setSaving(false);
+    if (!res.ok) { setTripFormError(created?.error || 'Не удалось создать рейс'); return; }
+    setShowTripModal(false); load();
     // Сразу разворачиваем карточку нового рейса — дальше пробег/топливо/расходы
     // заполняются прямо там, не нужно искать отдельную форму редактирования.
     if (created?.id) { setExpandedId(created.id); loadDetail(created.id); }
@@ -418,6 +423,7 @@ export default function VehicleTripsPage() {
     else { setExpandedId(id); loadDetail(id); }
     setLiveSnapshot(null); setLiveError(null); setGeoEvents([]);
     setEditingClosed(false); setIncomePreview(null); setShowCloseModal(false); setCloseError(null);
+    setDetailSaveError(null);
   };
 
   const saveDetailForm = async () => {
@@ -431,12 +437,18 @@ export default function VehicleTripsPage() {
       detailForm.returnDate !== (detail.returnDate?.slice(0, 16) || '')
     );
     setDetailSaving(true);
+    setDetailSaveError(null);
     try {
-      await fetch('/api/vehicle-trips', {
+      const res = await fetch('/api/vehicle-trips', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...detailForm, id: detail.id }),
       });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null);
+        setDetailSaveError(errBody?.error || 'Не удалось сохранить рейс');
+        return;
+      }
       await loadDetail(detail.id);
       await load();
       if (datesChanged) {
@@ -920,24 +932,21 @@ export default function VehicleTripsPage() {
                                 </button>
                               )}
                             </div>
-                            <p>
-                              {detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : 'пробег не рассчитан'}
-                              {', '}
-                              {detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л топлива` : 'расход не рассчитан'}
-                              {', '}
-                              {detail.calculatedIdleMinutes != null ? `простой ${Math.floor(detail.calculatedIdleMinutes / 60)} ч ${Math.round(detail.calculatedIdleMinutes % 60)} мин` : 'простой не рассчитан'}
-                              {detail.fuelCalcSource === 'wialon_track' && (
-                                <span className="text-emerald-600"> {'(по реальным показаниям датчика Wialon на даты выезда/возврата)'}</span>
-                              )}
-                              {detail.fuelCalcSource === 'odometer_diff' && (
-                                <span className="text-amber-600"> {'(расчёт по разнице остатков, введённых вручную, точность ниже)'}</span>
-                              )}
-                            </p>
-                            {detail.fuelCalcAt && (
-                              <p className="text-[10px] text-muted-foreground">
-                                {'Рассчитано: '}{new Date(detail.fuelCalcAt).toLocaleString('ru-RU')}
-                                {' — трекер может досылать данные с задержкой (например, после зон без покрытия), пересчитайте позже при сомнениях.'}
-                              </p>
+                            {(detail.calculatedKm != null || detail.calculatedFuelConsumedL != null || detail.calculatedIdleMinutes != null) ? (
+                              <>
+                                <p>{'Пробег: '}{detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : '—'}</p>
+                                <p>{'Расход топлива: '}{detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л` : '—'}</p>
+                                <p>{'Простой: '}{detail.calculatedIdleMinutes != null ? `${Math.floor(detail.calculatedIdleMinutes / 60)} ч ${Math.round(detail.calculatedIdleMinutes % 60)} мин` : '—'}</p>
+                                <p className="text-muted-foreground">{'По данным Wialon за период с даты выезда до даты возврата.'}</p>
+                                {detail.fuelCalcAt && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {'Рассчитано: '}{new Date(detail.fuelCalcAt).toLocaleString('ru-RU')}
+                                    {' — трекер может досылать данные с задержкой (например, после зон без покрытия), при сомнениях доступен повторный пересчёт.'}
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-amber-600">{'Не рассчитано — официальный отчёт Wialon недоступен для этого периода.'}</p>
                             )}
                           </div>
                         )}
@@ -1034,6 +1043,7 @@ export default function VehicleTripsPage() {
                               <p className="text-xs text-red-600 font-bold mt-2">{'Итого расходы'}: {fmtAmd(a.total)}</p>
                             ) : null;
                           })()}
+                          {detailSaveError && <p className="text-xs text-red-600 mt-2">{detailSaveError}</p>}
                           <div className="flex justify-end mt-3">
                             <button type="button" onClick={saveDetailForm} disabled={detailSaving}
                               className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5">
@@ -1201,6 +1211,7 @@ export default function VehicleTripsPage() {
               </div>
             </div>
 
+            {tripFormError && <p className="text-xs text-red-600">{tripFormError}</p>}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setShowTripModal(false)} className="px-4 py-2 text-sm border rounded-lg hover:bg-muted">{'Отмена'}</button>
               <button type="button" onClick={saveTripForm} disabled={saving || !tripForm.vehicleId || !tripForm.departureDate}

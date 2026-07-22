@@ -237,50 +237,6 @@ export async function getUnitMileage(sid: string, unitId: number): Promise<Wialo
   return { id: item.id, name: item.nm, mileageKm: typeof item.cnm === 'number' ? item.cnm : null };
 }
 
-export interface WialonUnitReportOptions {
-  /** ID ресурса Wialon, в котором сохранён шаблон отчёта (Reports -> Templates) */
-  resourceId: number;
-  /** ID сохранённого шаблона отчёта в этом ресурсе */
-  templateId: number;
-}
-
-/**
- * Отчёт по технике (пробег/расход топлива) за период — report/exec_report.
- *
- * ВАЖНО: это заготовка под шаг 2 (полная интеграция). report/exec_report
- * обязательно требует reportResourceId + reportTemplateId существующего,
- * заранее сохранённого в Wialon шаблона отчёта — в задании на тестовое
- * подключение это не проверялось (scripts/test-wialon.ts вызывает только
- * login()/getUnits()). Перед реальным использованием: зайти в Wialon Reports,
- * создать/подобрать шаблон с нужными таблицами (пробег, расход топлива),
- * узнать resourceId/templateId и передать их сюда.
- */
-export async function getUnitReport(
-  sid: string,
-  unitId: number,
-  from: Date | number,
-  to: Date | number,
-  options: WialonUnitReportOptions
-): Promise<any> {
-  const toUnixTs = (d: Date | number) => (d instanceof Date ? Math.floor(d.getTime() / 1000) : d);
-
-  return callWialon(
-    'report/exec_report',
-    {
-      reportResourceId: options.resourceId,
-      reportTemplateId: options.templateId,
-      reportObjectId: unitId,
-      reportObjectSecId: 0,
-      interval: {
-        from: toUnixTs(from),
-        to: toUnixTs(to),
-        flags: 0,
-      },
-    },
-    sid
-  );
-}
-
 // ───────────────────────── Текущий снимок пробега/топлива ─────────────────────────
 // Сырые сообщения Wialon содержат протокол-специфичные параметры (io_270 и т.п.), не
 // "odometer"/"fuel" — расшифровываются через настроенные в Wialon датчики с кусочно-линейной
@@ -436,329 +392,8 @@ export async function getCurrentSnapshot(unitId: number): Promise<WialonVehicleS
 }
 
 // ───────────────────────── Поиск шаблона отчёта по имени ─────────────────────────
-// report/exec_report (см. getUnitReport выше) требует resourceId + templateId существующего
-// шаблона, сохранённого в Wialon вручную через веб-кабинет (Reports -> Templates) — их
-// невозможно создать через API, только найти. Чтобы не хардкодить и не терять эти id при
-// пересоздании шаблона, ищем его по имени среди всех ресурсов аккаунта и кэшируем результат.
-
-interface WialonReportTemplateRaw {
-  id: number;
-  n: string;
-}
-
-/** Минимально необходимые поля ответа core/search_items для avl_resource с шаблонами отчётов. */
-interface WialonResourceWithReportsItem {
-  id: number;
-  nm: string;
-  /** Словарь шаблонов отчётов ресурса, ключ — произвольный числовой индекс (не templateId!). */
-  reports?: Record<string, WialonReportTemplateRaw>;
-}
-
-export interface WialonReportTemplateRef {
-  resourceId: number;
-  templateId: number;
-  name: string;
-}
-
-/** flags: 1 (общие свойства: id/nm) | 8388608 (0x800000, PROP_TYPE_REPORTS — подгрузить шаблоны отчётов) */
-const RESOURCE_WITH_REPORTS_FLAGS = 1 | 8388608;
-
-export const REPORT_TEMPLATE_CACHE_PATH = path.resolve(__dirname, '../../config/wialon-report-templates.json');
-
-type WialonReportTemplateCache = Record<string, { resourceId: number; templateId: number }>;
-
-function readReportTemplateCache(): WialonReportTemplateCache {
-  try {
-    const raw = fs.readFileSync(REPORT_TEMPLATE_CACHE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    // Файла ещё нет (первый запуск) или он повреждён — считаем кэш пустым, не роняем вызов.
-    return {};
-  }
-}
-
-function writeReportTemplateCache(cache: WialonReportTemplateCache): void {
-  fs.mkdirSync(path.dirname(REPORT_TEMPLATE_CACHE_PATH), { recursive: true });
-  fs.writeFileSync(REPORT_TEMPLATE_CACHE_PATH, JSON.stringify(cache, null, 2) + '\n', 'utf8');
-}
-
 /**
- * Находит resourceId/templateId шаблона отчёта Wialon по его имени (как оно указано в
- * веб-кабинете Wialon, Reports -> Templates) — перебирает все ресурсы аккаунта через
- * core/search_items и ищет совпадение имени среди их шаблонов (reports). Сравнение имени —
- * без учёта регистра и краевых пробелов, чтобы не ловить баги на опечатках/лишних пробелах.
- *
- * Результат кэшируется в config/wialon-report-templates.json — повторные вызовы с тем же
- * именем не делают запрос к API, пока не передан forceRefresh: true (нужен, если шаблон
- * в Wialon пересоздали и его templateId/resourceId изменились).
- */
-export async function findReportTemplate(
-  templateName: string,
-  forceRefresh = false
-): Promise<WialonReportTemplateRef> {
-  const cache = readReportTemplateCache();
-  if (!forceRefresh) {
-    const cached = cache[templateName];
-    if (cached) {
-      return { resourceId: cached.resourceId, templateId: cached.templateId, name: templateName };
-    }
-  }
-
-  const sid = await getCachedSid();
-  const data = await callWialon<{ items?: WialonResourceWithReportsItem[] }>(
-    'core/search_items',
-    {
-      spec: {
-        itemsType: 'avl_resource',
-        propName: 'sys_name',
-        propValueMask: '*',
-        sortType: 'sys_name',
-      },
-      force: 1,
-      flags: RESOURCE_WITH_REPORTS_FLAGS,
-      flagsMask: 0,
-      from: 0,
-      to: 0,
-    },
-    sid
-  );
-
-  const items = data.items ?? [];
-  const wanted = templateName.trim().toLowerCase();
-  const allTemplateNames: string[] = [];
-
-  for (const item of items) {
-    if (!item.reports) continue;
-    for (const tmpl of Object.values(item.reports)) {
-      allTemplateNames.push(tmpl.n);
-      if (tmpl.n.trim().toLowerCase() === wanted) {
-        const found: WialonReportTemplateRef = { resourceId: item.id, templateId: tmpl.id, name: tmpl.n };
-        cache[templateName] = { resourceId: found.resourceId, templateId: found.templateId };
-        writeReportTemplateCache(cache);
-        return found;
-      }
-    }
-  }
-
-  const detail =
-    items.length === 0
-      ? 'core/search_items вернул 0 ресурсов — проверьте токен/сессию.'
-      : allTemplateNames.length === 0
-        ? 'ни у одного ресурса аккаунта нет ни одного шаблона отчёта.'
-        : `Найденные шаблоны: ${allTemplateNames.join(', ')}`;
-  throw new Error(`Report template '${templateName}' not found in any Wialon resource. ${detail}`);
-}
-
-// ───────────────────────── Создание шаблона отчёта через API ─────────────────────────
-// Обычный путь — создать шаблон руками в веб-кабинете Wialon (Reports -> Templates), см.
-// findReportTemplate выше. Метод ниже — попытка сделать то же самое через API
-// (report/update_report, callMode: "create"), на случай если у аккаунта нет прав на кнопку
-// "Создать" в веб-интерфейсе, но есть права на ресурс через API-токен (или наоборот — тогда
-// это явно покажет code 7 / Access denied, что и является ожидаемым диагностическим результатом).
-
-export interface WialonCreateReportTemplateResult {
-  id: number;
-  name: string;
-  raw: any;
-}
-
-/** Заготовка "пустого" расписания таблицы отчёта — без периодичности (одноразовый интервал). */
-const NO_SCHEDULE = { f1: 0, f2: 0, t1: 0, t2: 0, m: 0, y: 0, w: 0, fl: 0 };
-
-/**
- * Создаёт новый шаблон отчёта в указанном ресурсе Wialon (report/update_report,
- * callMode: "create", id: 0) с двумя таблицами — пробег/рейсы (unit_trips) и
- * заправки топлива (unit_fillings). Структура таблиц собрана по документации Wialon SDK
- * (sdk.wialon.com/wiki, report/update_report) — реальный API аккаунта может отличаться
- * в деталях необязательных полей, но структура itemId/id/callMode/n/ct/tbl обязательна.
- *
- * НЕ пытаться "чинить" в ответ на WialonApiError с code 7 (Access denied) — это означает,
- * что у токена/пользователя реально нет прав на создание шаблонов в этом ресурсе, а не баг.
- */
-export async function createReportTemplate(
-  resourceId: number,
-  templateName: string
-): Promise<WialonCreateReportTemplateResult> {
-  const sid = await getCachedSid();
-
-  const data = await callWialon<any>(
-    'report/update_report',
-    {
-      itemId: resourceId,
-      id: 0,
-      callMode: 'create',
-      n: templateName,
-      ct: 'avl_unit',
-      p: '',
-      bsfl: 0,
-      tbl: [
-        {
-          n: 'unit_trips',
-          l: 'Пробег и рейсы',
-          c: 'mileage,duration,avg_speed,max_speed,count,engine_hours',
-          cl: '',
-          s: '',
-          sl: '',
-          filter_order: [],
-          p: '{"stop_min":5}',
-          sch: NO_SCHEDULE,
-          f: 0,
-        },
-        {
-          n: 'unit_fillings',
-          l: 'Заправки топлива',
-          c: 'volume,cost,mileage',
-          cl: '',
-          s: '',
-          sl: '',
-          filter_order: [],
-          p: '{}',
-          sch: NO_SCHEDULE,
-          f: 0,
-        },
-      ],
-    },
-    sid
-  );
-
-  const id = data?.id ?? data?.[0]?.id;
-  if (typeof id !== 'number') {
-    throw new Error(
-      `report/update_report выполнился без ошибки, но не вернул id созданного шаблона. Ответ: ${JSON.stringify(data)}`
-    );
-  }
-
-  return { id, name: templateName, raw: data };
-}
-
-// ───────────────────────── Inline-отчёт по пробегу и топливу (без сохранённого шаблона) ─────────────────────────
-// Сохранённые шаблоны (findReportTemplate/createReportTemplate выше) требуют права editReports
-// на ресурс — у аккаунта их не оказалось. Обходной путь, задокументированный в Wialon SDK:
-// report/exec_report с reportTemplateId: 0 и телом шаблона (reportTemplate) прямо в запросе —
-// отчёт не сохраняется в Wialon, выполняется "на лету". Для этого достаточно права viewReports
-// (см. help.wialon.com/en/api/expert-articles/introduction-to-sdk/reports-execution), которое
-// у аккаунта уже есть — то есть editReports для этого пути не нужен.
-
-interface WialonReportTableSpec {
-  /** Тип таблицы отчёта Wialon (например "unit_trips", "unit_fillings") */
-  n: string;
-  /** Заголовок таблицы (произвольный, для читаемости в вебе — на парсинг не влияет) */
-  l: string;
-  /** Список кодов колонок через запятую — порядок определяет порядок ячеек в строках результата */
-  c: string;
-  cl: string;
-  s: string;
-  sl: string;
-  /** JSON-строка таблично-специфичных параметров (интервал фильтрации, мин. стоянка и т.п.) */
-  p: string;
-  sch: typeof NO_SCHEDULE;
-  f: number;
-}
-
-/** Ячейка строки результата отчёта — либо примитив, либо объект {t: текст, v: число} */
-type WialonReportCell = string | number | { t?: string; v?: number } | null;
-
-interface WialonReportRow {
-  n?: number;
-  /** Массив ячеек строки, порядок соответствует списку колонок `c` в запросе. */
-  c?: WialonReportCell[];
-}
-
-interface WialonReportTableMeta {
-  name?: string;
-  label?: string;
-  /** Количество строк в этой таблице результата — 0, если данных за период нет */
-  rows?: number;
-}
-
-interface WialonExecReportResult {
-  reportResult?: {
-    tables?: WialonReportTableMeta[];
-  };
-}
-
-/** Достаёт числовое значение из ячейки результата отчёта (примитив или объект {t, v}). */
-function cellNumber(cell: WialonReportCell | undefined): number {
-  if (cell == null) return 0;
-  if (typeof cell === 'number') return cell;
-  if (typeof cell === 'object') {
-    if (typeof cell.v === 'number') return cell.v;
-    if (typeof cell.t === 'string') {
-      const n = parseFloat(cell.t.replace(/[^\d.-]/g, ''));
-      return Number.isFinite(n) ? n : 0;
-    }
-    return 0;
-  }
-  if (typeof cell === 'string') {
-    const n = parseFloat(cell.replace(/[^\d.-]/g, ''));
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-/** Сумма значений колонки по всем строкам таблицы (по имени колонки из списка `c`, не по индексу вслепую). */
-function sumColumn(rows: WialonReportRow[], columns: string[], columnName: string): number {
-  const idx = columns.indexOf(columnName);
-  if (idx === -1) return 0;
-  return rows.reduce((sum, row) => sum + cellNumber(row.c?.[idx]), 0);
-}
-
-/** Таблица "Пробег и рейсы" (unit_trips) — суммируем колонку mileage по всем поездкам за период. */
-function parseMileageTable(rows: WialonReportRow[], columns: string[]): number {
-  return Math.round(sumColumn(rows, columns, 'mileage') * 10) / 10;
-}
-
-/** Таблица "Заправки топлива" (unit_fillings) — суммируем колонку volume (заправки минус сливы). */
-function parseFillingsTable(rows: WialonReportRow[], columns: string[]): number {
-  return Math.round(sumColumn(rows, columns, 'volume') * 10) / 10;
-}
-
-/**
- * Определение inline-отчёта — список таблиц с их спецификацией (для запроса к Wialon) и функцией
- * разбора результата. Порядок элементов = порядок таблиц в ответе (tables[0], tables[1], ...).
- * Чтобы добавить новую таблицу (например моточасы) — просто дописать сюда ещё один элемент
- * с новым `key`, спецификацией `table` и функцией `parse`; менять остальную логику не нужно.
- */
-const REPORT_DEFINITION: Array<{
-  key: 'mileageKm' | 'fuelConsumedL';
-  table: WialonReportTableSpec;
-  parse: (rows: WialonReportRow[], columns: string[]) => number;
-}> = [
-  {
-    key: 'mileageKm',
-    table: {
-      n: 'unit_trips',
-      l: 'Пробег и рейсы',
-      c: 'mileage,duration,avg_speed,max_speed,count,engine_hours',
-      cl: '',
-      s: '',
-      sl: '',
-      p: '{"stop_min":5}',
-      sch: NO_SCHEDULE,
-      f: 0,
-    },
-    parse: parseMileageTable,
-  },
-  {
-    key: 'fuelConsumedL',
-    table: {
-      n: 'unit_fillings',
-      l: 'Заправки топлива',
-      c: 'volume,cost,mileage',
-      cl: '',
-      s: '',
-      sl: '',
-      p: '{}',
-      sch: NO_SCHEDULE,
-      f: 0,
-    },
-    parse: parseFillingsTable,
-  },
-];
-
-/**
- * Находит id единственного ресурса аккаунта (avl_resource) — inline-отчёт требует
+ * Находит id единственного ресурса аккаунта (avl_resource) — официальному отчёту требует
  * reportResourceId, а хардкодить его не хочется (см. WIALON_REPORT_RESOURCE_ID как явный
  * override на случай, если в аккаунте когда-нибудь появится больше одного ресурса).
  */
@@ -791,126 +426,164 @@ async function resolveDefaultResourceId(sid: string): Promise<number> {
   return items[0].id;
 }
 
-export interface WialonMileageAndFuelReport {
-  mileageKm: number;
-  fuelConsumedL: number;
-  /** Сырой ответ API — для отладки, не для использования в бизнес-логике. */
+/**
+ * Официальный отчёт Wialon "Расход топлива" — воспроизводит ТОЧНУЮ последовательность запросов
+ * веб-интерфейса Wialon (подтверждено HAR-файлом реального сеанса пользователя в вебе, см. чат):
+ *   1) report/exec_report — reportTemplateId (реальный СОХРАНЁННЫЙ шаблон на ресурсе аккаунта,
+ *      не инлайн-тело — inline-тело (reportTemplateId:0) стабильно давало msgsRendered:0, потому
+ *      что веб-интерфейс использует не его, а обычный сохранённый шаблон), remoteExec:1 (реально
+ *      асинхронно, вопреки более ранней попытке с remoteExec:0), interval.flags:16777216 (0x1000000 —
+ *      именно это значение стоит у веб-интерфейса, семантика в публичной документации не описана,
+ *      используется как есть).
+ *   2) report/get_report_status — опрос до status:"4" (готово).
+ *   3) report/apply_report_result — только ЗДЕСЬ приходит заполненный reportResult с таблицами
+ *      (report/get_result_rows, использовавшийся раньше, для этого аккаунта не подходит).
+ *   4) report/cleanup_result — освобождение сессии отчёта (как и в остальных функциях этого файла).
+ *
+ * Таблица "unit_generic" (группировка по дням, но totalRaw — сразу готовый итог за весь период) —
+ * колонки ищем по header_type (устойчиво к порядку), не по индексу.
+ */
+const WIALON_FUEL_REPORT_INTERVAL_FLAGS = 16777216;
+
+export interface WialonOfficialTripReport {
+  mileageAllKm: number; // "Пробег по всем сообщениям" — та же цифра, что в шапке отчёта Wialon
+  mileageTripsKm: number; // "Пробег в поездках" (детектор рейсов, обычно меньше mileageAllKm)
+  fuelConsumedL: number; // "Потрачено по ДУТ" — с учётом заправок/сливов за период
+  avgFuelConsumptionPer100Km: number; // "Ср. расход по ДУТ"
+  fuelLevelBeginL: number; // "Нач. уровень"
+  fuelLevelEndL: number; // "Кон. уровень"
+  engineHoursSec: number; // "Моточасы"
+  idleSec: number; // "Стоянки" (duration_stay) — используется как "Простой" в карточке рейса
+  fillingsCount: number;
+  filledL: number;
+  theftsCount: number;
+  theftedL: number;
+  calculatedAt: Date;
   raw: any;
 }
 
+function rawValueByHeaderType(table: { header_type: string[]; totalRaw: Array<{ v: number; vt: number }> }, type: string): number {
+  const idx = table.header_type.indexOf(type);
+  return idx === -1 ? 0 : (table.totalRaw[idx]?.v ?? 0);
+}
+
 /**
- * Пробег и расход топлива машины за интервал через inline-отчёт (report/exec_report с
- * reportTemplateId: 0 и телом шаблона прямо в запросе — без сохранённого templateId).
- *
- * Отсутствие данных за период (машина не выходила на связь — например транзит через
- * территорию без покрытия) — это НЕ ошибка: возвращает { mileageKm: 0, fuelConsumedL: 0 },
- * с пометкой в raw.noData. Настоящие ошибки (логин, доступ) бросаются как есть.
+ * "Пробег по всем сообщениям" в верхнеуровневой сводке reportResult.stats — ТОЧНО то число,
+ * что видит пользователь в шапке отчёта Wialon (подтверждено дважды вживую на реальных данных,
+ * см. чат) — НЕ совпадает с тем же header_type "mileage_all" в таблице unit_generic (там
+ * группировка по дням теряет ~2% на стыках суток). Для остальных полей (топливо/заправки/
+ * уровни/моточасы) таблица unit_generic и stats совпадают — берём их оттуда, как раньше.
+ * stats — только текстовые пары [label, "8064 km"], поэтому парсим ведущее число регуляркой.
  */
-export async function getMileageAndFuelReport(
-  unitId: number,
-  dateFrom: Date,
-  dateTo: Date
-): Promise<WialonMileageAndFuelReport> {
-  let sid: string;
-  try {
-    sid = await getCachedSid();
-  } catch (e) {
-    throw new Error(`Wialon: не удалось авторизоваться перед выполнением отчёта: ${(e as Error).message}`);
-  }
+function parseStatNumber(stats: Array<[string, string]> | undefined, labelSubstring: string): number | null {
+  const row = stats?.find(([label]) => label.includes(labelSubstring));
+  if (!row) return null;
+  const match = row[1].replace(',', '.').match(/-?\d+(\.\d+)?/);
+  return match ? parseFloat(match[0]) : null;
+}
 
-  let resourceId: number;
-  try {
-    resourceId = await resolveDefaultResourceId(sid);
-  } catch (e) {
-    throw new Error(`Wialon: не удалось определить ресурс для отчёта: ${(e as Error).message}`);
+/**
+ * Выполняет официальный отчёт Wialon за интервал и возвращает итоги ровно в том виде, в котором
+ * их показывает веб-интерфейс Wialon — без собственного расчёта по сырым GPS-сообщениям.
+ * WIALON_FUEL_REPORT_TEMPLATE_ID (.env) — id сохранённого шаблона отчёта на ресурсе аккаунта;
+ * найти автоматически (core/search_items) не удалось — эта же учётка не даёt увидеть список
+ * шаблонов через API (видимо, ограничение прав именно на просмотр списка, не на выполнение по id),
+ * хотя сам шаблон реально существует и выполняется. Обязательный параметр — без него отчёт
+ * выполнить нельзя (заводить каждый раз новый id вручную через веб-кабинет).
+ */
+export async function getOfficialTripReport(unitId: number, dateFrom: Date, dateTo: Date): Promise<WialonOfficialTripReport> {
+  const templateIdEnv = process.env.WIALON_FUEL_REPORT_TEMPLATE_ID;
+  if (!templateIdEnv) {
+    throw new Error(
+      'Wialon: не задан WIALON_FUEL_REPORT_TEMPLATE_ID в .env — id сохранённого шаблона отчёта "Расход топлива" ' +
+        '(взять из веб-кабинета Wialon: Отчёты → нужный шаблон → его id, либо перехватить из HAR при построении отчёта в вебе).'
+    );
   }
+  const templateId = Number(templateIdEnv);
 
+  const sid = await getCachedSid();
+  const resourceId = await resolveDefaultResourceId(sid);
   const from = Math.floor(dateFrom.getTime() / 1000);
   const to = Math.floor(dateTo.getTime() / 1000);
 
-  let execData: WialonExecReportResult;
-  try {
-    execData = await callWialon<WialonExecReportResult>(
-      'report/exec_report',
-      {
-        reportResourceId: resourceId,
-        reportTemplateId: 0,
-        reportTemplate: {
-          id: 0,
-          n: 'LevAV inline: пробег и топливо',
-          ct: 'avl_unit',
-          p: '',
-          bsfl: 0,
-          tbl: REPORT_DEFINITION.map((d) => d.table),
-        },
-        reportObjectId: unitId,
-        reportObjectSecId: 0,
-        interval: { from, to, flags: 0 },
-        // remoteExec: 0 (по умолчанию) — синхронное выполнение, reportResult приходит сразу
-        // в этом же ответе. С remoteExec: 1 Wialon выполняет отчёт асинхронно и возвращает
-        // только {"remoteExec":1} без результата — это ломало парсинг (проверено вживую).
-        remoteExec: 0,
-      },
-      sid
-    );
-  } catch (e) {
-    if (e instanceof WialonApiError) {
-      // 1001 = "Нет сообщений за выбранный период" — ожидаемо (машина не выходила на связь),
-      // не ошибка выполнения, а нормальный исход.
-      if (e.code === 1001) {
-        return { mileageKm: 0, fuelConsumedL: 0, raw: { noData: true, reason: 'no_messages_in_interval' } };
-      }
-      if (e.code === 7) {
-        throw new Error(
-          `Wialon: нет доступа к выполнению отчёта на ресурсе id=${resourceId} (code 7, Access denied) — ` +
-            'нужно как минимум право "Просмотр отчётов" (viewReports) на этот ресурс.'
-        );
-      }
-      throw new Error(`Wialon: ошибка выполнения отчёта (report/exec_report): ${e.message}`);
-    }
-    throw e;
-  }
+  // 1) Запуск отчёта — асинхронно (remoteExec:1), как в веб-интерфейсе.
+  await callWialon<any>(
+    'report/exec_report',
+    {
+      reportResourceId: resourceId,
+      reportTemplateId: templateId,
+      reportTemplate: null,
+      reportObjectId: unitId,
+      reportObjectSecId: 0,
+      interval: { flags: WIALON_FUEL_REPORT_INTERVAL_FLAGS, from, to },
+      remoteExec: 1,
+    },
+    sid
+  );
 
-  const tables = execData.reportResult?.tables ?? [];
-  const allEmpty = tables.length === 0 || tables.every((t) => !t.rows);
-  if (allEmpty) {
-    // cleanup_result всё равно нужно вызвать, если exec_report успешно отработал (сессия
-    // отчёта открыта), даже если во всех таблицах 0 строк.
+  // 2) Опрос статуса до готовности ("4"). Реальный отчёт на 19 дней/66k сообщений занял в вебе
+  // 4 опроса — с запасом даём до 40 опросов по 750мс (30 сек), дольше считаем зависшим отчётом.
+  const MAX_STATUS_POLLS = 40;
+  const STATUS_POLL_INTERVAL_MS = 750;
+  let ready = false;
+  for (let i = 0; i < MAX_STATUS_POLLS; i++) {
+    const statusResult = await callWialon<{ status?: string }>('report/get_report_status', {}, sid);
+    if (statusResult?.status === '4') {
+      ready = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
+  }
+  if (!ready) {
     await callWialon('report/cleanup_result', {}, sid).catch(() => {});
-    return { mileageKm: 0, fuelConsumedL: 0, raw: { noData: true, reason: 'empty_tables', execData } };
+    throw new Error(`Wialon: отчёт не завершился за ${(MAX_STATUS_POLLS * STATUS_POLL_INTERVAL_MS) / 1000} сек (report/get_report_status)`);
   }
 
-  const parsedByKey: Record<string, number> = {};
+  // 3) Только apply_report_result отдаёт заполненный reportResult с таблицами на этом аккаунте.
+  let applyResult: {
+    reportResult?: {
+      stats?: Array<[string, string]>;
+      tables?: Array<{ name: string; header_type: string[]; totalRaw: Array<{ v: number; vt: number }> }>;
+    };
+  };
   try {
-    for (let i = 0; i < REPORT_DEFINITION.length; i++) {
-      const def = REPORT_DEFINITION[i];
-      const rowCount = tables[i]?.rows ?? 0;
-      let rows: WialonReportRow[] = [];
-      if (rowCount > 0) {
-        const rowsData = await callWialon<WialonReportRow[]>(
-          'report/get_result_rows',
-          { tableIndex: i, indexFrom: 0, indexTo: rowCount - 1 },
-          sid
-        );
-        rows = Array.isArray(rowsData) ? rowsData : [];
-      }
-      const columns = def.table.c.split(',').map((s) => s.trim()).filter(Boolean);
-      parsedByKey[def.key] = def.parse(rows, columns);
-    }
+    applyResult = await callWialon<any>('report/apply_report_result', {}, sid);
   } finally {
-    // Wialon держит только один результат отчёта на сессию — обязательно освобождать,
-    // даже если разбор строк выше упал с ошибкой.
     await callWialon('report/cleanup_result', {}, sid).catch(() => {});
   }
+
+  const table = applyResult.reportResult?.tables?.find((t) => t.name === 'unit_generic');
+  const now = new Date();
+  if (!table) {
+    return {
+      mileageAllKm: 0, mileageTripsKm: 0, fuelConsumedL: 0, avgFuelConsumptionPer100Km: 0,
+      fuelLevelBeginL: 0, fuelLevelEndL: 0, engineHoursSec: 0, idleSec: 0,
+      fillingsCount: 0, filledL: 0, theftsCount: 0, theftedL: 0,
+      calculatedAt: now, raw: { noData: true, applyResult },
+    };
+  }
+
+  const mileageAllFromStats = parseStatNumber(applyResult.reportResult?.stats, 'Пробег по всем сообщениям');
 
   return {
-    mileageKm: parsedByKey.mileageKm ?? 0,
-    fuelConsumedL: parsedByKey.fuelConsumedL ?? 0,
-    raw: { execData },
+    mileageAllKm: mileageAllFromStats ?? Math.round((rawValueByHeaderType(table, 'mileage_all') / 1000) * 10) / 10,
+    mileageTripsKm: Math.round((rawValueByHeaderType(table, 'mileage') / 1000) * 10) / 10,
+    fuelConsumedL: Math.round(rawValueByHeaderType(table, 'fuel_consumption_fls') * 10) / 10,
+    avgFuelConsumptionPer100Km: Math.round(rawValueByHeaderType(table, 'avg_fuel_consumption_fls') * 10) / 10,
+    fuelLevelBeginL: Math.round(rawValueByHeaderType(table, 'fuel_level_begin') * 10) / 10,
+    fuelLevelEndL: Math.round(rawValueByHeaderType(table, 'fuel_level_end') * 10) / 10,
+    engineHoursSec: Math.round(rawValueByHeaderType(table, 'eh')),
+    idleSec: Math.round(rawValueByHeaderType(table, 'duration_stay')),
+    fillingsCount: Math.round(rawValueByHeaderType(table, 'fillings_count')),
+    filledL: Math.round(rawValueByHeaderType(table, 'filled') * 10) / 10,
+    theftsCount: Math.round(rawValueByHeaderType(table, 'thefts_count')),
+    theftedL: Math.round(rawValueByHeaderType(table, 'thefted') * 10) / 10,
+    calculatedAt: now,
+    raw: { table },
   };
 }
 
-// ───────────────────────── Пробег по сырому GPS-треку (обход report/exec_report) ─────────────────────────
+// ───────────────────────── Пробег по сырому GPS-треку (для точечного автозаполнения формы) ─────────────────────────
 // getMileageAndFuelReport выше (report/exec_report, таблицы unit_trips/unit_stats) стабильно
 // возвращал msgsRendered: 0 на этом аккаунте при структурно валидном запросе — проверено вживую
 // 5 разными вариантами (разные машины, разные типы таблиц), схему reportTemplate публичная
@@ -1130,50 +803,6 @@ export async function getFuelLevelAtDate(unitId: number, date: Date): Promise<Wi
     lat: null,
     lon: null,
     raw: { reason: 'no_data_in_any_window', maxWindowHours: FUEL_LOOKUP_WINDOWS_HOURS[FUEL_LOOKUP_WINDOWS_HOURS.length - 1] },
-  };
-}
-
-export interface WialonFuelConsumptionResult {
-  /** startFuelL - endFuelL, null если хотя бы один конец не удалось определить */
-  fuelConsumedL: number | null;
-  startFuelL: number | null;
-  endFuelL: number | null;
-  /** Координаты той же пары сообщений, что дали startFuelL/endFuelL — доп. запрос не нужен. */
-  startLat: number | null;
-  startLon: number | null;
-  endLat: number | null;
-  endLon: number | null;
-  raw: any;
-}
-
-/**
- * Расход топлива за рейс = остаток на дату выезда минус остаток на дату возврата (обе точки —
- * через getFuelLevelAtDate). ВАЖНО: это простая разница остатков, БЕЗ обнаружения дозаправок
- * в пути — если машину заправляли между dateFrom и dateTo, результат будет занижен (или даже
- * отрицательным). Обнаружение дозаправок по скачкам показаний сюда сознательно не добавлено —
- * отдельная, более рискованная эвристика; сейчас это тот же уровень точности, что и
- * существующий fallback в lib/wialon/calculateTripFuel.ts (fuelCalcSource: "odometer_diff"),
- * просто источник остатков — честные показания на дату, а не текущее/введённое вручную значение.
- */
-export async function getFuelConsumedBetweenDates(
-  unitId: number,
-  dateFrom: Date,
-  dateTo: Date
-): Promise<WialonFuelConsumptionResult> {
-  const [start, end] = await Promise.all([getFuelLevelAtDate(unitId, dateFrom), getFuelLevelAtDate(unitId, dateTo)]);
-
-  const fuelConsumedL =
-    start.fuelLevelL != null && end.fuelLevelL != null ? Math.round((start.fuelLevelL - end.fuelLevelL) * 10) / 10 : null;
-
-  return {
-    fuelConsumedL,
-    startFuelL: start.fuelLevelL,
-    endFuelL: end.fuelLevelL,
-    startLat: start.lat,
-    startLon: start.lon,
-    endLat: end.lat,
-    endLon: end.lon,
-    raw: { start, end },
   };
 }
 
