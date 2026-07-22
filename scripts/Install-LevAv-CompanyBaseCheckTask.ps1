@@ -34,7 +34,7 @@ try {
 }
 catch {}
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ps1`" -ProjectDir `"$ProjectDir`""
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ps1`" -ProjectDir `"$ProjectDir`""
 # RepetitionDuration must be a bounded TimeSpan - [TimeSpan]::MaxValue is rejected by Task
 # Scheduler's XML validation (HRESULT 0x80041318) with a *non-terminating* error, which is
 # why -ErrorAction Stop below is required (otherwise this script would print "Task created"
