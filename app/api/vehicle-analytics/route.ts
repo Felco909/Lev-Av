@@ -4,16 +4,15 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeCostPerKmAmd, computeProfitabilityRatio, computeProfitPerKmAmd } from '@/lib/finance/formulas';
-import { matchTripsInRange, computeVehicleTripFinancials, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
+import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
+import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 
 /**
- * GET /api/vehicle-analytics — аналитика по каждой машине (Этап 8, пересмотрено —
- * "Финальная доработка логики рейсов и аналитики"). Доход/расходы/прибыль — ЕДИНЫЙ
- * источник computeVehicleTripFinancials (lib/vehicle-trips/revenue.ts), та же функция,
- * что у карточки рейса и /api/vehicles/[id]/economics. Раньше здесь была отдельная копия
- * сломанной формулы (Trip.vehicleTripId нигде не заполнялся) — доход всегда был 0, из-за
- * чего аналитика расходилась с (тоже сломанной) карточкой рейса. Теперь обе точки — одна
- * и та же функция, расхождение архитектурно исключено.
+ * GET /api/vehicle-analytics — аналитика по каждой машине. Этап 3 миграции на архитектуру
+ * "заявка → рейс": доход каждого рейса — сумма заявок, ЯВНО привязанных к нему
+ * (Trip.vehicleTripId), даты в расчёте не участвуют. Та же формула расходов
+ * (computeVehicleTripExpensesAmd), что у карточки рейса и /api/vehicles/[id]/economics —
+ * расхождение между разделами архитектурно исключено, т.к. это один и тот же запрос.
  * Не путать с computeExpeditionProfitAmd/computeOwnTransportProfitAmd (другой модуль, см. CLAUDE.md).
  */
 export async function GET() {
@@ -25,7 +24,7 @@ export async function GET() {
 
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       select: {
-        vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true, calculatedKm: true,
+        id: true, vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true, calculatedKm: true,
         finalRevenueAmd: true, finalExpensesAmd: true,
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
@@ -33,10 +32,8 @@ export async function GET() {
       },
     });
 
-    // Заявки всех машин — один запрос (не N+1), сопоставление в памяти per-рейс.
-    const allTrips = await prisma.trip.findMany({
-      select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, vehicleId: true, client: { select: { name: true } } },
-    });
+    // Доход всех рейсов одним запросом (не N+1) — по явной связи Trip.vehicleTripId.
+    const incomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
 
     // Топливо (заправки) по машине — тот же приём, что в driver-analytics/route.ts.
     const fuelRecords = await prisma.fuelRecord.findMany({ select: { vehicleId: true, liters: true, cost: true } });
@@ -55,10 +52,9 @@ export async function GET() {
       let totalMileage = 0;
       // Финансы каждого рейса считаем один раз (используются и в итоге, и в помесячной разбивке).
       const perTrip = vTrips.map((vt) => {
-        const matched = vt.finalRevenueAmd == null
-          ? matchTripsInRange(allTrips, vehicle.id, vt.departureDate, resolveMatchRangeEnd(vt, vTrips))
-          : [];
-        const financials = computeVehicleTripFinancials(vt, matched);
+        const revenue = vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (incomeByVt.get(vt.id) ?? 0);
+        const totalExpenses = vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt);
+        const financials = { revenue, totalExpenses, profit: revenue - totalExpenses };
         // Пробег — только официальный отчёт Wialon (calculatedKm), тот же источник, что и
         // "Итоги рейса" в карточке (см. lib/wialon/calculateTripFuel.ts) — без fallback на
         // разницу одометра, иначе аналитика расходится с карточкой рейса и с самим Wialon.

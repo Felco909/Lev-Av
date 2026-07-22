@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeClientDueAmd, computeCarrierDueAmd, splitExpensesAmd } from '@/lib/finance/formulas';
+import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
+import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 
 export async function GET(req: Request) {
   try {
@@ -337,8 +339,12 @@ export async function GET(req: Request) {
     });
 
     // \u2500\u2500 8. OWN FLEET SUMMARY \u2500\u2500
-    const ownFleetTrips = allTrips.filter(t => t.tripType === 'own_transport');
-    const ownFleetRevenue = ownFleetTrips.reduce((s, t) => s + Number(t.clientRateAmd ?? t.clientRate ?? 0), 0);
+    // Этап 3 миграции на архитектуру "заявка → рейс": доход и расход считаются по ОДНОМУ
+    // И ТОМУ ЖЕ набору рейсов машин (та же формула, что и /api/director-finance,
+    // /api/vehicle-analytics, /api/vehicles/[id]/economics) — раньше доход считался
+    // напрямую по заявкам own_transport, а расход отдельно по VehicleTrip за период
+    // (и даже без FleetExpense) — две независимые, слегка разные суммы.
+    const ownFleetTripCount = allTrips.filter((t: any) => t.tripType === 'own_transport').length;
 
     const vtWhere: any = {};
     if (dateFrom || dateTo) {
@@ -346,19 +352,32 @@ export async function GET(req: Request) {
       if (dateFrom) vtWhere.departureDate.gte = new Date(dateFrom);
       if (dateTo) vtWhere.departureDate.lte = new Date(dateTo + 'T23:59:59');
     }
-    const vehicleTripExpenses = await prisma.vehicleTrip.findMany({
+    const ownFleetVehicleTrips = await prisma.vehicleTrip.findMany({
       where: vtWhere,
-      select: { salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, otherExpensesAmd: true, fuelCostAmd: true },
+      select: {
+        id: true, finalRevenueAmd: true, finalExpensesAmd: true,
+        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
+        otherExpensesAmd: true, fuelCostAmd: true,
+        fleetExpenses: { select: { amountAmd: true } },
+      },
     });
-    const ownFleetSalary = vehicleTripExpenses.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
+    const ownFleetIncomeByVt = await getVehicleTripsIncomeAmdBulk(ownFleetVehicleTrips.map((vt) => vt.id));
+    const ownFleetRevenue = ownFleetVehicleTrips.reduce(
+      (sum, vt) => sum + (vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (ownFleetIncomeByVt.get(vt.id) ?? 0)),
+      0
+    );
+    const ownFleetSalary = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
     // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
-    const ownFleetPerDiem = vehicleTripExpenses.reduce(
+    const ownFleetPerDiem = ownFleetVehicleTrips.reduce(
       (s, v) => s + (Number(v.perDiemAmd) || 0) + (Number(v.perDiem2Amd) || 0) + (Number(v.perDiem3Amd) || 0),
       0
     );
-    const ownFleetOther = vehicleTripExpenses.reduce((s, v) => s + (Number(v.otherExpensesAmd) || 0), 0);
-    const ownFleetFuel = vehicleTripExpenses.reduce((s, v) => s + (Number(v.fuelCostAmd) || 0), 0);
-    const ownFleetExpenses = ownFleetSalary + ownFleetPerDiem + ownFleetOther + ownFleetFuel;
+    const ownFleetOther = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.otherExpensesAmd) || 0), 0);
+    const ownFleetFuel = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.fuelCostAmd) || 0), 0);
+    const ownFleetExpenses = ownFleetVehicleTrips.reduce(
+      (sum, vt) => sum + (vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt)),
+      0
+    );
     const ownFleetProfit = ownFleetRevenue - ownFleetExpenses;
 
     const ownFleet = {
@@ -366,8 +385,8 @@ export async function GET(req: Request) {
       expenses: ownFleetExpenses,
       profit: ownFleetProfit,
       breakdown: { salary: ownFleetSalary, perDiem: ownFleetPerDiem, fuel: ownFleetFuel, other: ownFleetOther },
-      tripCount: ownFleetTrips.length,
-      vtCount: vehicleTripExpenses.length,
+      tripCount: ownFleetTripCount,
+      vtCount: ownFleetVehicleTrips.length,
     };
 
     // \u2500\u2500 9. CLIENTS LIST for filter \u2500\u2500

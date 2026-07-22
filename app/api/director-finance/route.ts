@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { computeAggregateMetrics, computeBreakdownTotals, computeMetricRowsForTrips, getTripSplitExpenseTotalsAmd } from '@/lib/finance/finance-metrics-service';
 import type { FinancePaymentInput, FinanceTripInput } from '@/lib/finance/types';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
+import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 
 function ymd(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -90,17 +91,13 @@ export async function GET(req: Request) {
     const aggregate = computeAggregateMetrics(rows);
     const breakdown = computeBreakdownTotals(rows);
 
-    // "Собственный транспорт" — расход считаем НЕ из Trip.expenses (там для своих машин
-    // почти всегда пусто — реальные расходы по рейсу машины лежат на VehicleTrip: зарплата,
-    // суточные x3, прочее, топливо, + FleetExpense), а из VehicleTrip напрямую, тем же
-    // computeVehicleTripExpensesAmd, что уже используют карточка рейса, /vehicles/[id]/economics
-    // и /api/vehicle-analytics — тот же расчёт, что уже даёт верную сумму на дашборде
-    // ("Собственный автопарк"). Раньше расход по своим машинам был систематически 0.
-    // Доход (breakdown.ownTransport.incomeAmd, ниже) НЕ трогаем и не переводим на матчинг
-    // по VehicleTrip: 13 из 39 заявок own_transport не привязаны ни к одному VehicleTrip
-    // (более старые заявки без заведённого рейса машины) — при матчинге их доход просто
-    // исчез бы из отчёта. Доход и расход тут — две независимые суммы по одной и той же
-    // теме "свой транспорт", не попарно сопоставленные по рейсам, как на дашборде.
+    // "Собственный транспорт" — Этап 3 миграции на архитектуру "заявка → рейс": доход и
+    // расход теперь считаются по ОДНОМУ И ТОМУ ЖЕ набору рейсов машин (раньше это были
+    // две независимые суммы: доход — по всем заявкам own_transport напрямую, расход — по
+    // VehicleTrip за период — из-за этого могли расходиться). Расход — та же
+    // computeVehicleTripExpensesAmd, что и у карточки рейса, /vehicles/[id]/economics и
+    // /api/vehicle-analytics. Доход — сумма заявок, ЯВНО привязанных к каждому рейсу
+    // (Trip.vehicleTripId), даты заявок в расчёте не участвуют.
     const vehicleTripWhere: any = {};
     if (dateFrom || dateTo) {
       vehicleTripWhere.departureDate = {};
@@ -110,12 +107,17 @@ export async function GET(req: Request) {
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       where: vehicleTripWhere,
       select: {
-        finalExpensesAmd: true,
+        id: true, finalRevenueAmd: true, finalExpensesAmd: true,
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
         fleetExpenses: { select: { amountAmd: true } },
       },
     });
+    const ownFleetIncomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
+    const ownFleetIncomeAmd = vehicleTrips.reduce(
+      (sum, vt) => sum + (vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (ownFleetIncomeByVt.get(vt.id) ?? 0)),
+      0
+    );
     const ownFleetExpenseAmd = vehicleTrips.reduce(
       (sum, vt) => sum + (vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt)),
       0
@@ -217,9 +219,9 @@ export async function GET(req: Request) {
       asOf: ymd(new Date()),
       kpi,
       ownTransport: {
-        incomeAmd: breakdown.ownTransport.incomeAmd,
+        incomeAmd: Math.round(ownFleetIncomeAmd),
         expenseAmd: Math.round(ownFleetExpenseAmd),
-        profitAmd: Math.round(breakdown.ownTransport.incomeAmd - ownFleetExpenseAmd),
+        profitAmd: Math.round(ownFleetIncomeAmd - ownFleetExpenseAmd),
       },
       expedition: {
         incomeAmd: breakdown.expedition.incomeAmd,

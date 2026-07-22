@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { findMatchingTrips, computeVehicleTripFinancials, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
+import { computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,12 +11,11 @@ export const dynamic = 'force-dynamic';
  *
  * Доход: "Доработка логики рейсов" (финальная архитектура) — Trip.vehicleTripId нигде
  * не заполнялся, поэтому раньше доход всегда показывал 0. Теперь:
- * - если рейс уже заморожен закрытием (finalRevenueAmd не null) — отдаём замороженные
- *   итоговые значения, НЕ пересчитывая (заявка могла измениться после закрытия — это
- *   не должно влиять на архивный рейс);
- * - иначе (активный/архивный без заморозки) — считаем live-джойном по датам
- *   (см. lib/vehicle-trips/revenue.ts): все заявки этой машины, чья дата попадает
- *   в [departureDate, returnDate ?? сейчас].
+ * Этап 3 миграции на архитектуру "заявка → рейс": список заявок рейса теперь всегда
+ * читается через явную связь Trip.vehicleTripId — даты в этом расчёте не участвуют.
+ * Если рейс уже заморожен закрытием (finalRevenueAmd не null) — сумма дохода всё равно
+ * берётся из замороженного значения (не пересчитывается, даже если ставка заявки
+ * изменится после закрытия), список заявок для отображения — тот же явный набор.
  */
 export async function GET(_req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -37,29 +36,19 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
 
   if (!vt) return NextResponse.json({ error: 'Не найден' }, { status: 404 });
 
-  // matchedTrips — для отображения списка заявок. Закрытый рейс: список зафиксирован
-  // (Trip.vehicleTripId проставлен при закрытии). Активный: live-подбор по датам, ограниченный
-  // датой выезда следующего рейса той же машины (см. resolveMatchRangeEnd) — без этого рейс
-  // без returnDate "переезжает" в бесконечность и задваивает заявки следующего рейса.
-  let matchedTrips;
-  if (vt.finalRevenueAmd != null) {
-    const rows = await prisma.trip.findMany({
-      where: { vehicleTripId: vt.id },
-      select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
-      orderBy: { tripDate: 'asc' },
-    });
-    matchedTrips = rows.map((t) => ({
-      id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
-      clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
-    }));
-  } else {
-    const siblings = await prisma.vehicleTrip.findMany({
-      where: { vehicleId: vt.vehicleId, id: { not: vt.id } },
-      select: { id: true, vehicleId: true, departureDate: true },
-    });
-    const rangeEnd = resolveMatchRangeEnd(vt, siblings);
-    matchedTrips = await findMatchingTrips(vt.vehicleId, vt.departureDate, rangeEnd);
-  }
+  // matchedTrips — заявки, ЯВНО привязанные к этому рейсу (Trip.vehicleTripId), а не
+  // подобранные по датам. Работает одинаково для активного и закрытого рейса — состав
+  // определяется тем, что было привязано за время его жизни (автопривязкой, вручную,
+  // массовым "Добавить заявки"), закрытие само по себе больше ничего не досчитывает.
+  const rows = await prisma.trip.findMany({
+    where: { vehicleTripId: vt.id },
+    select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
+    orderBy: { tripDate: 'asc' },
+  });
+  const matchedTrips = rows.map((t) => ({
+    id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
+    clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
+  }));
 
   // ЕДИНЫЙ источник дохода/расходов/прибыли (lib/vehicle-trips/revenue.ts) — та же функция,
   // что использует /api/vehicles/[id]/economics и /api/vehicle-analytics, чтобы карточка
