@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { convertHtmlToPdf } from '@/lib/pdf-convert';
 
 function fmtNum(n: number): string {
   return Math.round(n).toLocaleString('ru-RU');
@@ -92,44 +93,15 @@ export async function GET(req: Request) {
 
     const html = buildHtml(data);
 
-    // Step 1: Create PDF request
-    const createRes = await fetch('https://apps.abacus.ai/api/createConvertHtmlToPdfRequest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deployment_token: process.env.ABACUSAI_API_KEY,
-        html_content: html,
-        pdf_options: { format: 'A4', landscape: true, margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }, print_background: true },
-      }),
+    // Локальный LibreOffice (lib/pdf-convert.ts) — Abacus.AI отключён (не оплачивается, см.
+    // CLAUDE.md), этот роут был единственным местом, которое не перевели при миграции.
+    const pdfBuffer = await convertHtmlToPdf(html);
+    return new NextResponse(pdfBuffer as any, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="dashboard_${new Date().toISOString().slice(0, 10)}.pdf"`,
+      },
     });
-    if (!createRes.ok) throw new Error('PDF create failed');
-    const { request_id } = await createRes.json();
-    if (!request_id) throw new Error('No request_id');
-
-    // Step 2: Poll
-    let attempts = 0;
-    while (attempts < 120) {
-      await new Promise(r => setTimeout(r, 1000));
-      const statusRes = await fetch('https://apps.abacus.ai/api/getConvertHtmlToPdfStatus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id, deployment_token: process.env.ABACUSAI_API_KEY }),
-      });
-      const statusData = await statusRes.json();
-      if (statusData?.status === 'SUCCESS' && statusData?.result?.result) {
-        const pdfBuffer = Buffer.from(statusData.result.result, 'base64');
-        return new NextResponse(pdfBuffer as any, {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="dashboard_${new Date().toISOString().slice(0, 10)}.pdf"`,
-          },
-        });
-      } else if (statusData?.status === 'FAILED') {
-        throw new Error('PDF generation failed');
-      }
-      attempts++;
-    }
-    throw new Error('PDF timeout');
   } catch (e: any) {
     console.error('Dashboard PDF error:', e);
     return NextResponse.json({ error: '\u041e\u0448\u0438\u0431\u043a\u0430 \u0433\u0435\u043d\u0435\u0440\u0430\u0446\u0438\u0438 PDF' }, { status: 500 });
