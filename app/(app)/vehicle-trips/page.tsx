@@ -99,8 +99,13 @@ interface ExpForm {
 
 const CURRENCIES = ['AMD', 'RUB', 'USD', 'GEL', 'EUR'];
 
-function wialonHintText(reason?: string): string {
-  if (reason === 'too_old') return 'Дата слишком старая для расчёта пробега по треку (>45 дней) — введите вручную';
+function wialonHintText(reason?: string, rangeDistanceKm?: number | null): string {
+  if (reason === 'too_old') {
+    if (rangeDistanceKm != null) {
+      return `Дата старше 45 дней — точный одометр по треку недоступен, но пробег рейса по официальному отчёту Wialon: ${Math.round(rangeDistanceKm).toLocaleString('ru-RU')} км (та же цифра, что даёт «Пересчитать по Wialon»). Одометр введите вручную.`;
+    }
+    return 'Дата слишком старая для расчёта пробега по треку (>45 дней) — введите вручную, либо нажмите «Пересчитать по Wialon» для пробега рейса';
+  }
   if (reason === 'wialon_error') return 'Wialon сейчас недоступен — введите вручную';
   return 'Нет данных Wialon на эту дату — введите вручную';
 }
@@ -261,11 +266,16 @@ export default function VehicleTripsPage() {
     fetch('/api/drivers').then(r => r.json()).then(d => setDrivers(Array.isArray(d) ? d : d.drivers || []));
   }, []);
 
-  const fetchWialonSnapshot = useCallback(async (wialonUnitId: string, dateTimeStr: string) => {
+  const fetchWialonSnapshot = useCallback(async (wialonUnitId: string, dateTimeStr: string, otherDateTimeStr?: string) => {
     // dateTimeStr — значение input[type=datetime-local] ("YYYY-MM-DDTHH:mm"), уже полный момент
     // времени (раньше принимали только дату и подставляли фиксированные 12:00).
     const datetime = new Date(dateTimeStr).toISOString();
-    const res = await fetch(`/api/wialon/vehicle-snapshot?wialonUnitId=${encodeURIComponent(wialonUnitId)}&datetime=${encodeURIComponent(datetime)}`);
+    let url = `/api/wialon/vehicle-snapshot?wialonUnitId=${encodeURIComponent(wialonUnitId)}&datetime=${encodeURIComponent(datetime)}`;
+    // otherDateTimeStr — вторая известная граница рейса (выезд/возврат), нужна серверу, чтобы
+    // при "слишком старой" дате посчитать пробег рейса через официальный отчёт Wialon вместо
+    // голого отказа (см. rangeDistanceKm в /api/wialon/vehicle-snapshot).
+    if (otherDateTimeStr) url += `&rangeDatetime=${encodeURIComponent(new Date(otherDateTimeStr).toISOString())}`;
+    const res = await fetch(url);
     return res.json();
   }, []);
 
@@ -277,7 +287,7 @@ export default function VehicleTripsPage() {
     let cancelled = false;
     setDepartureSnapshotLoading(true);
     setDepartureHint(null);
-    fetchWialonSnapshot(wialonUnitId, detailForm.departureDate).then(data => {
+    fetchWialonSnapshot(wialonUnitId, detailForm.departureDate, detailForm.returnDate).then(data => {
       if (cancelled) return;
       if (data.available) {
         setDetailForm(prev => ({
@@ -293,13 +303,13 @@ export default function VehicleTripsPage() {
             : null
         );
       } else {
-        setDepartureHint(wialonHintText(data.reason));
+        setDepartureHint(wialonHintText(data.reason, data.rangeDistanceKm));
       }
     }).catch(() => { if (!cancelled) setDepartureHint(wialonHintText('wialon_error')); })
       .finally(() => { if (!cancelled) setDepartureSnapshotLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail?.vehicle?.wialonUnitId, detailForm.departureDate]);
+  }, [detail?.vehicle?.wialonUnitId, detailForm.departureDate, detailForm.returnDate]);
 
   useEffect(() => {
     const wialonUnitId = detail?.vehicle?.wialonUnitId;
@@ -307,7 +317,7 @@ export default function VehicleTripsPage() {
     let cancelled = false;
     setReturnSnapshotLoading(true);
     setReturnHint(null);
-    fetchWialonSnapshot(wialonUnitId, detailForm.returnDate).then(data => {
+    fetchWialonSnapshot(wialonUnitId, detailForm.returnDate, detailForm.departureDate).then(data => {
       if (cancelled) return;
       if (data.available) {
         setDetailForm(prev => ({
@@ -323,13 +333,13 @@ export default function VehicleTripsPage() {
             : null
         );
       } else {
-        setReturnHint(wialonHintText(data.reason));
+        setReturnHint(wialonHintText(data.reason, data.rangeDistanceKm));
       }
     }).catch(() => { if (!cancelled) setReturnHint(wialonHintText('wialon_error')); })
       .finally(() => { if (!cancelled) setReturnSnapshotLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail?.vehicle?.wialonUnitId, detailForm.returnDate]);
+  }, [detail?.vehicle?.wialonUnitId, detailForm.returnDate, detailForm.departureDate]);
 
   const recalculateFuel = async () => {
     if (!detail?.id) return;

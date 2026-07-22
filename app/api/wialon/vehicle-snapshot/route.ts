@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { getOdometerAtDate, getFuelLevelAtDate, WialonApiError } from '@/lib/wialon/client';
+import { getOdometerAtDate, getFuelLevelAtDate, getOfficialTripReport, WialonApiError } from '@/lib/wialon/client';
 
 // getOdometerAtDate прогоняет весь GPS-трек от даты до сейчас (getMileageFromTrack) — дороже
 // прямого запроса, поэтому глубину в прошлое ограничиваем ради отзывчивости интерактивного
@@ -29,6 +29,10 @@ export async function GET(req: NextRequest) {
 
     const wialonUnitId = req.nextUrl.searchParams.get('wialonUnitId');
     const datetimeParam = req.nextUrl.searchParams.get('datetime');
+    // Вторая (уже известная) граница рейса — если она есть, для "слишком старой" даты можно
+    // дать пробег ЗА ИНТЕРВАЛ через официальный отчёт Wialon (см. rangeDistanceKm ниже), у
+    // которого нет ограничения в 45 дней, вместо голого "введите вручную".
+    const rangeDatetimeParam = req.nextUrl.searchParams.get('rangeDatetime');
     if (!wialonUnitId || !datetimeParam) {
       return NextResponse.json({ error: 'Укажите wialonUnitId и datetime' }, { status: 400 });
     }
@@ -40,6 +44,8 @@ export async function GET(req: NextRequest) {
     if (isNaN(datetime.getTime())) {
       return NextResponse.json({ error: 'Некорректный datetime' }, { status: 400 });
     }
+    const rangeDatetime = rangeDatetimeParam ? new Date(rangeDatetimeParam) : null;
+    const hasValidRangeDatetime = rangeDatetime != null && !isNaN(rangeDatetime.getTime());
 
     const withinMileageWindow = Math.abs(Date.now() - datetime.getTime()) <= MILEAGE_TRACK_WINDOW_MS;
 
@@ -51,6 +57,21 @@ export async function GET(req: NextRequest) {
     ]);
 
     if (mileageResult.mileageKm == null && fuelResult.fuelLevelL == null) {
+      if (!withinMileageWindow && hasValidRangeDatetime) {
+        // Абсолютный одометр на старую дату официальный отчёт не даёт (он про дистанцию за
+        // интервал, не про показание счётчика) — зато можно честно посчитать пробег САМОГО
+        // рейса [departureDate, returnDate] тем же механизмом, что и кнопка "Пересчитать по
+        // Wialon" (getOfficialTripReport, exec_report Wialon), без ограничения по возрасту.
+        const from = datetime < rangeDatetime! ? datetime : rangeDatetime!;
+        const to = datetime < rangeDatetime! ? rangeDatetime! : datetime;
+        try {
+          const report = await getOfficialTripReport(unitId, from, to);
+          return NextResponse.json({ available: false, reason: 'too_old', rangeDistanceKm: report.mileageAllKm });
+        } catch (e) {
+          console.error('[wialon/vehicle-snapshot] official report fallback failed:', e);
+          return NextResponse.json({ available: false, reason: 'too_old' });
+        }
+      }
       return NextResponse.json({ available: false, reason: withinMileageWindow ? 'no_data' : 'too_old' });
     }
 
