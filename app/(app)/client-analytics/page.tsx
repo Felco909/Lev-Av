@@ -100,7 +100,7 @@ export default function ClientAnalyticsPage() {
             {sorted.map(r => (
               <tr key={r.clientId} className="border-b border-border/50 hover:bg-muted/30 transition">
                 <td className="px-3 py-2">
-                  <Link href={`/clients/${r.clientId}`} className="text-primary hover:underline font-medium">{r.clientName}</Link>
+                  <Link href={`/clients?search=${encodeURIComponent(r.clientName)}`} className="text-primary hover:underline font-medium">{r.clientName}</Link>
                 </td>
                 <td className="px-3 py-2 text-center">{r.tripCount}</td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{formatCurrency(r.revenue)}</td>

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Plus, Search, Pencil, Trash2, Users, Phone, Mail, MapPin, X, FileText, Upload, Loader2, ChevronDown, ChevronUp, FileDown, UserPlus, User } from 'lucide-react';
 
 const TEMPLATE_TYPES = [
@@ -8,9 +9,13 @@ const TEMPLATE_TYPES = [
 ] as const;
 
 export default function ClientsPage() {
+  const searchParams = useSearchParams();
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  // Инициализация из ?search= — ссылка "Аналитика по клиентам" -> клиент раньше вела на
+  // несуществующую /clients/[id] (такой страницы нет, только список); теперь ведёт сюда
+  // с готовым поиском по имени вместо 404.
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
   const [form, setForm] = useState({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', invoicePrefix: '\u0421\u0427', actPrefix: '\u0410\u041A\u0422', numberFormat: '{prefix}-{number}', resetNumberingYearly: false, paymentTermsDays: '' });
