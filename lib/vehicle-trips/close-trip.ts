@@ -141,6 +141,29 @@ export async function validateNoOverlappingVehicleTripDates(
   return null;
 }
 
+/**
+ * Номер рейса вводится вручную (см. `tripNumber` в POST/PUT /api/vehicle-trips) и обычно
+ * означает "рейс №N этой машины", а не глобальный номер — уникальность в рамках vehicleId
+ * не проверялась, из-за чего у одной машины могло появиться два разных рейса с одним и тем
+ * же номером (найдено на 796DE61 — архивный и активный рейс оба "№2").
+ */
+export async function validateUniqueTripNumberForVehicle(
+  vehicleId: string,
+  tripNumber: string,
+  excludeId?: string
+): Promise<string | null> {
+  const trimmed = tripNumber.trim();
+  if (!trimmed) return null;
+  const dup = await prisma.vehicleTrip.findFirst({
+    where: { vehicleId, tripNumber: trimmed, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true, status: true, departureDate: true },
+  });
+  if (dup) {
+    return `У этой машины уже есть рейс №${trimmed} (${fmtDateRu(dup.departureDate)}, статус: ${dup.status}) — выберите другой номер`;
+  }
+  return null;
+}
+
 interface VehicleTripExpenseFields {
   salaryAmd: unknown;
   perDiemAmd: unknown;

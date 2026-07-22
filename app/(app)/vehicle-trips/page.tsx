@@ -1184,7 +1184,7 @@ export default function VehicleTripsPage() {
             <div>
               <label className="text-xs text-muted-foreground">{'№ рейса'}</label>
               <input type="text" value={tripForm.tripNumber} onChange={e => setTripForm({...tripForm, tripNumber: e.target.value})}
-                className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5 font-mono" placeholder={'авто'} />
+                className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5 font-mono" placeholder={'авто — следующий номер этой машины'} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground">{'Машина'} *</label>

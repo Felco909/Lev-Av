@@ -2,17 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle } from '@/lib/vehicle-trips/close-trip';
 
 export const dynamic = 'force-dynamic';
 
-/* Generate next trip number: VT-0001 ... */
-async function nextTripNumber(): Promise<string> {
-  const last = await prisma.vehicleTrip.findFirst({ orderBy: { createdAt: 'desc' }, select: { tripNumber: true } });
-  if (!last?.tripNumber) return 'VT-0001';
-  const m = last.tripNumber.match(/(\d+)$/);
-  const n = m ? parseInt(m[1], 10) + 1 : 1;
-  return `VT-${String(n).padStart(4, '0')}`;
+/*
+ * Следующий номер рейса ДЛЯ ЭТОЙ МАШИНЫ — не глобальный счётчик. На практике номер рейса
+ * всегда означает "рейс №N этой машины" (так вводили вручную во всех реальных записях —
+ * простые "1", "2", "3" на машину), а не сквозной номер по всему парку. Раньше при пустом
+ * поле подставлялся глобальный "VT-0001" — выбивался из этой конвенции, поэтому им никто не
+ * пользовался и все номера вводили вручную, что и привело к дублю (см. 796DE61: два рейса
+ * с номером "2" — один архивный, один активный).
+ */
+async function nextTripNumberForVehicle(vehicleId: string): Promise<string> {
+  const rows = await prisma.vehicleTrip.findMany({ where: { vehicleId }, select: { tripNumber: true } });
+  let max = 0;
+  for (const r of rows) {
+    const m = r.tripNumber?.match(/(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return String(max + 1);
 }
 
 export async function GET(req: NextRequest) {
@@ -87,7 +96,10 @@ export async function POST(req: NextRequest) {
   );
   if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
 
-  const tripNumber = customTripNumber?.trim() || await nextTripNumber();
+  const tripNumber = customTripNumber?.trim() || await nextTripNumberForVehicle(vehicleId);
+
+  const dupNumberError = await validateUniqueTripNumberForVehicle(vehicleId, tripNumber);
+  if (dupNumberError) return NextResponse.json({ error: dupNumberError }, { status: 400 });
 
   // Per-expense AMD calculation
   const toAmd = (v: any, cur: string, rate: number) => {
@@ -192,6 +204,13 @@ export async function PUT(req: NextRequest) {
       const overlapError = await validateNoOverlappingVehicleTripDates(effectiveVehicleId, effectiveDepartureDate, effectiveReturnDate, id, effectiveStatus);
       if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
     }
+  }
+
+  if (tripNumber !== undefined || vehicleId !== undefined) {
+    const effectiveVehicleId = vehicleId ?? before.vehicleId;
+    const effectiveTripNumber = tripNumber !== undefined ? tripNumber.trim() : before.tripNumber;
+    const dupNumberError = await validateUniqueTripNumberForVehicle(effectiveVehicleId, effectiveTripNumber, id);
+    if (dupNumberError) return NextResponse.json({ error: dupNumberError }, { status: 400 });
   }
 
   const data: any = {};
