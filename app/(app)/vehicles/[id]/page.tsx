@@ -196,7 +196,7 @@ export default function VehicleDetailPage() {
                   {trips.slice(0, 20).map(t => (
                     <div key={t.id} className="flex items-center justify-between px-4 py-2 text-xs">
                       <span className="font-mono">{t.tripNumber}</span>
-                      <span>{formatDate(t.departureDate)} → {t.returnDate ? formatDate(t.returnDate) : 'в рейсе'}</span>
+                      <span>{formatDate(t.departureDate)} → {t.returnDate ? formatDate(t.returnDate) : (t.status === 'active' ? 'в рейсе' : '—')}</span>
                     </div>
                   ))}
                 </div>
