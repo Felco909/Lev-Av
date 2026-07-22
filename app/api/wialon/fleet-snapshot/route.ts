@@ -48,6 +48,7 @@ export async function GET() {
         lat: s?.lat ?? null,
         lon: s?.lon ?? null,
         speedKmh: s?.speedKmh ?? null,
+        headingDeg: s?.headingDeg ?? null,
         lastMessageAt: s?.lastMessageAt ? s.lastMessageAt.toISOString() : null,
         activeTripNumber: activeTrip?.tripNumber ?? null,
       };

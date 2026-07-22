@@ -869,6 +869,8 @@ export interface WialonFleetSnapshotItem {
   lat: number | null;
   lon: number | null;
   speedKmh: number | null;
+  /** Курс движения в градусах (0=север, 90=восток) — для поворота иконки на карте. */
+  headingDeg: number | null;
   /** Время последнего сообщения от трекера — по нему определяем "нет связи" в UI. */
   lastMessageAt: Date | null;
 }
@@ -917,6 +919,7 @@ export async function getFleetSnapshot(): Promise<WialonFleetSnapshotItem[]> {
       lat: typeof it.pos?.y === 'number' ? it.pos.y : null,
       lon: typeof it.pos?.x === 'number' ? it.pos.x : null,
       speedKmh: typeof it.pos?.s === 'number' ? it.pos.s : null,
+      headingDeg: typeof it.pos?.c === 'number' ? it.pos.c : null,
       lastMessageAt: typeof it.lmsg?.t === 'number' ? new Date(it.lmsg.t * 1000) : null,
     };
   });
