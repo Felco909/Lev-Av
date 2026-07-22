@@ -89,24 +89,49 @@ function fmtDateRu(d: Date): string {
  * без неё два рейса одной машины могут получить перекрывающиеся [departureDate, returnDate],
  * и заявки, попадающие в пересечение, задваиваются в расчёте дохода (см. разбор по 521DF61 —
  * там ошибка уже была в данных, эта проверка не пускает её повториться при вводе новых рейсов).
- * Рейс без returnDate (ещё в пути) считается открытым до бесконечности.
+ * Рейс без returnDate считается открытым до бесконечности ТОЛЬКО если он реально активен
+ * (status='active'). Архивный/завершённый рейс без returnDate (старые записи до внедрения
+ * обязательного закрытия) НЕ проверяем на пересечение вообще — у него нет надёжной верхней
+ * границы, и если считать его "открытым навсегда", он будет блокировать создание/закрытие
+ * вообще любых последующих рейсов этой машины. Тот же принцип, что и в resolveMatchRangeEnd
+ * (lib/vehicle-trips/revenue.ts) для расчёта дохода — там такой рейс тоже не считается
+ * открытым до сегодня, а ограничивается датой выезда следующего рейса.
  */
 export async function validateNoOverlappingVehicleTripDates(
   vehicleId: string,
   departureDate: Date,
   returnDate: Date | null,
-  excludeId?: string
+  excludeId?: string,
+  status?: string
 ): Promise<string | null> {
   const FAR_FUTURE = new Date(8640000000000000);
-  const newEnd = returnDate ?? FAR_FUTURE;
+  let newEnd: Date;
+  if (returnDate) {
+    newEnd = returnDate;
+  } else if (status === undefined || status === 'active') {
+    // status не передан (POST — новый рейс всегда 'active' без returnDate или 'completed' с
+    // returnDate, см. вызывающий код) либо реально активен — считаем открытым до сегодня/будущего.
+    newEnd = FAR_FUTURE;
+  } else {
+    // Тот же самый рейс, что и "other" ниже: архивный/завершённый без returnDate — нет
+    // надёжной границы, пропускаем проверку целиком для этого сохранения.
+    return null;
+  }
 
   const others = await prisma.vehicleTrip.findMany({
     where: { vehicleId, ...(excludeId ? { id: { not: excludeId } } : {}) },
-    select: { id: true, tripNumber: true, departureDate: true, returnDate: true },
+    select: { id: true, tripNumber: true, status: true, departureDate: true, returnDate: true },
   });
 
   for (const other of others) {
-    const otherEnd = other.returnDate ?? FAR_FUTURE;
+    let otherEnd: Date;
+    if (other.returnDate) {
+      otherEnd = other.returnDate;
+    } else if (other.status === 'active') {
+      otherEnd = FAR_FUTURE;
+    } else {
+      continue; // архивный/завершённый рейс без returnDate — не проверяем, см. комментарий выше
+    }
     const overlaps = other.departureDate.getTime() <= newEnd.getTime() && otherEnd.getTime() >= departureDate.getTime();
     if (overlaps) {
       const otherRange = `${fmtDateRu(other.departureDate)} → ${other.returnDate ? fmtDateRu(other.returnDate) : 'ещё в пути'}`;

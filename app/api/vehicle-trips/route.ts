@@ -81,7 +81,9 @@ export async function POST(req: NextRequest) {
   const overlapError = await validateNoOverlappingVehicleTripDates(
     vehicleId,
     new Date(departureDate),
-    returnDate ? new Date(returnDate) : null
+    returnDate ? new Date(returnDate) : null,
+    undefined,
+    returnDate ? 'completed' : 'active'
   );
   if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
 
@@ -172,11 +174,24 @@ export async function PUT(req: NextRequest) {
     if (odometerError) return NextResponse.json({ error: odometerError }, { status: 400 });
   }
 
-  if (departureDate !== undefined || returnDate !== undefined || vehicleId !== undefined) {
+  {
+    const effectiveVehicleId = vehicleId ?? before.vehicleId;
     const effectiveDepartureDate = departureDate !== undefined ? new Date(departureDate) : before.departureDate;
     const effectiveReturnDate = returnDate !== undefined ? (returnDate ? new Date(returnDate) : null) : before.returnDate;
-    const overlapError = await validateNoOverlappingVehicleTripDates(vehicleId ?? before.vehicleId, effectiveDepartureDate, effectiveReturnDate, id);
-    if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
+    // Проверяем пересечение только если даты/машина РЕАЛЬНО меняются — иначе форма карточки
+    // рейса (которая всегда шлёт даты в body, даже если их не трогали) заблокировала бы
+    // сохранение любого не связанного с датами поля (расходы, заметки и т.п.) у СТАРЫХ
+    // рейсов без returnDate, которые и так уже корректно обрабатываются при расчёте дохода
+    // (см. resolveMatchRangeEnd) — это не тот же случай, что 521DF61 (там обе даты были
+    // явно заданы и реально пересекались).
+    const datesChanged = effectiveVehicleId !== before.vehicleId
+      || effectiveDepartureDate.getTime() !== before.departureDate.getTime()
+      || (effectiveReturnDate?.getTime() ?? null) !== (before.returnDate?.getTime() ?? null);
+    if (datesChanged) {
+      const effectiveStatus = st !== undefined ? st : before.status;
+      const overlapError = await validateNoOverlappingVehicleTripDates(effectiveVehicleId, effectiveDepartureDate, effectiveReturnDate, id, effectiveStatus);
+      if (overlapError) return NextResponse.json({ error: overlapError }, { status: 400 });
+    }
   }
 
   const data: any = {};
