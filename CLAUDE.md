@@ -42,6 +42,12 @@ profit = clientRateAmd + totalClientExpensesAmd - carrierRateAmd - totalCarrierE
 `admin`, `owner`, `director`, `accountant` — правка `clientPaidAmount*`/`carrierPaidAmount*`/статусов оплаты.
 `dispatcher` дополнительно допущен к номерам счёта/акта и генерации PDF/DOCX по заявке.
 
+Доход собственного транспорта (рейс/машина/парк) — с 22.07.2026 считается ТОЛЬКО через явную
+связь `Trip.vehicleTripId` (`lib/finance/own-fleet-income.ts`), даты заявки/рейса в расчёте
+не участвуют. Заявка без рейса — нормальное переходное состояние («Ожидают привязки»,
+`lib/vehicle-trips/attach-service.ts`), в доход не входит, пока не привязана явно. Подробности
+миграции (было/стало, что устарело): `docs/own-fleet-income-migration.md`.
+
 ## Известные проблемные зоны (не наступать повторно)
 1. **OneDrive / Postgres** — это НЕ периодическая проблема, а разовый инцидент, разобранный
    и закрытый 07.07.2026. Причина (подтверждено по реестру и меткам времени): обновление

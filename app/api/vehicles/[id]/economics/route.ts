@@ -8,10 +8,10 @@ import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 
 /**
  * GET /api/vehicles/[id]/economics — общий доход/расходы/прибыль машины по всем её рейсам
- * (карточка машины). Этап 3 миграции на архитектуру "заявка → рейс": доход — сумма заявок,
- * ЯВНО привязанных к каждому рейсу (Trip.vehicleTripId), даты в расчёте не участвуют.
- * ЕДИНЫЙ источник расходов — computeVehicleTripFinancials (lib/vehicle-trips/revenue.ts),
- * та же функция, что у карточки рейса и /api/vehicle-analytics. Не путать с
+ * (карточка машины). Доход — сумма заявок, ЯВНО привязанных к каждому рейсу
+ * (Trip.vehicleTripId, см. lib/finance/own-fleet-income.ts), даты в расчёте не участвуют.
+ * Расходы — computeVehicleTripExpensesAmd (lib/vehicle-trips/close-trip.ts), та же функция,
+ * что у карточки рейса, /api/vehicle-analytics и /api/director-finance. Не путать с
  * computeExpeditionProfitAmd/computeOwnTransportProfitAmd в lib/finance/finance-metrics-service.ts —
  * это другая, не идентичная логика для другого модуля (см. CLAUDE.md).
  */

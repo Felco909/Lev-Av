@@ -3,17 +3,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { findMatchingTrips, sumRevenueAmd, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
-
 /**
- * POST /api/vehicle-trips/[id]/recalculate-income — пересчёт состава заявок и дохода
- * ПОСЛЕ ручной правки дат уже закрытого рейса ("Доработка логики рейсов", п.8): нельзя
- * автоматически менять архивные финансовые данные — только explicit-подтверждением.
+ * POST /api/vehicle-trips/[id]/recalculate-income — обновление замороженного дохода
+ * ЗАКРЫТОГО рейса по УЖЕ явно привязанным заявкам (Trip.vehicleTripId), например если
+ * ставка одной из них была исправлена после закрытия. Состав заявок (сама привязка)
+ * этим эндпоинтом больше не трогается и не пересобирается по датам — после закрытия
+ * состав зафиксирован и не подлежит изменению (см. архитектуру "заявка → рейс"),
+ * меняется только пересчитанная сумма по тому же набору.
  *
  * body: { confirm?: boolean } — без confirm (или confirm=false) отдаёт предпросмотр
- * (какие заявки войдут по текущим датам рейса, на какую сумму), НИЧЕГО не сохраняя.
- * confirm=true — применяет: обновляет привязку заявок (Trip.vehicleTripId) и
- * finalRevenueAmd, пишет запись в журнал.
+ * (текущий состав и сумма по нему), НИЧЕГО не сохраняя. confirm=true — применяет:
+ * обновляет finalRevenueAmd, пишет запись в журнал.
  */
 export async function POST(req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = await paramsPromise;
@@ -30,12 +30,16 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     return NextResponse.json({ error: 'Пересчёт с подтверждением нужен только для закрытых рейсов' }, { status: 400 });
   }
 
-  const siblings = await prisma.vehicleTrip.findMany({
-    where: { vehicleId: trip.vehicleId, id: { not: trip.id } },
-    select: { id: true, vehicleId: true, departureDate: true },
+  const linkedTrips = await prisma.trip.findMany({
+    where: { vehicleTripId: trip.id },
+    select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
+    orderBy: { tripDate: 'asc' },
   });
-  const matched = await findMatchingTrips(trip.vehicleId, trip.departureDate, resolveMatchRangeEnd(trip, siblings));
-  const newRevenueAmd = sumRevenueAmd(matched);
+  const matched = linkedTrips.map((t) => ({
+    id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
+    clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
+  }));
+  const newRevenueAmd = matched.reduce((s, t) => s + t.clientRateAmd, 0);
   const oldRevenueAmd = trip.finalRevenueAmd != null ? Number(trip.finalRevenueAmd) : null;
 
   if (!confirm) {
@@ -48,13 +52,8 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     });
   }
 
-  // Снимаем старую привязку (могли уйти заявки, не попадающие в новый диапазон дат) и
-  // проставляем новую — набор, зафиксированный при закрытии, полностью заменяется.
-  await prisma.trip.updateMany({ where: { vehicleTripId: trip.id }, data: { vehicleTripId: null } });
-  if (matched.length > 0) {
-    await prisma.trip.updateMany({ where: { id: { in: matched.map((t) => t.id) } }, data: { vehicleTripId: trip.id } });
-  }
-
+  // Привязку заявок НЕ трогаем — состав закрытого рейса зафиксирован (см. архитектуру
+  // "заявка → рейс"), пересчитывается только сумма по уже привязанному набору.
   const updated = await prisma.vehicleTrip.update({
     where: { id: trip.id },
     data: { finalRevenueAmd: newRevenueAmd },
