@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { computeAggregateMetrics, computeBreakdownTotals, computeMetricRowsForTrips, getTripSplitExpenseTotalsAmd } from '@/lib/finance/finance-metrics-service';
 import type { FinancePaymentInput, FinanceTripInput } from '@/lib/finance/types';
+import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 
 function ymd(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -88,6 +89,37 @@ export async function GET(req: Request) {
     const rows = computeMetricRowsForTrips(tripInputs, payments);
     const aggregate = computeAggregateMetrics(rows);
     const breakdown = computeBreakdownTotals(rows);
+
+    // "Собственный транспорт" — расход считаем НЕ из Trip.expenses (там для своих машин
+    // почти всегда пусто — реальные расходы по рейсу машины лежат на VehicleTrip: зарплата,
+    // суточные x3, прочее, топливо, + FleetExpense), а из VehicleTrip напрямую, тем же
+    // computeVehicleTripExpensesAmd, что уже используют карточка рейса, /vehicles/[id]/economics
+    // и /api/vehicle-analytics — тот же расчёт, что уже даёт верную сумму на дашборде
+    // ("Собственный автопарк"). Раньше расход по своим машинам был систематически 0.
+    // Доход (breakdown.ownTransport.incomeAmd, ниже) НЕ трогаем и не переводим на матчинг
+    // по VehicleTrip: 13 из 39 заявок own_transport не привязаны ни к одному VehicleTrip
+    // (более старые заявки без заведённого рейса машины) — при матчинге их доход просто
+    // исчез бы из отчёта. Доход и расход тут — две независимые суммы по одной и той же
+    // теме "свой транспорт", не попарно сопоставленные по рейсам, как на дашборде.
+    const vehicleTripWhere: any = {};
+    if (dateFrom || dateTo) {
+      vehicleTripWhere.departureDate = {};
+      if (dateFrom) vehicleTripWhere.departureDate.gte = new Date(dateFrom);
+      if (dateTo) vehicleTripWhere.departureDate.lte = new Date(dateTo);
+    }
+    const vehicleTrips = await prisma.vehicleTrip.findMany({
+      where: vehicleTripWhere,
+      select: {
+        finalExpensesAmd: true,
+        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
+        otherExpensesAmd: true, fuelCostAmd: true,
+        fleetExpenses: { select: { amountAmd: true } },
+      },
+    });
+    const ownFleetExpenseAmd = vehicleTrips.reduce(
+      (sum, vt) => sum + (vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt)),
+      0
+    );
     const metaByTripId = new Map(
       trips.map((t) => [
         t.id,
@@ -186,8 +218,8 @@ export async function GET(req: Request) {
       kpi,
       ownTransport: {
         incomeAmd: breakdown.ownTransport.incomeAmd,
-        expenseAmd: breakdown.ownTransport.expenseAmd,
-        profitAmd: breakdown.ownTransport.profitAmd,
+        expenseAmd: Math.round(ownFleetExpenseAmd),
+        profitAmd: Math.round(breakdown.ownTransport.incomeAmd - ownFleetExpenseAmd),
       },
       expedition: {
         incomeAmd: breakdown.expedition.incomeAmd,
