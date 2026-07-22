@@ -298,7 +298,9 @@ export default function VehicleTripsPage() {
           departureLon: data.lon != null ? String(data.lon) : prev.departureLon,
         }));
         setDepartureHint(
-          data.isApproximate
+          data.mileageKm == null && data.rangeDistanceKm != null
+            ? wialonHintText('too_old', data.rangeDistanceKm)
+            : data.isApproximate
             ? 'Ближайшее найденное показание Wialon не точно на этот момент (машина могла быть вне сети) — проверьте вручную'
             : null
         );
@@ -328,7 +330,9 @@ export default function VehicleTripsPage() {
           returnLon: data.lon != null ? String(data.lon) : prev.returnLon,
         }));
         setReturnHint(
-          data.isApproximate
+          data.mileageKm == null && data.rangeDistanceKm != null
+            ? wialonHintText('too_old', data.rangeDistanceKm)
+            : data.isApproximate
             ? 'Ближайшее найденное показание Wialon не точно на этот момент (машина могла быть вне сети) — проверьте вручную'
             : null
         );

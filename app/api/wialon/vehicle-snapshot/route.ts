@@ -56,23 +56,31 @@ export async function GET(req: NextRequest) {
       getFuelLevelAtDate(unitId, datetime).catch(() => ({ fuelLevelL: null, measuredAt: null, lat: null, lon: null, raw: {} })),
     ]);
 
-    if (mileageResult.mileageKm == null && fuelResult.fuelLevelL == null) {
-      if (!withinMileageWindow && hasValidRangeDatetime) {
-        // Абсолютный одометр на старую дату официальный отчёт не даёт (он про дистанцию за
-        // интервал, не про показание счётчика) — зато можно честно посчитать пробег САМОГО
-        // рейса [departureDate, returnDate] тем же механизмом, что и кнопка "Пересчитать по
-        // Wialon" (getOfficialTripReport, exec_report Wialon), без ограничения по возрасту.
-        const from = datetime < rangeDatetime! ? datetime : rangeDatetime!;
-        const to = datetime < rangeDatetime! ? rangeDatetime! : datetime;
-        try {
-          const report = await getOfficialTripReport(unitId, from, to);
-          return NextResponse.json({ available: false, reason: 'too_old', rangeDistanceKm: report.mileageAllKm });
-        } catch (e) {
-          console.error('[wialon/vehicle-snapshot] official report fallback failed:', e);
-          return NextResponse.json({ available: false, reason: 'too_old' });
-        }
+    // Абсолютный одометр на старую дату официальный отчёт не даёт (он про дистанцию за интервал,
+    // не про показание счётчика) — зато можно честно посчитать пробег интервала между `datetime`
+    // и `rangeDatetime` тем же механизмом, что и кнопка "Пересчитать по Wialon"
+    // (getOfficialTripReport, exec_report Wialon), без ограничения в 45 дней. Считаем его
+    // ВСЕГДА, когда сам пробег недоступен из-за возраста даты — независимо от того, нашлось ли
+    // топливо (иначе пробел: топливо есть => ветка "available" ниже, а rangeDistanceKm так и не
+    // считался, хотя пробег всё равно null).
+    let rangeDistanceKm: number | null = null;
+    if (mileageResult.mileageKm == null && !withinMileageWindow && hasValidRangeDatetime) {
+      const from = datetime < rangeDatetime! ? datetime : rangeDatetime!;
+      const to = datetime < rangeDatetime! ? rangeDatetime! : datetime;
+      try {
+        const report = await getOfficialTripReport(unitId, from, to);
+        rangeDistanceKm = report.mileageAllKm;
+      } catch (e) {
+        console.error('[wialon/vehicle-snapshot] official report fallback failed:', e);
       }
-      return NextResponse.json({ available: false, reason: withinMileageWindow ? 'no_data' : 'too_old' });
+    }
+
+    if (mileageResult.mileageKm == null && fuelResult.fuelLevelL == null) {
+      return NextResponse.json({
+        available: false,
+        reason: withinMileageWindow ? 'no_data' : 'too_old',
+        ...(rangeDistanceKm != null ? { rangeDistanceKm } : {}),
+      });
     }
 
     const fuelDiffSec = typeof fuelResult.raw?.diffSeconds === 'number' ? fuelResult.raw.diffSeconds : null;
@@ -86,6 +94,7 @@ export async function GET(req: NextRequest) {
       lon: fuelResult.lon,
       measuredAt: fuelResult.measuredAt ? fuelResult.measuredAt.toISOString() : null,
       isApproximate,
+      ...(rangeDistanceKm != null ? { rangeDistanceKm } : {}),
     });
   } catch (e: any) {
     console.error('[wialon/vehicle-snapshot] error:', e);
