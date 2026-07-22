@@ -20,6 +20,7 @@ interface LiveSnapshot {
 interface TripRow {
   id: string; tripNumber: string; departureDate: string; returnDate: string | null;
   status: string; startMileage: number | null; endMileage: number | null;
+  calculatedKm: number | null;
   driver: { fullName: string } | null;
 }
 interface ServiceRecordRow {
@@ -29,6 +30,21 @@ interface ServiceRecordRow {
 interface Economics { tripsCount: number; totalRevenue: number; totalExpenses: number; profit: number }
 
 const STALE_MS = 30 * 60 * 1000;
+
+/**
+ * Пробег рейса для отображения — предпочитаем calculatedKm (официальный отчёт Wialon,
+ * см. lib/wialon/calculateTripFuel.ts), а не разницу одометра: показания одометра вводятся
+ * вручную и могут быть недостоверны (см. найденные несостыковки по нескольким машинам —
+ * 521DF61 показывал бы "0 км" при реальных calculatedKm=10677). Разница одометра — только
+ * запасной вариант, если рейс ещё не пересчитан по Wialon.
+ */
+function tripDistanceKm(t: TripRow): number | null {
+  if (t.calculatedKm != null) return Math.round(t.calculatedKm);
+  if (t.startMileage != null && t.endMileage != null && t.endMileage >= t.startMileage) {
+    return t.endMileage - t.startMileage;
+  }
+  return null;
+}
 
 export default function VehicleDetailPage() {
   const params = useParams();
@@ -139,7 +155,7 @@ export default function VehicleDetailPage() {
                     <span className="font-mono font-medium">{t.tripNumber}</span>
                     <span className="text-muted-foreground">{t.driver?.fullName || '—'}</span>
                     <span>{formatDate(t.departureDate)}{t.returnDate ? ` → ${formatDate(t.returnDate)}` : ''}</span>
-                    <span className="font-mono">{t.startMileage != null && t.endMileage != null ? `${(t.endMileage - t.startMileage).toLocaleString('ru-RU')} км` : '—'}</span>
+                    <span className="font-mono">{tripDistanceKm(t) != null ? `${tripDistanceKm(t)!.toLocaleString('ru-RU')} км` : '—'}</span>
                   </Link>
                 ))}
               </div>
