@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { matchTripsInRange, computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
+import { matchTripsInRange, computeVehicleTripFinancials, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
 
 /**
  * GET /api/vehicles/[id]/economics — общий доход/расходы/прибыль машины по всем её рейсам
@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
   const vehicleTrips = await prisma.vehicleTrip.findMany({
     where: { vehicleId: params.id },
     select: {
-      departureDate: true, returnDate: true,
+      id: true, vehicleId: true, departureDate: true, returnDate: true,
       finalRevenueAmd: true, finalExpensesAmd: true,
       salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
       otherExpensesAmd: true, fuelCostAmd: true,
@@ -45,7 +45,7 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
   let totalExpenses = 0;
   for (const vt of vehicleTrips) {
     const matched = vt.finalRevenueAmd == null
-      ? matchTripsInRange(allTrips, params.id, vt.departureDate, vt.returnDate ?? new Date())
+      ? matchTripsInRange(allTrips, params.id, vt.departureDate, resolveMatchRangeEnd(vt, vehicleTrips))
       : [];
     const { revenue, totalExpenses: expenses } = computeVehicleTripFinancials(vt, matched);
     totalRevenue += revenue;

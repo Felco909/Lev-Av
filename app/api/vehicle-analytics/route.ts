@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeCostPerKmAmd, computeProfitabilityRatio, computeProfitPerKmAmd } from '@/lib/finance/formulas';
-import { matchTripsInRange, computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
+import { matchTripsInRange, computeVehicleTripFinancials, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
 
 /**
  * GET /api/vehicle-analytics — аналитика по каждой машине (Этап 8, пересмотрено —
@@ -56,7 +56,7 @@ export async function GET() {
       // Финансы каждого рейса считаем один раз (используются и в итоге, и в помесячной разбивке).
       const perTrip = vTrips.map((vt) => {
         const matched = vt.finalRevenueAmd == null
-          ? matchTripsInRange(allTrips, vehicle.id, vt.departureDate, vt.returnDate ?? new Date())
+          ? matchTripsInRange(allTrips, vehicle.id, vt.departureDate, resolveMatchRangeEnd(vt, vTrips))
           : [];
         const financials = computeVehicleTripFinancials(vt, matched);
         // Пробег — только официальный отчёт Wialon (calculatedKm), тот же источник, что и

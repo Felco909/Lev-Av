@@ -66,6 +66,44 @@ export function matchTripsInRange(allTrips: TripSourceRow[], vehicleId: string, 
     .map(toMatchedTrip);
 }
 
+export interface VehicleTripBoundaryLike {
+  id?: string;
+  vehicleId: string;
+  departureDate: Date;
+  /** Не читается для элементов siblings — нужен только у самого vt (первый аргумент). */
+  returnDate?: Date | null;
+}
+
+/**
+ * Верхняя граница диапазона сопоставления заявок для НЕзамороженного рейса машины (когда
+ * returnDate ещё не задан). Обычно это "сейчас" — рейс ещё активен. Но если рейс
+ * архивный/устаревший без returnDate (старые записи до внедрения обязательного закрытия
+ * через .../close — см. разбор по 796DE61: VehicleTrip cmp83q5oc... в статусе "archived"
+ * с returnDate=null), диапазон "до сейчас" растягивается до сегодняшнего дня и перекрывает
+ * диапазон следующего рейса той же машины — каждая заявка следующего рейса засчитывается
+ * ДВАЖДЫ (и там, и там), а сам следующий рейс визуально выглядит "потерявшим" часть заявок,
+ * если смотреть только на разницу сумм. Поэтому верхняя граница не может быть позже даты
+ * выезда следующего (по departureDate) рейса той же машины, если такой рейс уже есть.
+ */
+export function resolveMatchRangeEnd(vt: VehicleTripBoundaryLike, siblings: VehicleTripBoundaryLike[]): Date {
+  if (vt.returnDate) return vt.returnDate;
+  let nextDeparture: Date | null = null;
+  for (const other of siblings) {
+    if (other.vehicleId !== vt.vehicleId) continue;
+    if (vt.id != null && other.id === vt.id) continue;
+    if (other.departureDate.getTime() <= vt.departureDate.getTime()) continue;
+    if (nextDeparture == null || other.departureDate.getTime() < nextDeparture.getTime()) nextDeparture = other.departureDate;
+  }
+  if (nextDeparture == null) return new Date();
+  // matchTripsInRange/findMatchingTrips включают обе границы диапазона (tripDate >= from И
+  // <= to). Следующий рейс той же машины тоже включает СВОЮ дату выезда как нижнюю границу
+  // (>= nextDeparture) — если вернуть nextDeparture как есть, заявка, датированная РОВНО
+  // днём выезда следующего рейса, попадёт в оба диапазона сразу (см. 055TT20,
+  // TMS-2026-0107 от 18.06 — ровно дата выезда второго рейса). Отступаем на 1мс, чтобы
+  // граница была исключающей и заявка на стыке однозначно доставалась следующему рейсу.
+  return new Date(nextDeparture.getTime() - 1);
+}
+
 export function sumRevenueAmd(matched: MatchedTrip[]): number {
   return matched.reduce((s, t) => s + t.clientRateAmd, 0);
 }

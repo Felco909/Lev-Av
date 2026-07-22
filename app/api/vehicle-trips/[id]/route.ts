@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { findMatchingTrips, computeVehicleTripFinancials } from '@/lib/vehicle-trips/revenue';
+import { findMatchingTrips, computeVehicleTripFinancials, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,17 +38,28 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   if (!vt) return NextResponse.json({ error: 'Не найден' }, { status: 404 });
 
   // matchedTrips — для отображения списка заявок. Закрытый рейс: список зафиксирован
-  // (Trip.vehicleTripId проставлен при закрытии). Активный: live-подбор по датам.
-  const matchedTrips = vt.finalRevenueAmd != null
-    ? await prisma.trip.findMany({
-        where: { vehicleTripId: vt.id },
-        select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
-        orderBy: { tripDate: 'asc' },
-      }).then((rows) => rows.map((t) => ({
-        id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
-        clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
-      })))
-    : await findMatchingTrips(vt.vehicleId, vt.departureDate, vt.returnDate ?? new Date());
+  // (Trip.vehicleTripId проставлен при закрытии). Активный: live-подбор по датам, ограниченный
+  // датой выезда следующего рейса той же машины (см. resolveMatchRangeEnd) — без этого рейс
+  // без returnDate "переезжает" в бесконечность и задваивает заявки следующего рейса.
+  let matchedTrips;
+  if (vt.finalRevenueAmd != null) {
+    const rows = await prisma.trip.findMany({
+      where: { vehicleTripId: vt.id },
+      select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
+      orderBy: { tripDate: 'asc' },
+    });
+    matchedTrips = rows.map((t) => ({
+      id: t.id, tripNumber: t.tripNumber, routeFrom: t.routeFrom, routeTo: t.routeTo, tripDate: t.tripDate,
+      clientRateAmd: Number(t.clientRateAmd || t.clientRate || 0), clientName: t.client?.name ?? null,
+    }));
+  } else {
+    const siblings = await prisma.vehicleTrip.findMany({
+      where: { vehicleId: vt.vehicleId, id: { not: vt.id } },
+      select: { id: true, vehicleId: true, departureDate: true },
+    });
+    const rangeEnd = resolveMatchRangeEnd(vt, siblings);
+    matchedTrips = await findMatchingTrips(vt.vehicleId, vt.departureDate, rangeEnd);
+  }
 
   // ЕДИНЫЙ источник дохода/расходов/прибыли (lib/vehicle-trips/revenue.ts) — та же функция,
   // что использует /api/vehicles/[id]/economics и /api/vehicle-analytics, чтобы карточка

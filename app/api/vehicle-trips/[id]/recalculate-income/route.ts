@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { findMatchingTrips, sumRevenueAmd } from '@/lib/vehicle-trips/revenue';
+import { findMatchingTrips, sumRevenueAmd, resolveMatchRangeEnd } from '@/lib/vehicle-trips/revenue';
 
 /**
  * POST /api/vehicle-trips/[id]/recalculate-income — пересчёт состава заявок и дохода
@@ -30,7 +30,11 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     return NextResponse.json({ error: 'Пересчёт с подтверждением нужен только для закрытых рейсов' }, { status: 400 });
   }
 
-  const matched = await findMatchingTrips(trip.vehicleId, trip.departureDate, trip.returnDate ?? new Date());
+  const siblings = await prisma.vehicleTrip.findMany({
+    where: { vehicleId: trip.vehicleId, id: { not: trip.id } },
+    select: { id: true, vehicleId: true, departureDate: true },
+  });
+  const matched = await findMatchingTrips(trip.vehicleId, trip.departureDate, resolveMatchRangeEnd(trip, siblings));
   const newRevenueAmd = sumRevenueAmd(matched);
   const oldRevenueAmd = trip.finalRevenueAmd != null ? Number(trip.finalRevenueAmd) : null;
 
