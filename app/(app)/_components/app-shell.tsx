@@ -45,7 +45,6 @@ const navGroups: NavGroup[] = [
     { href: '/dashboard', label: 'Главная', icon: LayoutDashboard },
     { href: '/day-tasks', label: 'Лист дня', icon: CalendarDays },
     { href: '/director-finance', label: 'Финансы директора', icon: PieChart },
-    { href: '/daily-reports', label: 'Ежедневные отчёты', icon: BarChart3 },
     { href: '/trips', label: 'Заявки', icon: Route },
     { href: '/calendar', label: 'Календарь', icon: CalendarDays },
     { href: '/documents', label: 'Документы', icon: FolderOpen },
