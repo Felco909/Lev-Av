@@ -579,6 +579,7 @@ export default function VehicleTripsPage() {
   // пересчитать" шага больше не требуется.
   const saveDetailForm = async () => {
     if (!detail) return;
+    const vehicleChanged = detailForm.vehicleId !== detail.vehicleId;
     setDetailSaving(true);
     setDetailSaveError(null);
     try {
@@ -594,6 +595,20 @@ export default function VehicleTripsPage() {
       }
       await loadDetail(detail.id);
       await load();
+      // Машину сменили — предложить привязать свободные заявки НОВОЙ машины, тем же
+      // образом, что и при создании рейса (см. saveTripForm). При смене машины старых
+      // привязанных заявок у рейса уже нет (см. проверку в PUT), так что подходит любой
+      // случай "рейс без заявок этой машины".
+      if (vehicleChanged) {
+        const unRes = await fetch(`/api/trips/unattached?vehicleId=${detailForm.vehicleId}&excludeVehicleTripId=${detail.id}`);
+        const unData = await unRes.json().catch(() => null);
+        const candidates = Array.isArray(unData?.trips) ? unData.trips : [];
+        if (candidates.length > 0) {
+          setSuggestTrips(candidates);
+          setSuggestForVehicleTripId(detail.id);
+          setSuggestSelected(new Set());
+        }
+      }
     } finally { setDetailSaving(false); }
   };
 
