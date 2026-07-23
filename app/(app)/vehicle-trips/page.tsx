@@ -105,6 +105,26 @@ interface ExpForm {
 
 const CURRENCIES = ['AMD', 'RUB', 'USD', 'GEL', 'EUR'];
 
+// Ереван — фиксированный UTC+4 без перехода на летнее время (подтверждено Get-TimeZone на
+// проде: "Caucasus Standard Time", SupportsDaylightSavingTime=False), поэтому смещение можно
+// жёстко зашить, не таская Intl/timezone-библиотеку.
+const YEREVAN_OFFSET_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * UTC-момент (ISO-строка из API или Date) -> "YYYY-MM-DDTHH:mm" местного ереванского времени
+ * для value input[type=datetime-local]. Раньше здесь была наивная `.slice(0, 16)` прямо на
+ * UTC-строке — это отображало "сырые" UTC-цифры, подписанные как будто местное время, и при
+ * любом сохранении формы (сервер тоже в UTC+4 и парсит строку без смещения как своё локальное)
+ * дата тихо уезжала на -4 часа, причём накопительно при повторных сохранениях. Проверено вживую
+ * 23.07.2026 (закрытие/переоткрытие тестового рейса на проде).
+ */
+function toYerevanLocalInputValue(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() + YEREVAN_OFFSET_MS).toISOString().slice(0, 16);
+}
+
 function wialonHintText(reason?: string, rangeDistanceKm?: number | null): string {
   if (reason === 'too_old') {
     if (rangeDistanceKm != null) {
@@ -117,7 +137,7 @@ function wialonHintText(reason?: string, rangeDistanceKm?: number | null): strin
 }
 
 const emptyTripForm = (): TripForm => ({
-  tripNumber: '', vehicleId: '', driverId: '', departureDate: new Date().toISOString().slice(0, 16),
+  tripNumber: '', vehicleId: '', driverId: '', departureDate: toYerevanLocalInputValue(new Date()),
   departureLat: '', departureLon: '',
   startMileage: '', startFuel: '', returnDate: '', returnLat: '', returnLon: '',
   endMileage: '', endFuel: '', notes: '', status: 'active',
@@ -139,12 +159,12 @@ function mapVtToForm(r: VT): TripForm {
   return {
     id: r.id, tripNumber: r.tripNumber || '',
     vehicleId: r.vehicleId, driverId: r.driverId || '',
-    departureDate: r.departureDate?.slice(0, 16) || '',
+    departureDate: toYerevanLocalInputValue(r.departureDate),
     departureLat: r.departureLat != null ? String(r.departureLat) : '',
     departureLon: r.departureLon != null ? String(r.departureLon) : '',
     startMileage: r.startMileage != null ? String(r.startMileage) : '',
     startFuel: r.startFuel != null ? String(Number(r.startFuel)) : '',
-    returnDate: r.returnDate?.slice(0, 16) || '',
+    returnDate: toYerevanLocalInputValue(r.returnDate),
     returnLat: r.returnLat != null ? String(r.returnLat) : '',
     returnLon: r.returnLon != null ? String(r.returnLon) : '',
     endMileage: r.endMileage != null ? String(r.endMileage) : '',
@@ -579,7 +599,7 @@ export default function VehicleTripsPage() {
 
   // --- Закрытие рейса вручную ("Доработка логики рейсов") ---
   const openCloseModal = () => {
-    setCloseDateTime(new Date().toISOString().slice(0, 16));
+    setCloseDateTime(toYerevanLocalInputValue(new Date()));
     setCloseError(null);
     setCloseUnattached([]); setCloseUnattachedSelected(new Set());
     setShowCloseModal(true);
