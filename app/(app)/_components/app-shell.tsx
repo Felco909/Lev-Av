@@ -64,6 +64,7 @@ const navGroups: NavGroup[] = [
     { href: '/vehicle-trips', label: 'Рейсы машин', icon: TrendingUp },
     { href: '/vehicle-analytics', label: 'Аналитика машин', icon: BarChart3 },
     { href: '/maintenance', label: 'Техобслуживание', icon: Wrench },
+    { href: '/fuel', label: 'Топливо', icon: Fuel },
     { href: '/expiry', label: 'Сроки документов', icon: ShieldAlert },
   ]},
   { group: 'Телематика', items: [
