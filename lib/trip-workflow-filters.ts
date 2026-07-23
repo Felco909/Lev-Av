@@ -5,6 +5,7 @@ export const PAYMENT_REMINDER_EXCLUDED_STATUSES = [
   'archived',
   'new',
   'in_progress',
+  'cancelled',
 ] as const;
 
 /** Статусы, исключаемые из активной дебиторки / кредиторки. */
@@ -15,6 +16,7 @@ export const ACTIVE_RECEIVABLE_EXCLUDED_STATUSES = [
   'new',
   'in_progress',
   'unloaded',
+  'cancelled',
 ] as const;
 
 /** «На оплату» — дебиторка, срок и просрочка. */
@@ -44,6 +46,7 @@ export const TRIP_STATUS_LABELS_RU: Record<string, string> = {
   completed: 'Оплачен / Завершён',
   paid: 'Оплачен / Завершён',
   archived: 'Архив',
+  cancelled: 'Отменена',
 };
 
 export function prismaPaymentReminderExcludedStatuses(): string[] {

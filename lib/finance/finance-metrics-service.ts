@@ -51,6 +51,28 @@ export function computeTripFinanceMetrics(trip: FinanceTripInput, payments: Fina
   const clientPaidAmd = sumPaymentsAmd(payments, trip.tripId, 'client');
   const carrierPaidAmd = sumPaymentsAmd(payments, trip.tripId, 'carrier');
 
+  // Отменённая заявка (Этап 4 аудита) — сделка не состоялась: не в доход, не в прибыль,
+  // не в долг/просрочку, независимо от того, что там с ней происходило раньше (ставки,
+  // расходы, платежи). Фактические платежи (clientPaidAmd/carrierPaidAmd) не обнуляем —
+  // это исторический факт для истории заявки, а не признак того, что сделка состоялась.
+  if (trip.status === 'cancelled') {
+    return {
+      tripId: trip.tripId,
+      tripNumber: trip.tripNumber,
+      tripType: trip.tripType,
+      clientPaidAmd,
+      carrierPaidAmd,
+      clientDebtAmd: 0,
+      carrierDebtAmd: 0,
+      clientPaymentStatus: computePaymentStatus(0, clientPaidAmd),
+      carrierPaymentStatus: computePaymentStatus(0, carrierPaidAmd),
+      clientOverdue: false,
+      carrierOverdue: false,
+      profitAmd: 0,
+      cashGapAmd: 0,
+    };
+  }
+
   // trip.clientRateAmd уже включает clientExtraAmd (см. вызывающие роуты —
   // director-finance/finance-audit складывают его до вызова).
   // trip.expensesAmd для этой функции — carrierExtraAmd, поэтому долг/статус
@@ -142,11 +164,16 @@ export function computeMetricRowsForTrips(
 ): FinanceMetricRow[] {
   return trips.map((trip) => {
     const metrics = computeTripFinanceMetrics(trip, payments);
+    // Отменённая заявка (Этап 4 аудита) — computeBreakdownTotals/computeAggregateMetrics
+    // суммируют clientRateAmd/carrierRateAmd/expensesAmd СТРОКИ напрямую (не только
+    // profitAmd), поэтому обнулять их нужно уже здесь, а не только в metrics.profitAmd —
+    // иначе доход отменённой заявки не попадёт в "прибыль", но всё ещё попадёт в "доход".
+    const isCancelled = trip.status === 'cancelled';
     return {
       ...metrics,
-      clientRateAmd: roundMoney(trip.clientRateAmd),
-      carrierRateAmd: roundMoney(trip.carrierRateAmd),
-      expensesAmd: roundMoney(trip.expensesAmd),
+      clientRateAmd: isCancelled ? 0 : roundMoney(trip.clientRateAmd),
+      carrierRateAmd: isCancelled ? 0 : roundMoney(trip.carrierRateAmd),
+      expensesAmd: isCancelled ? 0 : roundMoney(trip.expensesAmd),
     };
   });
 }
@@ -213,6 +240,11 @@ export function validateMetricsAgainstContract(
   metrics: TripFinanceMetrics
 ): FinanceValidationWarning[] {
   const warnings: FinanceValidationWarning[] = [];
+
+  // Отменённая заявка сознательно обнуляется в computeTripFinanceMetrics (Этап 4 аудита) —
+  // сверять её с "обычной" формулой прибыли/долга смысла нет, иначе на каждой отменённой
+  // заявке будет ложное предупреждение о расхождении.
+  if (trip.status === 'cancelled') return warnings;
 
   // trip.clientRateAmd уже включает clientExtraAmd (см. getTripSplitExpenseTotalsAmd /
   // конвенцию вызывающей стороны), а trip.expensesAmd — это carrierExtraAmd, поэтому

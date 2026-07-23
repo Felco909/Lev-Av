@@ -114,13 +114,15 @@ const TRIP_SELECT_FOR_ATTACH = {
   vehicleTrip: { select: { tripNumber: true } },
 } as const;
 
-/** Заявки собственного транспорта с назначенной машиной, но ещё без рейса вообще. */
+/** Заявки собственного транспорта с назначенной машиной, но ещё без рейса вообще.
+ *  Отменённые (Этап 4 аудита) не предлагаются — привязывать их к рейсу нет смысла. */
 export async function getUnattachedOwnTrips(vehicleId?: string): Promise<UnattachedTripRow[]> {
   const trips = await prisma.trip.findMany({
     where: {
       tripType: 'own_transport',
       vehicleId: vehicleId ? vehicleId : { not: null },
       vehicleTripId: null,
+      NOT: { status: 'cancelled' },
     },
     select: TRIP_SELECT_FOR_ATTACH,
     orderBy: { tripDate: 'desc' },
@@ -142,6 +144,8 @@ export async function getAvailableTripsForAttach(vehicleId: string, excludeVehic
         { vehicleTripId: null },
         { vehicleTripId: { not: excludeVehicleTripId } },
       ],
+      // Отменённые (Этап 4 аудита) не предлагаются — привязывать их к рейсу нет смысла.
+      NOT: { status: 'cancelled' },
     },
     select: TRIP_SELECT_FOR_ATTACH,
     orderBy: { tripDate: 'desc' },

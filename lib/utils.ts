@@ -35,6 +35,9 @@ export const STATUS_MAP: Record<string, { label: string; color: string }> = {
   paid: { label: '\u041E\u043F\u043B\u0430\u0447\u0435\u043D', color: 'bg-emerald-100 text-emerald-700' }, // legacy — kept for display only
   completed: { label: '\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D', color: 'bg-green-100 text-green-700' },
   archived: { label: '\u0410\u0440\u0445\u0438\u0432', color: 'bg-slate-100 text-slate-500' },
+  // \u041E\u0442\u043C\u0435\u043D\u0435\u043D\u0430 \u043A\u043B\u0438\u0435\u043D\u0442\u043E\u043C/\u0441\u043E\u0440\u0432\u0430\u043B\u0430\u0441\u044C \u2014 \u043D\u0435 \u0443\u0447\u0430\u0441\u0442\u0432\u0443\u0435\u0442 \u0432 \u0434\u043E\u0445\u043E\u0434\u0435/\u043F\u0440\u0438\u0431\u044B\u043B\u0438/\u0430\u043D\u0430\u043B\u0438\u0442\u0438\u043A\u0435 \u043A\u0430\u043A \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043D\u0430\u044F,
+  // \u043D\u043E \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0432 \u0438\u0441\u0442\u043E\u0440\u0438\u0438 (\u0441\u043C. lib/trip-workflow-filters.ts, lib/finance/*).
+  cancelled: { label: '\u041E\u0442\u043C\u0435\u043D\u0435\u043D\u0430', color: 'bg-red-100 text-red-700' },
 };
 
 // Порядок статусов для кнопки "Следующий статус" — "paid" removed (tracked via clientPaymentStatus)

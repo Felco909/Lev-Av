@@ -24,9 +24,11 @@ export async function GET(req: Request) {
     const dateTo = searchParams.get('dateTo');
 
     // --- CARRIER DEBTS ---
+    // Отменённая заявка (Этап 4 аудита) — не в долги перевозчику, сделка не состоялась.
     const carrierWhere: any = {
       tripType: 'expedition',
       carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
+      NOT: { status: 'cancelled' },
     };
     if (dateFrom || dateTo) {
       carrierWhere.tripDate = {};

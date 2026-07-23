@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
   const client = await prisma.client.findUnique({ where: { id: clientId } });
   if (!client) return NextResponse.json({ error: 'Client not found' }, { status: 404 });
 
-  const where: any = { clientId };
+  // Отменённая заявка (Этап 4 аудита) — не в акт сверки, сделка не состоялась.
+  const where: any = { clientId, NOT: { status: 'cancelled' } };
   if (dateFrom || dateTo) {
     where.tripDate = {};
     if (dateFrom) where.tripDate.gte = new Date(dateFrom);

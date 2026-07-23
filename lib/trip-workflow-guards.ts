@@ -42,6 +42,18 @@ export function assertDirectWorkflowStatusChange(
     return { ok: true };
   }
 
+  // «Отменена» — та же логика, что и «Архив»: боковой статус вне линейного workflow,
+  // доступен из любого шага (отмена может произойти на любой стадии) и из него можно
+  // вернуться в любой статус (например, если отменили по ошибке).
+  if (from === 'cancelled') {
+    if (toCanon !== 'cancelled') return { ok: true };
+    return { ok: false, message: 'Заявка уже отменена.' };
+  }
+
+  if (toCanon === 'cancelled') {
+    return { ok: true };
+  }
+
   const fromIdx = workflowIndex(from);
   const toIdx = workflowIndex(toCanon);
   if (Math.abs(fromIdx - toIdx) > 1) {
@@ -91,10 +103,10 @@ export function assertReopenToUnloadedTransition(
 /** Статус при создании новой заявки. */
 export function assertInitialTripWorkflowStatus(status: string | null | undefined): WorkflowGuardResult {
   const canonical = canonicalWorkflowTripStatus(status ?? 'new');
-  if (canonical === 'archived' || canonical === 'completed') {
+  if (canonical === 'archived' || canonical === 'completed' || canonical === 'cancelled') {
     return {
       ok: false,
-      message: 'Новую заявку нельзя создать сразу как завершённую или в архиве.',
+      message: 'Новую заявку нельзя создать сразу как завершённую, отменённую или в архиве.',
     };
   }
   if (canonical !== 'new' && canonical !== 'in_progress') {

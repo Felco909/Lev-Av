@@ -16,6 +16,14 @@ export const KNOWN_USER_ROLES = ['admin', 'owner', 'director', 'accountant', 'di
 export const CRITICAL_FINANCE_FIELDS_ROLES = ['admin', 'owner', 'director', 'accountant'] as const;
 export const TRIP_DENORMALIZED_PAYMENT_ROLES = CRITICAL_FINANCE_FIELDS_ROLES;
 /**
+ * Финансовые поля рейса машины (зарплата, суточные ×1-4, прочие расходы, топливо,
+ * доп. расходы автопарка FleetExpense) — те же роли, что и для оплат заявки. Машина,
+ * водитель, даты, статус рейса — обычная операционная работа диспетчера, эта проверка
+ * их не касается (см. аудит архитектуры, пункт 2: рейс полностью редактируем по составу/
+ * датам/статусу, но не по деньгам).
+ */
+export const VEHICLE_TRIP_FINANCIAL_ROLES = CRITICAL_FINANCE_FIELDS_ROLES;
+/**
  * Глобальная нумерация в карточке клиента (префиксы, счётчики серии) — только финансы/руководство.
  */
 export const CLIENT_GLOBAL_DOC_NUMBERING_ROLES = ['admin', 'owner', 'director', 'accountant'] as const;

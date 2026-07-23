@@ -17,7 +17,9 @@ export async function GET(req: Request) {
     const routeFilter = searchParams.get('route');
     const format = searchParams.get('format') || 'json';
 
-    const where: any = {};
+    // Отменённая заявка (Этап 4 аудита) — не в отчёт по прибыли, сделка не состоялась
+    // (остаётся видна в истории — на /trips, в календаре, на своей странице).
+    const where: any = { NOT: { status: 'cancelled' } };
     if (dateFrom || dateTo) {
       where.tripDate = {};
       if (dateFrom) where.tripDate.gte = new Date(dateFrom);

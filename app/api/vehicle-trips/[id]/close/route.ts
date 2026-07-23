@@ -102,8 +102,9 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     calcError = `Не удалось рассчитать пробег/топливо по GPS-треку: ${(e as Error).message}`;
   }
 
+  // Отменённая заявка (Этап 4 аудита) — не в счёт "сколько заявок вёз этот рейс".
   const matched = await prisma.trip.findMany({
-    where: { vehicleTripId: trip.id },
+    where: { vehicleTripId: trip.id, NOT: { status: 'cancelled' } },
     select: { id: true },
   });
 

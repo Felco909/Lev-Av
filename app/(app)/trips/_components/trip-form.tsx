@@ -107,11 +107,13 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [archiving, setArchiving] = useState(false);
   const [savingSeries, setSavingSeries] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const actionLockRef = useRef({ save: false, complete: false, reopen: false, archive: false, delete: false });
+  const [cancelling, setCancelling] = useState(false);
+  const actionLockRef = useRef({ save: false, complete: false, reopen: false, archive: false, delete: false, cancel: false });
 
   const isArchived = status === 'archived';
   const isFinanciallyCompleted = status === 'completed' || status === 'paid';
-  const formLocked = isArchived;
+  const isCancelled = status === 'cancelled';
+  const formLocked = isArchived || isCancelled;
 
   // Payment management
   interface PaymentRecord { id: string; type: string; amount: number; amountAmd: number; currency: string; exchangeRate: number; paymentDate: string; description: string | null; }
@@ -762,6 +764,56 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     }
   };
 
+  const handleCancelTrip = async () => {
+    if (!tripId || cancelling || actionLockRef.current.cancel) return;
+    if (isCancelled) {
+      if (!confirm('Восстановить заявку из статуса «Отменена»? Статус изменится на «Новая».')) return;
+      actionLockRef.current.cancel = true;
+      setCancelling(true);
+      try {
+        const res = await fetch(`/api/trips/${tripId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'new' }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Ошибка' }));
+          appToast.error(err.error || 'Ошибка');
+          return;
+        }
+        setStatus('new');
+        appToast.success('Заявка восстановлена в статус «Новая».');
+      } catch { appToast.error('Ошибка'); }
+      finally {
+        actionLockRef.current.cancel = false;
+        setCancelling(false);
+      }
+      return;
+    }
+
+    if (!confirm('Отменить заявку? Сделка будет считаться несостоявшейся и не войдёт в доход/прибыль/аналитику, но останется в истории.')) return;
+    actionLockRef.current.cancel = true;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/trips/${tripId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Ошибка' }));
+        appToast.error(err.error || 'Ошибка');
+        return;
+      }
+      setStatus('cancelled');
+      appToast.success('Заявка отменена.');
+    } catch { appToast.error('Ошибка'); }
+    finally {
+      actionLockRef.current.cancel = false;
+      setCancelling(false);
+    }
+  };
+
   const handleDeleteTrip = async () => {
     if (!tripId || deleting || actionLockRef.current.delete) return;
     if (!confirm('Удалить заявку без возможности восстановления?')) return;
@@ -962,9 +1014,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 };
                 const FLOW = ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'];
                 const canonSt = (status === 'paid' ? 'completed' : status) as string;
-                const currentIdx = FLOW.indexOf(isArchived ? '' : canonSt);
-                const active = !isArchived && canonSt === key;
-                const isAllowed = !isArchived && !active && Math.abs(currentIdx - idx) <= 1;
+                const currentIdx = FLOW.indexOf(isArchived || isCancelled ? '' : canonSt);
+                const active = !isArchived && !isCancelled && canonSt === key;
+                const isAllowed = !isArchived && !isCancelled && !active && Math.abs(currentIdx - idx) <= 1;
                 // Block sverka->completed if conditions unmet
                 const completionBlocks: string[] = [];
                 if (key === 'completed' && canonSt === 'sverka') {
@@ -1019,8 +1071,28 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                   <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500 text-white ring-2 ring-offset-1 ring-slate-400">Архив ✓</span>
                 </div>
               )}
+              {isCancelled && (
+                <div className="flex items-center gap-1">
+                  <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                  <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-500 text-white ring-2 ring-offset-1 ring-red-400">Отменена ✕</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {!isArchived && !isCancelled && !isFinanciallyCompleted && (
+                <button type="button" onClick={handleCancelTrip} disabled={cancelling}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:opacity-60 transition">
+                  <X className="w-3.5 h-3.5" />
+                  {cancelling ? '...' : 'Отменить'}
+                </button>
+              )}
+              {isCancelled && (
+                <button type="button" onClick={handleCancelTrip} disabled={cancelling}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-xs font-medium rounded-lg hover:bg-amber-600 disabled:opacity-60 transition">
+                  <Unlock className="w-3.5 h-3.5" />
+                  {cancelling ? '...' : 'Восстановить'}
+                </button>
+              )}
               {isFinanciallyCompleted && !isArchived && (
                 <button type="button" onClick={handleArchiveToggle} disabled={archiving}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-600 text-white text-xs font-medium rounded-lg hover:bg-slate-700 disabled:opacity-60 transition">

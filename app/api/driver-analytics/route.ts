@@ -10,8 +10,9 @@ export async function GET() {
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
     const drivers = await prisma.driver.findMany({ where: { status: 'active' }, orderBy: { fullName: 'asc' } });
+    // Отменённая заявка (Этап 4 аудита) — не в доход/прибыль аналитики по водителям.
     const trips = await prisma.trip.findMany({
-      where: { driverId: { not: null } },
+      where: { driverId: { not: null }, NOT: { status: 'cancelled' } },
       select: { id: true, driverId: true, clientRate: true, clientRateAmd: true, profit: true, profitAmd: true, distance: true, cargoWeight: true, status: true, tripDate: true, tripType: true },
     });
     // Get fuel expenses from trip expenses
@@ -36,7 +37,7 @@ export async function GET() {
 
     // Get trips with vehicleId for fuel association
     const tripsWithVehicle = await prisma.trip.findMany({
-      where: { driverId: { not: null }, vehicleId: { not: null } },
+      where: { driverId: { not: null }, vehicleId: { not: null }, NOT: { status: 'cancelled' } },
       select: { driverId: true, vehicleId: true },
     });
     // Build driver → set of vehicleIds

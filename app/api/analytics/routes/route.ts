@@ -9,7 +9,9 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
+    // Отменённая заявка (Этап 4 аудита) — не в доход/прибыль аналитики по маршрутам.
     const trips = await prisma.trip.findMany({
+      where: { NOT: { status: 'cancelled' } },
       select: {
         routeFrom: true, routeTo: true,
         clientRateAmd: true, clientRate: true,

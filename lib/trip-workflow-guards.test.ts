@@ -64,6 +64,23 @@ describe('assertDirectWorkflowStatusChange (item 1.3 — jump prevention)', () =
   });
 });
 
+describe('assertDirectWorkflowStatusChange — cancelled (Этап 4 аудита)', () => {
+  it('allows moving into cancelled from any non-cancelled status', () => {
+    expect(assertDirectWorkflowStatusChange('new', 'cancelled').ok).toBe(true);
+    expect(assertDirectWorkflowStatusChange('sverka', 'cancelled').ok).toBe(true);
+    expect(assertDirectWorkflowStatusChange('completed', 'cancelled').ok).toBe(true);
+  });
+
+  it('blocks cancelling an already-cancelled trip', () => {
+    expect(assertDirectWorkflowStatusChange('cancelled', 'cancelled').ok).toBe(true); // same-status no-op wins first
+  });
+
+  it('allows leaving cancelled for any other status directly (reopen a mistaken cancellation)', () => {
+    expect(assertDirectWorkflowStatusChange('cancelled', 'new').ok).toBe(true);
+    expect(assertDirectWorkflowStatusChange('cancelled', 'awaiting_payment').ok).toBe(true);
+  });
+});
+
 describe('assertCompletedWorkflowTransition', () => {
   it('allows completing only from sverka', () => {
     expect(assertCompletedWorkflowTransition('sverka').ok).toBe(true);
@@ -80,6 +97,10 @@ describe('assertCompletedWorkflowTransition', () => {
 
   it('blocks completing directly from archived', () => {
     expect(assertCompletedWorkflowTransition('archived').ok).toBe(false);
+  });
+
+  it('blocks completing directly from cancelled', () => {
+    expect(assertCompletedWorkflowTransition('cancelled').ok).toBe(false);
   });
 });
 
@@ -104,9 +125,10 @@ describe('assertInitialTripWorkflowStatus', () => {
     expect(assertInitialTripWorkflowStatus(undefined).ok).toBe(true); // defaults to 'new'
   });
 
-  it('blocks creating a trip already completed or archived', () => {
+  it('blocks creating a trip already completed, archived or cancelled', () => {
     expect(assertInitialTripWorkflowStatus('completed').ok).toBe(false);
     expect(assertInitialTripWorkflowStatus('archived').ok).toBe(false);
+    expect(assertInitialTripWorkflowStatus('cancelled').ok).toBe(false);
   });
 
   it('blocks creating a trip in any other mid-workflow status', () => {

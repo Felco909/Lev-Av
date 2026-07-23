@@ -12,7 +12,8 @@ export async function GET(req: Request) {
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
 
-    const where: any = {};
+    // Отменённая заявка (Этап 4 аудита) — не в доход/прибыль/аналитику, сделка не состоялась.
+    const where: any = { NOT: { status: 'cancelled' } };
     if (dateFrom || dateTo) {
       where.tripDate = {};
       if (dateFrom) where.tripDate.gte = new Date(dateFrom);
@@ -101,7 +102,7 @@ export async function GET(req: Request) {
     const [vehicleUtilization, totalVehicles] = await Promise.all([
       prisma.trip.groupBy({
         by: ['vehicleId'],
-        where: { vehicleId: { not: null }, tripDate: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } },
+        where: { vehicleId: { not: null }, tripDate: { gte: new Date(now.getFullYear(), now.getMonth(), 1) }, NOT: { status: 'cancelled' } },
         _count: true,
       }),
       prisma.vehicle.count({ where: { status: 'active' } }),
@@ -112,15 +113,15 @@ export async function GET(req: Request) {
     const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
     const [curMonth, prevMonth] = await Promise.all([
-      prisma.trip.aggregate({ where: { tripDate: { gte: curMonthStart, lte: curMonthEnd } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
-      prisma.trip.aggregate({ where: { tripDate: { gte: prevMonthStart, lte: prevMonthEnd } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
+      prisma.trip.aggregate({ where: { tripDate: { gte: curMonthStart, lte: curMonthEnd }, NOT: { status: 'cancelled' } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
+      prisma.trip.aggregate({ where: { tripDate: { gte: prevMonthStart, lte: prevMonthEnd }, NOT: { status: 'cancelled' } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
     ]);
 
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
     const [overdueRaw, cashGapRaw] = await Promise.all([
       prisma.trip.findMany({
         where: {
-          status: { notIn: ['new', 'in_progress', 'archived'] },
+          status: { notIn: ['new', 'in_progress', 'archived', 'cancelled'] },
           clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
           OR: [
             { paymentDueDate: { not: null } },
@@ -138,7 +139,7 @@ export async function GET(req: Request) {
       prisma.trip.findMany({
         where: {
           tripType: 'expedition',
-          status: { notIn: ['archived', 'new', 'in_progress'] },
+          status: { notIn: ['archived', 'new', 'in_progress', 'cancelled'] },
           carrierPaidAmountAmd: { gt: 0 },
         },
         select: {

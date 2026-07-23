@@ -172,74 +172,51 @@ export default function ReportsPage() {
   }, [profitData?.rows]);
   const cashGapTotal = cashGapRows.reduce((s: number, r: any) => s + Number(r.carrierPaidAmountAmd ?? r.carrierPaidAmount ?? 0), 0);
 
-  // Own fleet data (only own_transport trips)
-  const ownFleetRows = useMemo(() => {
-    if (!profitData?.rows) return [];
-    return profitData.rows.filter((r: any) => r.tripTypeRaw === 'own_transport');
-  }, [profitData?.rows]);
+  // Own fleet data (доход/расход/прибыль собственного транспорта) — единый источник
+  // /api/reports/own-fleet, та же связка функций, что в director-finance/vehicle-analytics/
+  // vehicles/[id]/economics (Trip.vehicleTripId для дохода, computeVehicleTripExpensesAmd для
+  // расхода). Раньше здесь доход считался по Trip.tripDate напрямую, а расход — отдельным
+  // запросом по VehicleTrip за период; из-за разных выборок цифры могли расходиться с
+  // остальными разделами (см. аудит архитектуры). Теперь оба идут по одному и тому же
+  // набору рейсов, отфильтрованных по VehicleTrip.departureDate.
+  const [ownFleetData, setOwnFleetData] = useState<{
+    vehicleTrips: any[]; matchedTrips: any[]; fleetExpenseRows: any[];
+    totals: { incomeAmd: number; expensesAmd: number; profitAmd: number; breakdown: { salary: number; perDiem: number; fuel: number; other: number; fleetExpenses: number } };
+  } | null>(null);
+  const [ownFleetLoading, setOwnFleetLoading] = useState(false);
 
-  const ownFleetRevenue = ownFleetRows.reduce((s: number, r: any) => s + Number(r.clientRateAmd || r.clientRate || 0), 0);
-
-  // Fleet expenses (standalone, from fleet_expenses table)
-  const [fleetExpData, setFleetExpData] = useState<{ rows: any[]; totals: Record<string, number>; grandTotal: number } | null>(null);
-  const [fleetExpLoading, setFleetExpLoading] = useState(false);
-
-  const loadFleetExp = useCallback(async () => {
-    setFleetExpLoading(true);
-    const params = new URLSearchParams();
-    if (appliedFilters.dateFrom) params.set('dateFrom', appliedFilters.dateFrom);
-    if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo);
+  const loadOwnFleet = useCallback(async () => {
+    if (!appliedFilters.dateFrom || !appliedFilters.dateTo) return;
+    setOwnFleetLoading(true);
     try {
-      const res = await fetch(`/api/fleet-expenses?${params}`);
+      const params = new URLSearchParams({ dateFrom: appliedFilters.dateFrom, dateTo: appliedFilters.dateTo });
+      const res = await fetch(`/api/reports/own-fleet?${params}`);
       const data = await res.json();
-      setFleetExpData(data);
+      setOwnFleetData(data);
     } catch { /* */ }
-    setFleetExpLoading(false);
+    setOwnFleetLoading(false);
   }, [appliedFilters]);
 
-  useEffect(() => { if (tab === 'own_fleet' && filtersReady) loadFleetExp(); }, [tab, loadFleetExp, filtersReady]);
+  useEffect(() => { if (tab === 'own_fleet' && filtersReady) loadOwnFleet(); }, [tab, loadOwnFleet, filtersReady]);
 
-  const fleetTotalExpenses = fleetExpData?.grandTotal || 0;
-  const fleetExpBreakdown = fleetExpData?.totals || { salary: 0, fuel: 0, per_diem: 0, other: 0 };
-
-  // Vehicle trips profit data
-  const [vtProfitData, setVtProfitData] = useState<any[]>([]);
-  const [vtProfitLoading, setVtProfitLoading] = useState(false);
-
-  // Vehicle trip direct expenses totals
-  const vtDirectSalary = vtProfitData.reduce((s: number, v: any) => s + (v.directSalaryAmd || 0), 0);
-  const vtDirectPerDiem = vtProfitData.reduce((s: number, v: any) => s + (v.directPerDiemAmd || 0), 0);
-  const vtDirectOther = vtProfitData.reduce((s: number, v: any) => s + (v.directOtherAmd || 0), 0);
-  const vtDirectFuel = vtProfitData.reduce((s: number, v: any) => s + (v.directFuelAmd || 0), 0);
-  const vtDirectTotal = vtDirectSalary + vtDirectPerDiem + vtDirectOther + vtDirectFuel;
-  const combinedTotalExpenses = fleetTotalExpenses + vtDirectTotal;
-  const ownFleetProfit = ownFleetRevenue - combinedTotalExpenses;
-
-  const loadVtProfit = useCallback(async () => {
-    setVtProfitLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (appliedFilters.dateFrom) params.set('dateFrom', appliedFilters.dateFrom);
-      if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo);
-      params.set('showArchived', '1'); // reports always include archived
-      const res = await fetch(`/api/vehicle-trips?${params}`);
-      const list = await res.json();
-      const details = await Promise.all(
-        (Array.isArray(list) ? list : []).map(async (vt: any) => {
-          try {
-            const dr = await fetch(`/api/vehicle-trips/${vt.id}`);
-            return await dr.json();
-          } catch { return null; }
-        })
-      );
-      setVtProfitData(details.filter(Boolean));
-    } catch { /* */ }
-    setVtProfitLoading(false);
-  }, [appliedFilters]);
-
-  useEffect(() => {
-    if (tab === 'own_fleet' && filtersReady) loadVtProfit();
-  }, [tab, loadVtProfit, filtersReady]);
+  const ownFleetRows = ownFleetData?.matchedTrips ?? [];
+  const ownFleetRevenue = ownFleetData?.totals.incomeAmd ?? 0;
+  const vtDirectSalary = ownFleetData?.totals.breakdown.salary ?? 0;
+  const vtDirectPerDiem = ownFleetData?.totals.breakdown.perDiem ?? 0;
+  const vtDirectFuel = ownFleetData?.totals.breakdown.fuel ?? 0;
+  const vtDirectOther = ownFleetData?.totals.breakdown.other ?? 0;
+  const vtDirectTotal = vtDirectSalary + vtDirectPerDiem + vtDirectFuel + vtDirectOther;
+  const fleetTotalExpenses = ownFleetData?.totals.breakdown.fleetExpenses ?? 0;
+  const combinedTotalExpenses = ownFleetData?.totals.expensesAmd ?? 0;
+  const ownFleetProfit = ownFleetData?.totals.profitAmd ?? 0;
+  const fleetExpRows = useMemo(() => ownFleetData?.fleetExpenseRows ?? [], [ownFleetData]);
+  const fleetExpBreakdown = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const fe of fleetExpRows) totals[fe.expenseType] = (totals[fe.expenseType] || 0) + Number(fe.amountAmd || 0);
+    return totals;
+  }, [fleetExpRows]);
+  const fleetExpLoading = ownFleetLoading;
+  const vtProfitLoading = ownFleetLoading;
 
   // CSV export
   const exportCsv = () => {
@@ -260,7 +237,7 @@ export default function ReportsPage() {
       rows.push([]);
       rows.push(['--- РАСХОДЫ АВТОПАРКА ---']);
       rows.push(['Дата', 'Машина', 'Тип', 'Сумма', 'Валюта', 'Сумма AMD', 'Комментарий']);
-      for (const fe of (fleetExpData?.rows || [])) {
+      for (const fe of (fleetExpRows)) {
         rows.push([formatDate(fe.date), fe.vehicle?.plateNumber || '', FLEET_EXPENSE_TYPE_MAP[fe.expenseType] || fe.expenseType, String(Number(fe.amount)), fe.currency, String(Math.round(Number(fe.amountAmd))), fe.comment || '']);
       }
       rows.push([]);
@@ -306,7 +283,7 @@ export default function ReportsPage() {
     { key: 'cash_gaps', label: 'Кассовые разрывы', icon: AlertTriangle, color: 'text-red-600' },
   ];
 
-  const isLoading = profitLoading;
+  const isLoading = tab === 'own_fleet' ? ownFleetLoading : profitLoading;
 
   return (
     <div className="space-y-6">
@@ -529,19 +506,19 @@ export default function ReportsPage() {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3">
                 <p className="text-[11px] text-emerald-600 mb-0.5">Доход по заявкам</p>
-                <p className="text-lg font-bold font-mono text-emerald-700 dark:text-emerald-400">{profitLoading ? '...' : fmtAmd(ownFleetRevenue)}</p>
+                <p className="text-lg font-bold font-mono text-emerald-700 dark:text-emerald-400">{ownFleetLoading ? '...' : fmtAmd(ownFleetRevenue)}</p>
                 <p className="text-[9px] text-muted-foreground">{ownFleetRows.length} заявок</p>
               </div>
               <div className="bg-red-50 dark:bg-red-950/30 rounded-lg p-3">
                 <p className="text-[11px] text-red-600 mb-0.5">Все расходы</p>
-                <p className="text-lg font-bold font-mono text-red-600">{(fleetExpLoading || vtProfitLoading) ? '...' : fmtAmd(combinedTotalExpenses)}</p>
+                <p className="text-lg font-bold font-mono text-red-600">{ownFleetLoading ? '...' : fmtAmd(combinedTotalExpenses)}</p>
                 <p className="text-[9px] text-muted-foreground">
                   доп: {fmtAmd(fleetTotalExpenses)} + рейсы: {fmtAmd(vtDirectTotal)}
                 </p>
               </div>
               <div className={`rounded-lg p-3 ${ownFleetProfit >= 0 ? 'bg-green-50 dark:bg-green-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
                 <p className={`text-[11px] mb-0.5 ${ownFleetProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>ЧИСТАЯ ПРИБЫЛЬ</p>
-                <p className={`text-lg font-bold font-mono ${ownFleetProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{(profitLoading || fleetExpLoading || vtProfitLoading) ? '...' : fmtAmd(ownFleetProfit)}</p>
+                <p className={`text-lg font-bold font-mono ${ownFleetProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{ownFleetLoading ? '...' : fmtAmd(ownFleetProfit)}</p>
               </div>
             </div>
 
@@ -600,7 +577,7 @@ export default function ReportsPage() {
             <div className="px-4 py-3 border-b bg-muted/20">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Доход по заявкам ({ownFleetRows.length})</h4>
             </div>
-            {profitLoading ? (
+            {ownFleetLoading ? (
               <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
             ) : ownFleetRows.length === 0 ? (
               <div className="text-center py-10 text-muted-foreground text-sm">Нет заявок за период</div>
@@ -639,12 +616,12 @@ export default function ReportsPage() {
           {/* Fleet expenses table */}
           <div className="bg-card rounded-xl shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b bg-muted/20 flex items-center justify-between">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Расходы автопарка ({(fleetExpData?.rows || []).length})</h4>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Расходы автопарка ({(fleetExpRows).length})</h4>
               <Link href="/vehicle-trips" className="text-[11px] text-primary hover:underline">Рейсы машин →</Link>
             </div>
             {fleetExpLoading ? (
               <div className="flex items-center justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-            ) : (fleetExpData?.rows || []).length === 0 ? (
+            ) : (fleetExpRows).length === 0 ? (
               <div className="text-center py-10 text-muted-foreground text-sm">Нет расходов за период</div>
             ) : (
               <div className="overflow-x-auto">
@@ -660,7 +637,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(fleetExpData?.rows || []).map((fe: any) => (
+                    {(fleetExpRows).map((fe: any) => (
                       <tr key={fe.id} className="border-b hover:bg-muted/30 transition">
                         <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(fe.date)}</td>
                         <td className="py-2 px-3 text-xs">{fe.vehicle?.plateNumber || '—'}</td>

@@ -37,8 +37,11 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   // подобранные по датам. Работает одинаково для активного и закрытого рейса — состав
   // определяется тем, что было привязано за время его жизни (автопривязкой, вручную,
   // массовым "Добавить заявки"), закрытие само по себе больше ничего не досчитывает.
+  // Отменённая заявка (Этап 4 аудита) — не в доход рейса и не в список "Заявки" карточки
+  // (сделка не состоялась); сама заявка остаётся видна в истории на /trips, в календаре
+  // и на своей странице — только этот, "доходный" список рейса её не учитывает.
   const rows = await prisma.trip.findMany({
-    where: { vehicleTripId: vt.id },
+    where: { vehicleTripId: vt.id, NOT: { status: 'cancelled' } },
     select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, tripDate: true, clientRateAmd: true, clientRate: true, client: { select: { name: true } } },
     orderBy: { tripDate: 'asc' },
   });

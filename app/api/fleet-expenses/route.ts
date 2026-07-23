@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
+import { assertRole, VEHICLE_TRIP_FINANCIAL_ROLES } from '@/lib/auth/role-guard';
 
 export const dynamic = 'force-dynamic';
+
+const FLEET_EXPENSE_ACTION_LABEL = 'изменение доп. расходов автопарка';
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -50,6 +53,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, FLEET_EXPENSE_ACTION_LABEL);
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
   const body = await req.json();
   const { date, vehicleId, expenseType, amount, currency, exchangeRate, comment, vehicleTripId, liters } = body;
@@ -88,6 +93,8 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, FLEET_EXPENSE_ACTION_LABEL);
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
   const body = await req.json();
   const { id, date, vehicleId, expenseType, amount, currency, exchangeRate, comment, vehicleTripId, liters } = body;
@@ -127,6 +134,8 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, FLEET_EXPENSE_ACTION_LABEL);
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
   const sp = req.nextUrl.searchParams;
   const id = sp.get('id');

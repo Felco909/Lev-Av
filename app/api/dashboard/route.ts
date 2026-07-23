@@ -19,7 +19,12 @@ export async function GET(req: Request) {
     const tripType = searchParams.get('tripType');
 
     // Build base filter
-    const where: any = {};
+    const where: any = {
+      // Отменённая заявка (Этап 4 аудита) — не в доход/прибыль/долги/аналитику, сделка не
+      // состоялась. Применяется здесь один раз — clientDebtWhere/carrierDebtWhere/allTrips/
+      // problemTrips ниже все спредят этот же объект (...where).
+      NOT: { status: 'cancelled' },
+    };
     if (dateFrom || dateTo) {
       where.tripDate = {};
       if (dateFrom) where.tripDate.gte = new Date(dateFrom);
@@ -178,6 +183,7 @@ export async function GET(req: Request) {
 
       const prevWhere: any = {
         tripDate: { gte: prevFrom, lte: prevTo },
+        NOT: { status: 'cancelled' },
       };
       if (clientId) prevWhere.clientId = clientId;
       if (tripType) prevWhere.tripType = tripType;

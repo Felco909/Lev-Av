@@ -29,7 +29,9 @@ export async function GET() {
       orderBy: { name: 'asc' },
     });
 
+    // Отменённая заявка (Этап 4 аудита) — не в доход/прибыль клиентской аналитики.
     const trips = await prisma.trip.findMany({
+      where: { NOT: { status: 'cancelled' } },
       select: {
         clientId: true, clientRateAmd: true, clientRate: true,
         profitAmd: true, profit: true,

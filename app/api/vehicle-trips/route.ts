@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle, vehicleTripFinancialsChanged } from '@/lib/vehicle-trips/close-trip';
+import { assertRole, VEHICLE_TRIP_FINANCIAL_ROLES } from '@/lib/auth/role-guard';
 
 export const dynamic = 'force-dynamic';
+
+const FINANCIAL_ACTION_LABEL = 'изменение финансовых полей рейса (зарплата/суточные/расходы/топливо)';
 
 /*
  * Следующий номер рейса ДЛЯ ЭТОЙ МАШИНЫ — не глобальный счётчик. На практике номер рейса
@@ -116,39 +119,46 @@ export async function POST(req: NextRequest) {
   const oCur = otherCurrency || 'AMD'; const oRate = parseFloat(otherRate) || 1;
   const fCur = fuelCurrency || 'AMD'; const fRate = parseFloat(fuelRate) || 1;
 
+  const createData = {
+    tripNumber,
+    vehicleId,
+    driverId: driverId || null,
+    departureDate: new Date(departureDate),
+    departureLat: departureLat != null && departureLat !== '' ? parseFloat(departureLat) : null,
+    departureLon: departureLon != null && departureLon !== '' ? parseFloat(departureLon) : null,
+    startMileage: startMileage ? parseInt(startMileage, 10) : null,
+    startFuel: startFuel ? parseFloat(startFuel) : null,
+    returnDate: returnDate ? new Date(returnDate) : null,
+    returnLat: returnLat != null && returnLat !== '' ? parseFloat(returnLat) : null,
+    returnLon: returnLon != null && returnLon !== '' ? parseFloat(returnLon) : null,
+    endMileage: endMileage ? parseInt(endMileage, 10) : null,
+    endFuel: endFuel ? parseFloat(endFuel) : null,
+    status: returnDate ? 'completed' : 'active',
+    notes: notes || null,
+    salary: salary ? parseFloat(salary) : null, salaryCurrency: sCur, salaryRate: sRate,
+    salaryAmd: toAmd(salary, sCur, sRate),
+    perDiem: perDiem ? parseFloat(perDiem) : null, perDiemCurrency: pCur, perDiemRate: pRate,
+    perDiemAmd: toAmd(perDiem, pCur, pRate),
+    perDiem2: perDiem2 ? parseFloat(perDiem2) : null, perDiem2Currency: p2Cur, perDiem2Rate: p2Rate,
+    perDiem2Amd: toAmd(perDiem2, p2Cur, p2Rate),
+    perDiem3: perDiem3 ? parseFloat(perDiem3) : null, perDiem3Currency: p3Cur, perDiem3Rate: p3Rate,
+    perDiem3Amd: toAmd(perDiem3, p3Cur, p3Rate),
+    perDiem4: perDiem4 ? parseFloat(perDiem4) : null, perDiem4Currency: p4Cur, perDiem4Rate: p4Rate,
+    perDiem4Amd: toAmd(perDiem4, p4Cur, p4Rate),
+    otherExpenses: otherExpenses ? parseFloat(otherExpenses) : null, otherCurrency: oCur, otherRate: oRate,
+    otherExpensesAmd: toAmd(otherExpenses, oCur, oRate),
+    fuelLiters: fuelLiters ? parseFloat(fuelLiters) : null,
+    fuelCost: fuelCost ? parseFloat(fuelCost) : null, fuelCurrency: fCur, fuelRate: fRate,
+    fuelCostAmd: toAmd(fuelCost, fCur, fRate),
+  };
+
+  if (vehicleTripFinancialsChanged(null, createData)) {
+    const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, FINANCIAL_ACTION_LABEL);
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+  }
+
   const record = await prisma.vehicleTrip.create({
-    data: {
-      tripNumber,
-      vehicleId,
-      driverId: driverId || null,
-      departureDate: new Date(departureDate),
-      departureLat: departureLat != null && departureLat !== '' ? parseFloat(departureLat) : null,
-      departureLon: departureLon != null && departureLon !== '' ? parseFloat(departureLon) : null,
-      startMileage: startMileage ? parseInt(startMileage, 10) : null,
-      startFuel: startFuel ? parseFloat(startFuel) : null,
-      returnDate: returnDate ? new Date(returnDate) : null,
-      returnLat: returnLat != null && returnLat !== '' ? parseFloat(returnLat) : null,
-      returnLon: returnLon != null && returnLon !== '' ? parseFloat(returnLon) : null,
-      endMileage: endMileage ? parseInt(endMileage, 10) : null,
-      endFuel: endFuel ? parseFloat(endFuel) : null,
-      status: returnDate ? 'completed' : 'active',
-      notes: notes || null,
-      salary: salary ? parseFloat(salary) : null, salaryCurrency: sCur, salaryRate: sRate,
-      salaryAmd: toAmd(salary, sCur, sRate),
-      perDiem: perDiem ? parseFloat(perDiem) : null, perDiemCurrency: pCur, perDiemRate: pRate,
-      perDiemAmd: toAmd(perDiem, pCur, pRate),
-      perDiem2: perDiem2 ? parseFloat(perDiem2) : null, perDiem2Currency: p2Cur, perDiem2Rate: p2Rate,
-      perDiem2Amd: toAmd(perDiem2, p2Cur, p2Rate),
-      perDiem3: perDiem3 ? parseFloat(perDiem3) : null, perDiem3Currency: p3Cur, perDiem3Rate: p3Rate,
-      perDiem3Amd: toAmd(perDiem3, p3Cur, p3Rate),
-      perDiem4: perDiem4 ? parseFloat(perDiem4) : null, perDiem4Currency: p4Cur, perDiem4Rate: p4Rate,
-      perDiem4Amd: toAmd(perDiem4, p4Cur, p4Rate),
-      otherExpenses: otherExpenses ? parseFloat(otherExpenses) : null, otherCurrency: oCur, otherRate: oRate,
-      otherExpensesAmd: toAmd(otherExpenses, oCur, oRate),
-      fuelLiters: fuelLiters ? parseFloat(fuelLiters) : null,
-      fuelCost: fuelCost ? parseFloat(fuelCost) : null, fuelCurrency: fCur, fuelRate: fRate,
-      fuelCostAmd: toAmd(fuelCost, fCur, fRate),
-    },
+    data: createData,
     include: {
       vehicle: { select: { id: true, plateNumber: true, brand: true, model: true } },
       driver: { select: { id: true, fullName: true } },
@@ -325,6 +335,11 @@ export async function PUT(req: NextRequest) {
   if (fuelCost !== undefined || fuelCurrency !== undefined || fuelRate !== undefined) {
     const c = fuelCurrency ?? 'AMD'; const r = parseFloat(fuelRate) || 1;
     data.fuelCostAmd = toAmd(fuelCost, c, r);
+  }
+
+  if (vehicleTripFinancialsChanged(before, data)) {
+    const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, FINANCIAL_ACTION_LABEL);
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
 
   const record = await prisma.vehicleTrip.update({

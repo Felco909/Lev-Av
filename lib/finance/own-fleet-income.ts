@@ -21,10 +21,11 @@ function tripClientRateAmd(t: { clientRateAmd: unknown; clientRate: unknown }): 
   return Number(t.clientRateAmd ?? t.clientRate ?? 0);
 }
 
-/** Доход одного рейса — сумма клиентских ставок всех явно привязанных к нему заявок. */
+/** Доход одного рейса — сумма клиентских ставок всех явно привязанных к нему заявок.
+ *  Отменённые заявки (status='cancelled') не в счёт — сделка не состоялась. */
 export async function getVehicleTripIncomeAmd(vehicleTripId: string): Promise<number> {
   const trips = await prisma.trip.findMany({
-    where: { vehicleTripId },
+    where: { vehicleTripId, NOT: { status: 'cancelled' } },
     select: { clientRateAmd: true, clientRate: true },
   });
   return trips.reduce((sum, t) => sum + tripClientRateAmd(t), 0);
@@ -34,12 +35,13 @@ export async function getVehicleTripIncomeAmd(vehicleTripId: string): Promise<nu
  * Доход сразу нескольких рейсов одним запросом (без похода в БД на каждый) —
  * для аналитики/дашборда, где рейсов много. Возвращает Map<vehicleTripId, доход>;
  * рейсы без единой привязанной заявки в карте отсутствуют (доход = 0 подразумевается).
+ * Отменённые заявки (status='cancelled') исключены — та же логика, что и выше.
  */
 export async function getVehicleTripsIncomeAmdBulk(vehicleTripIds: string[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (vehicleTripIds.length === 0) return map;
   const trips = await prisma.trip.findMany({
-    where: { vehicleTripId: { in: vehicleTripIds } },
+    where: { vehicleTripId: { in: vehicleTripIds }, NOT: { status: 'cancelled' } },
     select: { vehicleTripId: true, clientRateAmd: true, clientRate: true },
   });
   for (const t of trips) {

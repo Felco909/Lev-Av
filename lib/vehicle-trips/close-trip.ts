@@ -190,3 +190,26 @@ export function computeVehicleTripExpensesAmd(vt: VehicleTripExpenseFields): num
   const fleetExpTotal = vt.fleetExpenses.reduce((s, e) => s + (Number(e.amountAmd) || 0), 0);
   return directSalaryAmd + directPerDiemAmd + directOtherAmd + directFuelAmd + fleetExpTotal;
 }
+
+/** Денежные поля рейса, посчитанные в AMD — единственные, за изменением которых следит
+ *  роль-защита (см. lib/auth/role-guard.ts VEHICLE_TRIP_FINANCIAL_ROLES, Этап 2 аудита). */
+export const VEHICLE_TRIP_FINANCIAL_AMD_FIELDS = [
+  'salaryAmd', 'perDiemAmd', 'perDiem2Amd', 'perDiem3Amd', 'perDiem4Amd', 'otherExpensesAmd', 'fuelCostAmd',
+] as const;
+
+/**
+ * Карточка рейса всегда шлёт ВСЕ поля формы разом (включая нетронутые расходы), поэтому
+ * проверять "поле присутствует в body" бессмысленно — пришлось бы требовать роль на любое
+ * сохранение статуса/дат/машины. Вместо этого сравниваем итоговое AMD-значение с уже
+ * сохранённым (для создания — с нулём/null, передав before=null) и требуем роль, только
+ * если деньги реально меняются.
+ */
+export function vehicleTripFinancialsChanged(before: Record<string, unknown> | null, data: Record<string, unknown>): boolean {
+  for (const field of VEHICLE_TRIP_FINANCIAL_AMD_FIELDS) {
+    if (!(field in data)) continue;
+    const beforeCents = Math.round((Number(before?.[field]) || 0) * 100);
+    const afterCents = Math.round((Number(data[field]) || 0) * 100);
+    if (beforeCents !== afterCents) return true;
+  }
+  return false;
+}

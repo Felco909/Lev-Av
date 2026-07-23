@@ -119,7 +119,8 @@ export async function GET(req: Request) {
     const dateFrom = searchParams.get('dateFrom');
     const dateTo = searchParams.get('dateTo');
 
-    const dateWhere: any = {};
+    // Отменённая заявка (Этап 4 аудита) — не в отчёт по прибыли/долгам, сделка не состоялась.
+    const dateWhere: any = { NOT: { status: 'cancelled' } };
     if (dateFrom || dateTo) {
       dateWhere.tripDate = {};
       if (dateFrom) dateWhere.tripDate.gte = new Date(dateFrom);
@@ -135,14 +136,14 @@ export async function GET(req: Request) {
 
     // Fetch client debts (all time, unpaid)
     const clientDebtTrips = await prisma.trip.findMany({
-      where: { clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
+      where: { clientPaymentStatus: { in: ['not_paid', 'partially_paid'] }, NOT: { status: 'cancelled' } },
       include: { client: { select: { name: true, phone: true } } },
       orderBy: { tripDate: 'desc' },
     });
 
     // Fetch carrier debts (all time, unpaid)
     const carrierDebtTrips = await prisma.trip.findMany({
-      where: { tripType: 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
+      where: { tripType: 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] }, NOT: { status: 'cancelled' } },
       include: {
         carrier: { select: { name: true } },
         client: { select: { name: true } },

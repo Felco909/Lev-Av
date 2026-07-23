@@ -39,7 +39,11 @@ export async function GET(req: Request) {
     const limitParam = Number(searchParams.get('limit') || 0);
     const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 5000) : undefined;
 
-    const where: any = {};
+    // Отменённая заявка (Этап 4 аудита) — исключаем из обеих сторон сравнения ("as-is" и
+    // canonical), иначе новое, намеренное исключение из canonicalTotals (через
+    // computeTripFinanceMetrics) выглядело бы как "расхождение" в диагностике, хотя это не
+    // регрессия формулы, а осознанное изменение бизнес-правила.
+    const where: any = { NOT: { status: 'cancelled' } };
     if (dateFrom || dateTo) {
       where.tripDate = {};
       if (dateFrom) where.tripDate.gte = new Date(dateFrom);
