@@ -560,6 +560,11 @@ model VehicleTrip {
   perDiem3Rate     Decimal  @default(1) @map("per_diem_3_rate") @db.Decimal(12, 4)
   perDiem3Amd      Decimal? @map("per_diem_3_amd") @db.Decimal(14, 2)
 
+  perDiem4         Decimal? @map("per_diem_4") @db.Decimal(12, 2)
+  perDiem4Currency String   @default("AMD") @map("per_diem_4_currency")
+  perDiem4Rate     Decimal  @default(1) @map("per_diem_4_rate") @db.Decimal(12, 4)
+  perDiem4Amd      Decimal? @map("per_diem_4_amd") @db.Decimal(14, 2)
+
   otherExpenses    Decimal? @map("other_expenses") @db.Decimal(12, 2)
   otherCurrency    String   @default("AMD") @map("other_currency")
   otherRate        Decimal  @default(1) @map("other_rate") @db.Decimal(12, 4)
@@ -578,6 +583,20 @@ model VehicleTrip {
   calculatedIdleMinutes   Float?    @map("calculated_idle_minutes")
   fuelCalcSource          String?   @map("fuel_calc_source") // "wialon_report" | "wialon_track" | "odometer_diff"
   fuelCalcAt              DateTime? @map("fuel_calc_at")
+
+  // Остальные показатели официального отчёта Wialon (WialonOfficialTripReport,
+  // lib/wialon/client.ts) — раньше запрашивались, но не сохранялись, только
+  // calculatedKm/calculatedFuelConsumedL/calculatedIdleMinutes выше. Нужны для
+  // "Итогового отчёта" рейса (см. docs/own-fleet-income-migration.md — переработка
+  // модуля "Рейсы"), показываются в формате, максимально близком к отчёту Wialon.
+  wialonFuelLevelBeginL         Float? @map("wialon_fuel_level_begin_l")
+  wialonFuelLevelEndL           Float? @map("wialon_fuel_level_end_l")
+  wialonEngineHoursSec          Float? @map("wialon_engine_hours_sec")
+  wialonAvgFuelConsumptionPer100Km Float? @map("wialon_avg_fuel_consumption_per_100km")
+  wialonFillingsCount           Int?   @map("wialon_fillings_count")
+  wialonFilledL                 Float? @map("wialon_filled_l")
+  wialonTheftsCount             Int?   @map("wialon_thefts_count")
+  wialonTheftedL                Float? @map("wialon_thefted_l")
 
   // База компании (пересмотрено с Wialon-геозон на собственные зоны TMS, см. CompanyZone) —
   // статус ПО БАЗЕ, отдельно от status выше (active/completed/archived), который используют

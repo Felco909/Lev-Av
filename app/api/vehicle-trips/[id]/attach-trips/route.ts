@@ -7,7 +7,8 @@ import { attachTripsToVehicleTrip } from '@/lib/vehicle-trips/attach-service';
 /**
  * Массовая привязка заявок к рейсу — карточка рейса ("Добавить заявки") и
  * предложение после создания нового рейса (см. Этап 2 архитектуры "заявка → рейс").
- * Заявка может быть привязана только пока рейс не закрыт.
+ * Рейс полностью редактируем независимо от статуса (переработка модуля "Рейсы",
+ * 2026-07-23) — привязка/перенос заявок работает и для завершённого рейса.
  */
 export async function POST(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = await paramsPromise;

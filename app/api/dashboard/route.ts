@@ -355,27 +355,27 @@ export async function GET(req: Request) {
     const ownFleetVehicleTrips = await prisma.vehicleTrip.findMany({
       where: vtWhere,
       select: {
-        id: true, finalRevenueAmd: true, finalExpensesAmd: true,
-        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
+        id: true,
+        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
         fleetExpenses: { select: { amountAmd: true } },
       },
     });
     const ownFleetIncomeByVt = await getVehicleTripsIncomeAmdBulk(ownFleetVehicleTrips.map((vt) => vt.id));
     const ownFleetRevenue = ownFleetVehicleTrips.reduce(
-      (sum, vt) => sum + (vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (ownFleetIncomeByVt.get(vt.id) ?? 0)),
+      (sum, vt) => sum + (ownFleetIncomeByVt.get(vt.id) ?? 0),
       0
     );
     const ownFleetSalary = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
     // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
     const ownFleetPerDiem = ownFleetVehicleTrips.reduce(
-      (s, v) => s + (Number(v.perDiemAmd) || 0) + (Number(v.perDiem2Amd) || 0) + (Number(v.perDiem3Amd) || 0),
+      (s, v) => s + (Number(v.perDiemAmd) || 0) + (Number(v.perDiem2Amd) || 0) + (Number(v.perDiem3Amd) || 0) + (Number(v.perDiem4Amd) || 0),
       0
     );
     const ownFleetOther = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.otherExpensesAmd) || 0), 0);
     const ownFleetFuel = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.fuelCostAmd) || 0), 0);
     const ownFleetExpenses = ownFleetVehicleTrips.reduce(
-      (sum, vt) => sum + (vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt)),
+      (sum, vt) => sum + computeVehicleTripExpensesAmd(vt),
       0
     );
     const ownFleetProfit = ownFleetRevenue - ownFleetExpenses;

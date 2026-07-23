@@ -107,19 +107,19 @@ export async function GET(req: Request) {
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       where: vehicleTripWhere,
       select: {
-        id: true, finalRevenueAmd: true, finalExpensesAmd: true,
-        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
+        id: true,
+        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
         fleetExpenses: { select: { amountAmd: true } },
       },
     });
     const ownFleetIncomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
     const ownFleetIncomeAmd = vehicleTrips.reduce(
-      (sum, vt) => sum + (vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (ownFleetIncomeByVt.get(vt.id) ?? 0)),
+      (sum, vt) => sum + (ownFleetIncomeByVt.get(vt.id) ?? 0),
       0
     );
     const ownFleetExpenseAmd = vehicleTrips.reduce(
-      (sum, vt) => sum + (vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt)),
+      (sum, vt) => sum + computeVehicleTripExpensesAmd(vt),
       0
     );
     const metaByTripId = new Map(

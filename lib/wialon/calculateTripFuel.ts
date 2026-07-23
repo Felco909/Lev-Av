@@ -21,6 +21,14 @@ export interface TripFuelCalcResult {
   calculatedIdleMinutes: number | null;
   fuelCalcSource: 'wialon_official_report' | null;
   fuelCalcAt: Date;
+  wialonFuelLevelBeginL: number | null;
+  wialonFuelLevelEndL: number | null;
+  wialonEngineHoursSec: number | null;
+  wialonAvgFuelConsumptionPer100Km: number | null;
+  wialonFillingsCount: number | null;
+  wialonFilledL: number | null;
+  wialonTheftsCount: number | null;
+  wialonTheftedL: number | null;
 }
 
 export async function calculateVehicleTripTotals(vehicleTripId: string): Promise<TripFuelCalcResult> {
@@ -38,6 +46,14 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     calculatedIdleMinutes: null,
     fuelCalcSource: null,
     fuelCalcAt: new Date(),
+    wialonFuelLevelBeginL: null,
+    wialonFuelLevelEndL: null,
+    wialonEngineHoursSec: null,
+    wialonAvgFuelConsumptionPer100Km: null,
+    wialonFillingsCount: null,
+    wialonFilledL: null,
+    wialonTheftsCount: null,
+    wialonTheftedL: null,
   };
 
   if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
@@ -48,6 +64,14 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
       result.calculatedIdleMinutes = Math.round(report.idleSec / 60);
       result.fuelCalcSource = 'wialon_official_report';
       result.fuelCalcAt = report.calculatedAt;
+      result.wialonFuelLevelBeginL = report.fuelLevelBeginL;
+      result.wialonFuelLevelEndL = report.fuelLevelEndL;
+      result.wialonEngineHoursSec = report.engineHoursSec;
+      result.wialonAvgFuelConsumptionPer100Km = report.avgFuelConsumptionPer100Km;
+      result.wialonFillingsCount = report.fillingsCount;
+      result.wialonFilledL = report.filledL;
+      result.wialonTheftsCount = report.theftsCount;
+      result.wialonTheftedL = report.theftedL;
     } catch (e) {
       console.error('[calculateTripFuel] Официальный отчёт Wialon не удался:', e);
       // Намеренно без fallback на собственный расчёт — лучше явное "не рассчитано" в карточке,
@@ -63,6 +87,14 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
       calculatedIdleMinutes: result.calculatedIdleMinutes,
       fuelCalcSource: result.fuelCalcSource,
       fuelCalcAt: result.fuelCalcAt,
+      wialonFuelLevelBeginL: result.wialonFuelLevelBeginL,
+      wialonFuelLevelEndL: result.wialonFuelLevelEndL,
+      wialonEngineHoursSec: result.wialonEngineHoursSec,
+      wialonAvgFuelConsumptionPer100Km: result.wialonAvgFuelConsumptionPer100Km,
+      wialonFillingsCount: result.wialonFillingsCount,
+      wialonFilledL: result.wialonFilledL,
+      wialonTheftsCount: result.wialonTheftsCount,
+      wialonTheftedL: result.wialonTheftedL,
     },
   });
 

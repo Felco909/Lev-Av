@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive, AlertTriangle } from 'lucide-react';
-import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
+import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP, STATUS_MAP } from '@/lib/utils';
 
 function baseStatusLabel(status: string | null): string {
   if (!status) return '—';
@@ -50,24 +50,29 @@ interface VT {
   calculatedIdleMinutes: number | null;
   geofenceStatus: string | null; geofenceStatusAt: string | null;
   salary: number | null; perDiem: number | null; otherExpenses: number | null;
-  perDiem2: number | null; perDiem3: number | null;
+  perDiem2: number | null; perDiem3: number | null; perDiem4: number | null;
   salaryCurrency: string; salaryRate: number;
   perDiemCurrency: string; perDiemRate: number;
   perDiem2Currency: string; perDiem2Rate: number;
   perDiem3Currency: string; perDiem3Rate: number;
+  perDiem4Currency: string; perDiem4Rate: number;
   otherCurrency: string; otherRate: number;
   salaryAmd: number | null; perDiemAmd: number | null; otherExpensesAmd: number | null;
-  perDiem2Amd: number | null; perDiem3Amd: number | null;
+  perDiem2Amd: number | null; perDiem3Amd: number | null; perDiem4Amd: number | null;
   fuelLiters: number | null; fuelCost: number | null;
   fuelCurrency: string; fuelRate: number; fuelCostAmd: number | null;
   calculatedKm: number | null; calculatedFuelConsumedL: number | null;
   fuelCalcSource: string | null; fuelCalcAt: string | null;
+  wialonFuelLevelBeginL: number | null; wialonFuelLevelEndL: number | null;
+  wialonEngineHoursSec: number | null; wialonAvgFuelConsumptionPer100Km: number | null;
+  wialonFillingsCount: number | null; wialonFilledL: number | null;
+  wialonTheftsCount: number | null; wialonTheftedL: number | null;
   _count: { trips: number; fleetExpenses: number };
 }
 
 interface VTDetail extends VT {
   matchedTrips: any[]; fleetExpenses: any[];
-  isFrozen: boolean; durationMs: number | null;
+  durationMs: number | null;
   finalRevenueAmd: number | null; finalExpensesAmd: number | null; closedAt: string | null; closedByUserId: string | null;
   revenue: number; totalExpenses: number; expensesByType: Record<string, number>; profit: number; mileage: number | null;
   directSalaryAmd: number; directPerDiemAmd: number; directOtherAmd: number; directFuelAmd: number; directTotalAmd: number; fleetExpTotal: number;
@@ -81,11 +86,12 @@ interface TripForm {
   returnLat: string; returnLon: string;
   endMileage: string; endFuel: string; notes: string; status: string;
   salary: string; perDiem: string; otherExpenses: string;
-  perDiem2: string; perDiem3: string;
+  perDiem2: string; perDiem3: string; perDiem4: string;
   salaryCurrency: string; salaryRate: string;
   perDiemCurrency: string; perDiemRate: string;
   perDiem2Currency: string; perDiem2Rate: string;
   perDiem3Currency: string; perDiem3Rate: string;
+  perDiem4Currency: string; perDiem4Rate: string;
   otherCurrency: string; otherRate: string;
   fuelLiters: string; fuelCost: string;
   fuelCurrency: string; fuelRate: string;
@@ -116,11 +122,12 @@ const emptyTripForm = (): TripForm => ({
   startMileage: '', startFuel: '', returnDate: '', returnLat: '', returnLon: '',
   endMileage: '', endFuel: '', notes: '', status: 'active',
   salary: '', perDiem: '', otherExpenses: '',
-  perDiem2: '', perDiem3: '',
+  perDiem2: '', perDiem3: '', perDiem4: '',
   salaryCurrency: 'AMD', salaryRate: '1',
   perDiemCurrency: 'AMD', perDiemRate: '1',
   perDiem2Currency: 'AMD', perDiem2Rate: '1',
   perDiem3Currency: 'AMD', perDiem3Rate: '1',
+  perDiem4Currency: 'AMD', perDiem4Rate: '1',
   otherCurrency: 'AMD', otherRate: '1',
   fuelLiters: '', fuelCost: '',
   fuelCurrency: 'AMD', fuelRate: '1',
@@ -147,6 +154,7 @@ function mapVtToForm(r: VT): TripForm {
     perDiem: r.perDiem != null ? String(Number(r.perDiem)) : '',
     perDiem2: r.perDiem2 != null ? String(Number(r.perDiem2)) : '',
     perDiem3: r.perDiem3 != null ? String(Number(r.perDiem3)) : '',
+    perDiem4: r.perDiem4 != null ? String(Number(r.perDiem4)) : '',
     otherExpenses: r.otherExpenses != null ? String(Number(r.otherExpenses)) : '',
     salaryCurrency: r.salaryCurrency || 'AMD',
     salaryRate: r.salaryRate != null ? String(Number(r.salaryRate)) : '1',
@@ -156,6 +164,8 @@ function mapVtToForm(r: VT): TripForm {
     perDiem2Rate: r.perDiem2Rate != null ? String(Number(r.perDiem2Rate)) : '1',
     perDiem3Currency: r.perDiem3Currency || 'AMD',
     perDiem3Rate: r.perDiem3Rate != null ? String(Number(r.perDiem3Rate)) : '1',
+    perDiem4Currency: r.perDiem4Currency || 'AMD',
+    perDiem4Rate: r.perDiem4Rate != null ? String(Number(r.perDiem4Rate)) : '1',
     otherCurrency: r.otherCurrency || 'AMD',
     otherRate: r.otherRate != null ? String(Number(r.otherRate)) : '1',
     fuelLiters: r.fuelLiters != null ? String(Number(r.fuelLiters)) : '',
@@ -173,13 +183,15 @@ function computeExpAmd(form: TripForm) {
   const pRate = form.perDiemCurrency === 'AMD' ? 1 : (parseFloat(form.perDiemRate) || 1);
   const p2Rate = form.perDiem2Currency === 'AMD' ? 1 : (parseFloat(form.perDiem2Rate) || 1);
   const p3Rate = form.perDiem3Currency === 'AMD' ? 1 : (parseFloat(form.perDiem3Rate) || 1);
+  const p4Rate = form.perDiem4Currency === 'AMD' ? 1 : (parseFloat(form.perDiem4Rate) || 1);
   const oRate = form.otherCurrency === 'AMD' ? 1 : (parseFloat(form.otherRate) || 1);
   const fRate = form.fuelCurrency === 'AMD' ? 1 : (parseFloat(form.fuelRate) || 1);
   const s = (parseFloat(form.salary) || 0) * sRate;
   const p1 = (parseFloat(form.perDiem) || 0) * pRate;
   const p2 = (parseFloat(form.perDiem2) || 0) * p2Rate;
   const p3 = (parseFloat(form.perDiem3) || 0) * p3Rate;
-  const p = p1 + p2 + p3;
+  const p4 = (parseFloat(form.perDiem4) || 0) * p4Rate;
+  const p = p1 + p2 + p3 + p4;
   const o = (parseFloat(form.otherExpenses) || 0) * oRate;
   const f = (parseFloat(form.fuelCost) || 0) * fRate;
   return { s: Math.round(s), p: Math.round(p), o: Math.round(o), f: Math.round(f), total: Math.round(s + p + o + f) };
@@ -220,7 +232,11 @@ export default function VehicleTripsPage() {
   // "ожидают привязки" в шапке, предложение после создания рейса, пикер добавления
   // в развёрнутой карточке, предупреждение при закрытии.
   const [unattachedCount, setUnattachedCount] = useState(0);
-  const [suggestTrips, setSuggestTrips] = useState<Array<{ id: string; tripNumber: string; tripDate: string; routeFrom: string; routeTo: string; clientRateAmd: number; clientName: string | null }>>([]);
+  const [suggestTrips, setSuggestTrips] = useState<Array<{ id: string; tripNumber: string; tripDate: string; routeFrom: string; routeTo: string; clientRateAmd: number; clientName: string | null; status: string; currentVehicleTripNumber?: string | null }>>([]);
+  // "На оплату"/"Сверка"/"Завершён" — перенос не трогает суммы/статус самой заявки, но
+  // диспетчера стоит явно предупредить, что меняется распределение дохода машины между
+  // рейсами задним числом (см. lib/vehicle-trips/attach-service.ts ADVANCED_TRIP_STATUSES).
+  const ADVANCED_STATUSES = new Set(['awaiting_payment', 'sverka', 'completed']);
   const [suggestForVehicleTripId, setSuggestForVehicleTripId] = useState<string | null>(null);
   const [suggestSelected, setSuggestSelected] = useState<Set<string>>(new Set());
   const [suggestSaving, setSuggestSaving] = useState(false);
@@ -275,15 +291,6 @@ export default function VehicleTripsPage() {
   const [closeError, setCloseError] = useState<string | null>(null);
   const [tripFormError, setTripFormError] = useState<string | null>(null);
   const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
-
-  // Редактирование уже закрытого рейса — по умолчанию поля read-only (заморожены), кнопка
-  // "Редактировать рейс" разблокирует форму; после сохранения снова становится read-only.
-  const [editingClosed, setEditingClosed] = useState(false);
-
-  // Пересчёт дохода закрытого рейса после правки дат — с явным подтверждением (п.8), не
-  // автоматически. Предпросмотр показывает, что изменится, до применения.
-  const [incomePreview, setIncomePreview] = useState<{ matchedTrips: any[]; newRevenueAmd: number; oldRevenueAmd: number | null; changed: boolean } | null>(null);
-  const [recalcIncomeLoading, setRecalcIncomeLoading] = useState(false);
 
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
@@ -436,10 +443,10 @@ export default function VehicleTripsPage() {
     // заполняются прямо там, не нужно искать отдельную форму редактирования.
     if (created?.id) {
       setExpandedId(created.id); loadDetail(created.id);
-      // Предложить привязать уже существующие непривязанные заявки этой машины
-      // (см. архитектуру "заявка → рейс") — без фильтра по датам, они просто
-      // отсортированы по дате, диспетчер сам решает, что относится к новому рейсу.
-      const unRes = await fetch(`/api/trips/unattached?vehicleId=${created.vehicleId}`);
+      // Предложить привязать заявки этой машины — непривязанные, а также уже привязанные
+      // к другому открытому рейсу (перенос сюда), см. архитектуру "заявка → рейс". Без
+      // фильтра по датам — диспетчер сам решает, что относится к новому рейсу.
+      const unRes = await fetch(`/api/trips/unattached?vehicleId=${created.vehicleId}&excludeVehicleTripId=${created.id}`);
       const unData = await unRes.json().catch(() => null);
       const candidates = Array.isArray(unData?.trips) ? unData.trips : [];
       if (candidates.length > 0) {
@@ -450,9 +457,11 @@ export default function VehicleTripsPage() {
     }
   };
 
-  // --- Привязка заявок к рейсу (Этап 2) ---
+  // --- Привязка заявок к рейсу (Этап 2) --- excludeVehicleTripId включает в список ещё и
+  // заявки, уже привязанные к ДРУГОМУ открытому рейсу этой машины (перенос сюда), не
+  // только по-настоящему свободные (см. lib/vehicle-trips/attach-service.ts).
   const openAddTripsPicker = async (vehicleTripId: string, vehicleId: string) => {
-    const res = await fetch(`/api/trips/unattached?vehicleId=${vehicleId}`);
+    const res = await fetch(`/api/trips/unattached?vehicleId=${vehicleId}&excludeVehicleTripId=${vehicleTripId}`);
     const data = await res.json().catch(() => null);
     setSuggestTrips(Array.isArray(data?.trips) ? data.trips : []);
     setSuggestForVehicleTripId(vehicleTripId);
@@ -469,6 +478,26 @@ export default function VehicleTripsPage() {
 
   const confirmSuggestAttach = async () => {
     if (!suggestForVehicleTripId || suggestSelected.size === 0) { setSuggestTrips([]); setSuggestForVehicleTripId(null); return; }
+
+    const selected = suggestTrips.filter(t => suggestSelected.has(t.id));
+    const moves = selected.filter(t => t.currentVehicleTripNumber);
+    const advanced = selected.filter(t => ADVANCED_STATUSES.has(t.status));
+    if (moves.length > 0 || advanced.length > 0) {
+      const lines: string[] = [];
+      if (moves.length > 0) {
+        lines.push('Перенос заявок из других рейсов:');
+        for (const t of moves) lines.push(`  №${t.tripNumber} (${fmtAmd(t.clientRateAmd)}) — сейчас в рейсе №${t.currentVehicleTripNumber}, доход этого рейса уменьшится на эту сумму`);
+      }
+      if (advanced.length > 0) {
+        lines.push('');
+        lines.push('Внимание: часть заявок уже далеко в финансовом статусе (На оплату/Сверка/Завершён):');
+        for (const t of advanced) lines.push(`  №${t.tripNumber} — статус «${STATUS_MAP[t.status]?.label || t.status}». Суммы по заявке не изменятся, но изменится распределение дохода между рейсами машины.`);
+      }
+      lines.push('');
+      lines.push('Продолжить?');
+      if (!confirm(lines.join('\n'))) return;
+    }
+
     setSuggestSaving(true);
     try {
       await fetch(`/api/vehicle-trips/${suggestForVehicleTripId}/attach-trips`, {
@@ -480,6 +509,20 @@ export default function VehicleTripsPage() {
     } finally {
       setSuggestSaving(false);
       setSuggestTrips([]); setSuggestForVehicleTripId(null); setSuggestSelected(new Set());
+    }
+  };
+
+  // Открепить заявку от рейса (без переноса в другой — "Заявки: add/remove/replace").
+  const [detachingTripId, setDetachingTripId] = useState<string | null>(null);
+  const detachTrip = async (tripId: string, tripNumber: string) => {
+    if (!confirm(`Открепить заявку №${tripNumber} от этого рейса? Она вернётся в "Ожидают привязки".`)) return;
+    setDetachingTripId(tripId);
+    try {
+      await fetch(`/api/trips/${tripId}/detach`, { method: 'POST' });
+      await loadUnattachedCount();
+      if (detail?.id) await loadDetail(detail.id);
+    } finally {
+      setDetachingTripId(null);
     }
   };
 
@@ -507,20 +550,15 @@ export default function VehicleTripsPage() {
     if (expandedId === id) { setExpandedId(null); setDetail(null); setDetailForm(emptyTripForm()); }
     else { setExpandedId(id); loadDetail(id); }
     setLiveSnapshot(null); setLiveError(null); setGeoEvents([]);
-    setEditingClosed(false); setIncomePreview(null); setShowCloseModal(false); setCloseError(null);
+    setShowCloseModal(false); setCloseError(null);
     setDetailSaveError(null);
   };
 
+  // Рейс полностью редактируем независимо от статуса — доход/расход всегда считаются
+  // автоматически (переработка модуля "Рейсы"), никакого отдельного "разморозить и
+  // пересчитать" шага больше не требуется.
   const saveDetailForm = async () => {
     if (!detail) return;
-    // Если рейс уже закрыт и меняются даты — после сохранения система САМА предлагает
-    // пересчёт состава заявок/дохода (предпросмотр + подтверждение), а не ждёт, что
-    // диспетчер сам заметит отдельную кнопку ("Доработка логики рейсов", п.6).
-    const wasClosed = detail.status === 'completed';
-    const datesChanged = wasClosed && (
-      detailForm.departureDate !== (detail.departureDate?.slice(0, 16) || '') ||
-      detailForm.returnDate !== (detail.returnDate?.slice(0, 16) || '')
-    );
     setDetailSaving(true);
     setDetailSaveError(null);
     try {
@@ -536,13 +574,6 @@ export default function VehicleTripsPage() {
       }
       await loadDetail(detail.id);
       await load();
-      if (datesChanged) {
-        await previewIncomeRecalc();
-        // editingClosed остаётся true — предпросмотр показывается только в этом режиме.
-      } else {
-        setEditingClosed(false);
-        setIncomePreview(null);
-      }
     } finally { setDetailSaving(false); }
   };
 
@@ -601,32 +632,6 @@ export default function VehicleTripsPage() {
       setCloseUnattached([]); setCloseUnattachedSelected(new Set());
       await confirmCloseTrip();
     } finally { setClosing(false); }
-  };
-
-  // --- Пересчёт дохода закрытого рейса после правки дат — с подтверждением (п.8) ---
-  const previewIncomeRecalc = async () => {
-    if (!detail) return;
-    setRecalcIncomeLoading(true);
-    try {
-      const res = await fetch(`/api/vehicle-trips/${detail.id}/recalculate-income`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: false }),
-      });
-      const data = await res.json();
-      if (res.ok) setIncomePreview(data);
-    } finally { setRecalcIncomeLoading(false); }
-  };
-
-  const confirmIncomeRecalc = async () => {
-    if (!detail) return;
-    setRecalcIncomeLoading(true);
-    try {
-      await fetch(`/api/vehicle-trips/${detail.id}/recalculate-income`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }),
-      });
-      setIncomePreview(null);
-      await loadDetail(detail.id);
-      await load();
-    } finally { setRecalcIncomeLoading(false); }
   };
 
   // --- Expense CRUD (additional fleet expenses) ---
@@ -711,7 +716,7 @@ export default function VehicleTripsPage() {
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{'Статус'}</label>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-2 py-1.5 text-xs mt-0.5 block w-[130px]">
             <option value="">{'Все'}</option>
-            <option value="active">{'В рейсе'}</option>
+            <option value="active">{'В работе'}</option>
             <option value="completed">{'Завершён'}</option>
             <option value="archived">{'Архив'}</option>
           </select>
@@ -752,7 +757,7 @@ export default function VehicleTripsPage() {
                         <span className="font-mono text-sm font-bold">{r.tripNumber}</span>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
                           r.status === 'archived' ? 'bg-slate-100 text-slate-500 dark:bg-slate-800/40 dark:text-slate-400' : isActive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                        }`}>{r.status === 'archived' ? '\u0410\u0440\u0445\u0438\u0432' : isActive ? '\u0412 \u0440\u0435\u0439\u0441\u0435' : '\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D'}</span>
+                        }`}>{r.status === 'archived' ? '\u0410\u0440\u0445\u0438\u0432' : isActive ? '\u0412 \u0440\u0430\u0431\u043E\u0442\u0435' : '\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D'}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">{r.vehicle?.plateNumber}</span>
@@ -826,15 +831,15 @@ export default function VehicleTripsPage() {
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground">{'Дата и время'} *</label>
-                                <input type="datetime-local" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
+                                <input type="datetime-local" value={detailForm.departureDate} onChange={e => setDetailForm({...detailForm, departureDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.startMileage} onChange={e => setDetailForm({...detailForm, startMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'нач.'} />
+                                <input type="number" min="0" value={detailForm.startMileage} onChange={e => setDetailForm({...detailForm, startMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'нач.'} />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {departureSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" step="0.01" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.startFuel} onChange={e => setDetailForm({...detailForm, startFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
+                                <input type="number" step="0.01" min="0" value={detailForm.startFuel} onChange={e => setDetailForm({...detailForm, startFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
                               </div>
                             </div>
                             {departureHint && <p className="text-[10px] text-amber-600">{departureHint}</p>}
@@ -847,15 +852,15 @@ export default function VehicleTripsPage() {
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground">{'Дата и время'}</label>
-                                <input type="datetime-local" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
+                                <input type="datetime-local" value={detailForm.returnDate} onChange={e => setDetailForm({...detailForm, returnDate: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Пробег (км)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.endMileage} onChange={e => setDetailForm({...detailForm, endMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'кон.'} />
+                                <input type="number" min="0" value={detailForm.endMileage} onChange={e => setDetailForm({...detailForm, endMileage: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'кон.'} />
                               </div>
                               <div>
                                 <label className="text-[10px] text-muted-foreground flex items-center gap-1">{'Топливо (л)'} {returnSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
-                                <input type="number" step="0.01" min="0" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.endFuel} onChange={e => setDetailForm({...detailForm, endFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
+                                <input type="number" step="0.01" min="0" value={detailForm.endFuel} onChange={e => setDetailForm({...detailForm, endFuel: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" placeholder={'остаток'} />
                               </div>
                             </div>
                             {returnHint && <p className="text-[10px] text-amber-600">{returnHint}</p>}
@@ -964,105 +969,72 @@ export default function VehicleTripsPage() {
                               <span className="font-medium">{'Рейс активен'}</span>
                             )}
                           </div>
-                          {detail.status === 'active' && (
-                            <div className="flex items-center gap-2">
-                              <button onClick={() => openAddTripsPicker(detail.id, detail.vehicleId)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
-                                {'Добавить заявки'}
-                              </button>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => openAddTripsPicker(detail.id, detail.vehicleId)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
+                              {'Добавить заявки'}
+                            </button>
+                            {detail.status === 'active' && (
                               <button onClick={openCloseModal} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">
                                 {'Закрыть рейс'}
                               </button>
-                            </div>
-                          )}
-                          {detail.status === 'completed' && (
-                            <button onClick={() => setEditingClosed(v => !v)} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 border rounded-lg hover:bg-muted transition">
-                              {editingClosed ? 'Отменить редактирование' : 'Редактировать рейс'}
-                            </button>
-                          )}
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Рейс полностью редактируем независимо от статуса (переработка модуля
+                            "Рейсы", 2026-07-23) — машина/водитель тоже доступны для правки, не
+                            только даты/расходы/статус. */}
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[11px] text-muted-foreground">{'Машина'}</label>
+                            <select value={detailForm.vehicleId} onChange={e => setDetailForm({...detailForm, vehicleId: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
+                              {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNumber} {'—'} {v.brand} {v.model}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] text-muted-foreground">{'Водитель'}</label>
+                            <select value={detailForm.driverId} onChange={e => setDetailForm({...detailForm, driverId: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
+                              <option value="">{'Не указан'}</option>
+                              {drivers.map(d => <option key={d.id} value={d.id}>{d.fullName}</option>)}
+                            </select>
+                          </div>
                         </div>
 
                         <div className="grid sm:grid-cols-2 gap-3">
                           <div>
                             <label className="text-[11px] text-muted-foreground">{'Статус'}</label>
-                            {detail.status === 'completed' ? (
-                              <p className="text-xs font-medium mt-1.5">{'Завершён'}</p>
-                            ) : (
-                              <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
-                                <option value="active">{'В рейсе'}</option>
-                                <option value="archived">{'Архив'}</option>
-                              </select>
-                            )}
+                            <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
+                              <option value="active">{'В работе'}</option>
+                              <option value="completed">{'Завершён'}</option>
+                              <option value="archived">{'Архив'}</option>
+                            </select>
                           </div>
                           <div>
                             <label className="text-[11px] text-muted-foreground">{'Заметки'}</label>
-                            <input type="text" disabled={detail.status === 'completed' && !editingClosed} value={detailForm.notes} onChange={e => setDetailForm({...detailForm, notes: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted" />
+                            <input type="text" value={detailForm.notes} onChange={e => setDetailForm({...detailForm, notes: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5" />
                           </div>
                         </div>
 
-                        {/* Доход/расходы закрытого рейса — заморожены (finalRevenueAmd/finalExpensesAmd),
-                            редактируются напрямую только в режиме "Редактировать рейс". */}
-                        {detail.status === 'completed' && (
-                          <div className="grid sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-[11px] text-muted-foreground">{'Итоговый доход (AMD)'}</label>
-                              <input type="number" step="0.01" disabled={!editingClosed} value={detailForm.finalRevenueAmd} onChange={e => setDetailForm({...detailForm, finalRevenueAmd: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted font-mono" />
-                            </div>
-                            <div>
-                              <label className="text-[11px] text-muted-foreground">{'Итоговые расходы (AMD)'}</label>
-                              <input type="number" step="0.01" disabled={!editingClosed} value={detailForm.finalExpensesAmd} onChange={e => setDetailForm({...detailForm, finalExpensesAmd: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 disabled:opacity-60 disabled:bg-muted font-mono" />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Пересчёт состава заявок/дохода после правки дат закрытого рейса — система
-                            САМА предлагает пересчёт сразу после сохранения новых дат (см. saveDetailForm),
-                            но применяется только с явным подтверждением (п.6/п.8), не автоматически.
-                            Кнопка ниже — для случая, если предпросмотр закрыли и хотят вызвать снова. */}
-                        {detail.status === 'completed' && editingClosed && (
-                          <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 text-xs space-y-2">
-                            {incomePreview ? (
-                              <>
-                                <p className="font-semibold text-amber-700 dark:text-amber-400">{'Пересчитать состав заявок и финансовые показатели рейса?'}</p>
-                                <p>{'По новым датам в рейс войдёт заявок'}: {incomePreview.matchedTrips.length}, {'доход'}: {fmtAmd(incomePreview.newRevenueAmd)} {incomePreview.oldRevenueAmd != null && <span className="text-muted-foreground">({'сейчас'} {fmtAmd(incomePreview.oldRevenueAmd)})</span>}</p>
-                                {incomePreview.changed ? (
-                                  <div className="flex gap-2">
-                                    <button onClick={confirmIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition disabled:opacity-50">
-                                      {'Да, пересчитать'}
-                                    </button>
-                                    <button onClick={() => setIncomePreview(null)} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
-                                      {'Нет, оставить как есть'}
-                                    </button>
-                                  </div>
-                                ) : <p className="text-muted-foreground">{'Изменений нет.'}</p>}
-                              </>
-                            ) : (
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-amber-700 dark:text-amber-400">{'Если меняли даты — можно пересчитать состав заявок и доход отдельно (не автоматически).'}</p>
-                                <button onClick={previewIncomeRecalc} disabled={recalcIncomeLoading} className="inline-flex items-center gap-1 shrink-0 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
-                                  {recalcIncomeLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : null}{'Пересчитать доход'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Итоги рейса — автоматический расчёт из Wialon, только для закрытых рейсов.
-                            Заморожено: кнопка пересчёта недоступна после закрытия (см. freeze выше). */}
+                        {/* Итоги рейса — автоматический расчёт из Wialon. Рейс полностью редактируем
+                            независимо от статуса, поэтому пересчёт доступен всегда. */}
                         {detail.returnDate && (
                           <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 text-xs space-y-1">
                             <div className="flex items-center justify-between gap-2">
                               <p className="font-semibold text-emerald-700 dark:text-emerald-400">{'Итоги рейса'}</p>
-                              {detail.status !== 'completed' && (
-                                <button onClick={recalculateFuel} disabled={recalculating} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
-                                  {recalculating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
-                                  {'Пересчитать по Wialon'}
-                                </button>
-                              )}
+                              <button onClick={recalculateFuel} disabled={recalculating} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 border rounded-md hover:bg-muted transition disabled:opacity-50">
+                                {recalculating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Fuel className="w-3 h-3" />}
+                                {'Пересчитать по Wialon'}
+                              </button>
                             </div>
                             {(detail.calculatedKm != null || detail.calculatedFuelConsumedL != null || detail.calculatedIdleMinutes != null) ? (
                               <>
                                 <p>{'Пробег: '}{detail.calculatedKm != null ? `${detail.calculatedKm.toLocaleString('ru-RU')} км` : '—'}</p>
-                                <p>{'Расход топлива: '}{detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л` : '—'}</p>
+                                <p>{'Расход топлива (ДУТ): '}{detail.calculatedFuelConsumedL != null ? `${detail.calculatedFuelConsumedL.toLocaleString('ru-RU')} л` : '—'}</p>
+                                <p>{'Ср. расход: '}{detail.wialonAvgFuelConsumptionPer100Km != null ? `${detail.wialonAvgFuelConsumptionPer100Km.toLocaleString('ru-RU')} л/100км` : '—'}</p>
+                                <p>{'Уровень топлива: '}{detail.wialonFuelLevelBeginL != null ? `${detail.wialonFuelLevelBeginL.toLocaleString('ru-RU')} л` : '—'}{' → '}{detail.wialonFuelLevelEndL != null ? `${detail.wialonFuelLevelEndL.toLocaleString('ru-RU')} л` : '—'}</p>
+                                <p>{'Заправки: '}{detail.wialonFillingsCount != null ? `${detail.wialonFillingsCount}` : '—'}{detail.wialonFilledL != null ? ` (всего ${detail.wialonFilledL.toLocaleString('ru-RU')} л)` : ''}</p>
+                                <p>{'Сливы: '}{detail.wialonTheftsCount != null ? `${detail.wialonTheftsCount}` : '—'}{detail.wialonTheftedL != null ? ` (всего ${detail.wialonTheftedL.toLocaleString('ru-RU')} л)` : ''}</p>
+                                <p>{'Моточасы: '}{detail.wialonEngineHoursSec != null ? `${Math.floor(detail.wialonEngineHoursSec / 3600)} ч ${Math.round((detail.wialonEngineHoursSec % 3600) / 60)} мин` : '—'}</p>
                                 <p>{'Простой: '}{detail.calculatedIdleMinutes != null ? `${Math.floor(detail.calculatedIdleMinutes / 60)} ч ${Math.round(detail.calculatedIdleMinutes % 60)} мин` : '—'}</p>
                                 <p className="text-muted-foreground">{'По данным Wialon за период с даты выезда до даты возврата.'}</p>
                                 {detail.fuelCalcAt && (
@@ -1131,6 +1103,19 @@ export default function VehicleTripsPage() {
                                 <input type="number" step="0.0001" min="0" value={detailForm.perDiem3Rate} onChange={e => setDetailForm({...detailForm, perDiem3Rate: e.target.value})} disabled={detailForm.perDiem3Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
                                 <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
                                   {detailForm.perDiem3Currency !== 'AMD' && (parseFloat(detailForm.perDiem3) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.perDiem3) || 0) * (parseFloat(detailForm.perDiem3Rate) || 1))) : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-purple-600">{'Суточные №4'}</label>
+                              <div className="grid grid-cols-4 gap-2">
+                                <input type="number" step="0.01" min="0" value={detailForm.perDiem4} onChange={e => setDetailForm({...detailForm, perDiem4: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-full" placeholder="Сумма" />
+                                <select value={detailForm.perDiem4Currency} onChange={e => setDetailForm({...detailForm, perDiem4Currency: e.target.value, perDiem4Rate: e.target.value === 'AMD' ? '1' : detailForm.perDiem4Rate})} className="border rounded-lg px-2 py-1.5 text-sm w-full">
+                                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input type="number" step="0.0001" min="0" value={detailForm.perDiem4Rate} onChange={e => setDetailForm({...detailForm, perDiem4Rate: e.target.value})} disabled={detailForm.perDiem4Currency === 'AMD'} className="border rounded-lg px-2 py-1.5 text-sm w-full disabled:opacity-50" placeholder="Курс" />
+                                <div className="flex items-center text-xs font-mono text-purple-600 pl-1">
+                                  {detailForm.perDiem4Currency !== 'AMD' && (parseFloat(detailForm.perDiem4) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.perDiem4) || 0) * (parseFloat(detailForm.perDiem4Rate) || 1))) : ''}
                                 </div>
                               </div>
                             </div>
@@ -1252,22 +1237,35 @@ export default function VehicleTripsPage() {
                           </div>
                         )}
 
-                        {/* Linked logistics trips — доход рейса живьём (или заморожен, если рейс закрыт) */}
-                        {detail.matchedTrips?.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold mb-1">
-                              {'Заявки'} ({detail.matchedTrips.length}){detail.isFrozen && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">{'(зафиксировано при закрытии)'}</span>}
-                            </p>
+                        {/* Заявки рейса — доход считается ВСЕГДА автоматически как сумма привязанных
+                            заявок (Trip.vehicleTripId), независимо от статуса рейса. */}
+                        <div>
+                          <p className="text-xs font-semibold mb-1">
+                            {'Заявки'} ({detail.matchedTrips?.length ?? 0})
+                          </p>
+                          {detail.matchedTrips?.length > 0 ? (
                             <div className="space-y-1">
                               {detail.matchedTrips.map((t: any) => (
-                                <CrumbLink key={t.id} href={`/trips/${t.id}`} fromLabel="Рейсы машин" fromKey="vehicle-trips" className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-1.5 text-xs hover:bg-muted/50 transition-colors">
-                                  <span><span className="font-mono font-medium">{t.tripNumber}</span> {t.routeFrom} {'→'} {t.routeTo} <span className="text-muted-foreground">({t.clientName})</span></span>
-                                  <span className="font-mono text-emerald-600">{fmtAmd(Number(t.clientRateAmd || 0))}</span>
-                                </CrumbLink>
+                                <div key={t.id} className="flex items-center gap-1 bg-muted/30 rounded-lg pr-1 hover:bg-muted/50 transition-colors">
+                                  <CrumbLink href={`/trips/${t.id}`} fromLabel="Рейсы машин" fromKey="vehicle-trips" className="flex-1 min-w-0 flex items-center justify-between px-3 py-1.5 text-xs">
+                                    <span className="truncate"><span className="font-mono font-medium">{t.tripNumber}</span> {t.routeFrom} {'→'} {t.routeTo} <span className="text-muted-foreground">({t.clientName})</span></span>
+                                    <span className="font-mono text-emerald-600 ml-2 whitespace-nowrap">{fmtAmd(Number(t.clientRateAmd || 0))}</span>
+                                  </CrumbLink>
+                                  <button type="button" onClick={() => detachTrip(t.id, t.tripNumber)} disabled={detachingTripId === t.id}
+                                    className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30 flex-shrink-0" title={'Открепить от рейса'}>
+                                    {detachingTripId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3 text-red-500" />}
+                                  </button>
+                                </div>
                               ))}
+                              <div className="flex items-center justify-between px-3 py-1.5 text-xs font-semibold">
+                                <span>{'ИТОГО'}</span>
+                                <span className="font-mono text-emerald-700 dark:text-emerald-400">{fmtAmd(detail.revenue)}</span>
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          ) : (
+                            <p className="text-xs text-muted-foreground py-2 text-center">{'Ни одной заявки не привязано к этому рейсу.'}</p>
+                          )}
+                        </div>
                       </>
                     ) : null}
                   </div>
@@ -1355,7 +1353,7 @@ export default function VehicleTripsPage() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => { setSuggestTrips([]); setSuggestForVehicleTripId(null); }}>
           <div className="bg-card rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold">{'Привязать заявки к рейсу'}</h2>
-            <p className="text-xs text-muted-foreground -mt-1">{'Непривязанные заявки этой машины (отсортированы по дате) — отметьте нужные.'}</p>
+            <p className="text-xs text-muted-foreground -mt-1">{'Заявки этой машины (отсортированы по дате) — свободные и уже привязанные к другому открытому рейсу (перенос сюда). Отметьте нужные.'}</p>
             <div className="max-h-96 overflow-y-auto divide-y">
               {suggestTrips.map(t => (
                 <label key={t.id} className="flex items-center gap-2 py-2 text-xs cursor-pointer">
@@ -1363,10 +1361,20 @@ export default function VehicleTripsPage() {
                   <span className="font-mono font-medium">{t.tripNumber}</span>
                   <span className="text-muted-foreground">{formatDate(t.tripDate)}</span>
                   <span className="text-muted-foreground truncate">{t.routeFrom} → {t.routeTo}</span>
+                  {t.currentVehicleTripNumber && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 whitespace-nowrap">
+                      {`уже в рейсе №${t.currentVehicleTripNumber}`}
+                    </span>
+                  )}
+                  {ADVANCED_STATUSES.has(t.status) && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400 whitespace-nowrap">
+                      {STATUS_MAP[t.status]?.label || t.status}
+                    </span>
+                  )}
                   <span className="font-mono ml-auto">{fmtAmd(t.clientRateAmd)}</span>
                 </label>
               ))}
-              {suggestTrips.length === 0 && <p className="text-xs text-muted-foreground py-6 text-center">{'Нет непривязанных заявок этой машины'}</p>}
+              {suggestTrips.length === 0 && <p className="text-xs text-muted-foreground py-6 text-center">{'Нет заявок для привязки/переноса'}</p>}
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <button onClick={() => { setSuggestTrips([]); setSuggestForVehicleTripId(null); }} disabled={suggestSaving} className="px-4 py-2 text-sm rounded-lg border hover:bg-muted transition disabled:opacity-50">{'Отмена'}</button>

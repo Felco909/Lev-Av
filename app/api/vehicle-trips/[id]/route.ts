@@ -9,13 +9,10 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/vehicle-trips/[id] — full detail + linked trips + expenses + profit calc.
  *
- * Доход: "Доработка логики рейсов" (финальная архитектура) — Trip.vehicleTripId нигде
- * не заполнялся, поэтому раньше доход всегда показывал 0. Теперь:
- * Этап 3 миграции на архитектуру "заявка → рейс": список заявок рейса теперь всегда
- * читается через явную связь Trip.vehicleTripId — даты в этом расчёте не участвуют.
- * Если рейс уже заморожен закрытием (finalRevenueAmd не null) — сумма дохода всё равно
- * берётся из замороженного значения (не пересчитывается, даже если ставка заявки
- * изменится после закрытия), список заявок для отображения — тот же явный набор.
+ * Список заявок рейса читается через явную связь Trip.vehicleTripId — даты в этом
+ * расчёте не участвуют. Доход/расходы/прибыль считаются ВСЕГДА автоматически из текущего
+ * состава заявок и статей расходов — независимо от статуса рейса (переработка модуля
+ * "Рейсы", 2026-07-23): рейс полностью редактируем, никакой заморозки при закрытии нет.
  */
 export async function GET(_req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -53,12 +50,11 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   // ЕДИНЫЙ источник дохода/расходов/прибыли (lib/vehicle-trips/revenue.ts) — та же функция,
   // что использует /api/vehicles/[id]/economics и /api/vehicle-analytics, чтобы карточка
   // рейса, экономика машины и аналитика никогда не расходились в цифрах.
-  const { revenue, totalExpenses, profit, isFrozen } = computeVehicleTripFinancials(vt, matchedTrips);
+  const { revenue, totalExpenses, profit } = computeVehicleTripFinancials(vt, matchedTrips);
 
-  // Direct expense fields (on VehicleTrip itself) + FleetExpense — для разбивки по категориям
-  // в UI (не влияет на totalExpenses выше — та уже учитывает заморозку).
+  // Direct expense fields (on VehicleTrip itself) + FleetExpense — для разбивки по категориям в UI.
   const directSalaryAmd = Number(vt.salaryAmd) || 0;
-  const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0);
+  const directPerDiemAmd = (Number(vt.perDiemAmd) || 0) + (Number(vt.perDiem2Amd) || 0) + (Number(vt.perDiem3Amd) || 0) + (Number(vt.perDiem4Amd) || 0);
   const directOtherAmd = Number(vt.otherExpensesAmd) || 0;
   const directFuelAmd = Number(vt.fuelCostAmd) || 0;
   const directTotalAmd = directSalaryAmd + directPerDiemAmd + directOtherAmd + directFuelAmd;
@@ -86,7 +82,7 @@ export async function GET(_req: NextRequest, { params: paramsPromise }: { params
   const durationMs = vt.returnDate ? vt.returnDate.getTime() - vt.departureDate.getTime() : null;
 
   return NextResponse.json({
-    ...vt, revenue, totalExpenses, expensesByType, profit, mileage, matchedTrips, isFrozen, durationMs,
+    ...vt, revenue, totalExpenses, expensesByType, profit, mileage, matchedTrips, durationMs,
     directSalaryAmd, directPerDiemAmd, directOtherAmd, directFuelAmd, directTotalAmd, fleetExpTotal,
     costPerKm, fuelPer100Km, profitMarginPercent,
   });

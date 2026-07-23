@@ -108,16 +108,14 @@ export interface VehicleTripFinancials {
   revenue: number;
   totalExpenses: number;
   profit: number;
-  isFrozen: boolean;
 }
 
 interface VehicleTripLike {
-  finalRevenueAmd: unknown;
-  finalExpensesAmd: unknown;
   salaryAmd: unknown;
   perDiemAmd: unknown;
   perDiem2Amd: unknown;
   perDiem3Amd: unknown;
+  perDiem4Amd: unknown;
   otherExpensesAmd: unknown;
   fuelCostAmd: unknown;
   fleetExpenses: Array<{ amountAmd: unknown }>;
@@ -126,14 +124,12 @@ interface VehicleTripLike {
 /**
  * ЕДИНЫЙ источник дохода/расходов/прибыли рейса машины — используется карточкой рейса
  * (app/api/vehicle-trips/[id]), экономикой машины (app/api/vehicles/[id]/economics) и
- * аналитикой (app/api/vehicle-analytics). Раньше каждое из этих мест считало доход своей
- * копией одной и той же (сломанной — vt.trips всегда пуст) формулы — отсюда расхождения
- * "аналитика не видит доход". Закрытый рейс — замороженные finalRevenueAmd/finalExpensesAmd,
- * НЕ пересчитываются даже если matchedTrips изменился бы. Активный — live по matchedTrips.
+ * аналитикой (app/api/vehicle-analytics). Доход/расход считаются ВСЕГДА автоматически,
+ * независимо от статуса рейса (переработка модуля "Рейсы", 2026-07-23) — ручной ввод и
+ * заморозка через finalRevenueAmd/finalExpensesAmd убраны, рейс полностью редактируем.
  */
 export function computeVehicleTripFinancials(vt: VehicleTripLike, matchedTrips: MatchedTrip[]): VehicleTripFinancials {
-  const isFrozen = vt.finalRevenueAmd != null;
-  const revenue = isFrozen ? Number(vt.finalRevenueAmd) : sumRevenueAmd(matchedTrips);
-  const totalExpenses = isFrozen ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt);
-  return { revenue, totalExpenses, profit: revenue - totalExpenses, isFrozen };
+  const revenue = sumRevenueAmd(matchedTrips);
+  const totalExpenses = computeVehicleTripExpensesAmd(vt);
+  return { revenue, totalExpenses, profit: revenue - totalExpenses };
 }

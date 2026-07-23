@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { getFleetSnapshot } from '@/lib/wialon/client';
 import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
-import { maybeSyncVehicleMileage, computeVehicleTripExpensesAmd, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
+import { maybeSyncVehicleMileage, validateNoOverlappingVehicleTripDates } from '@/lib/vehicle-trips/close-trip';
 import { getUnattachedOwnTrips } from '@/lib/vehicle-trips/attach-service';
 
 /**
@@ -18,10 +18,9 @@ import { getUnattachedOwnTrips } from '@/lib/vehicle-trips/attach-service';
  * 1) один раз берётся живой снимок Wialon (getFleetSnapshot — тот же источник, что и
  *    кнопка "Обновить сейчас");
  * 2) один раз вызывается существующий calculateVehicleTripTotals (GPS-трек выезд-возврат);
- * 3) замораживается доход по уже ЯВНО привязанным заявкам (Trip.vehicleTripId = этот
- *    рейс) — состав определяется связью, проставленной за время жизни рейса (автопривязка
- *    при создании заявки, массовое "Добавить заявки", ручной перенос), НЕ датами.
- * После этого — status=completed, дальше ничего из этого не пересчитывается автоматически.
+ * После этого — status=completed. Доход/расходы/прибыль по-прежнему считаются ВСЕГДА
+ * автоматически (см. lib/vehicle-trips/revenue.ts) — закрытие рейса ничего не замораживает
+ * и не блокирует дальнейшее редактирование (переработка модуля "Рейсы", 2026-07-23).
  */
 export async function POST(req: NextRequest, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = await paramsPromise;
@@ -103,16 +102,10 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
     calcError = `Не удалось рассчитать пробег/топливо по GPS-треку: ${(e as Error).message}`;
   }
 
-  // 3) Замораживаем доход по уже ЯВНО привязанным заявкам (Trip.vehicleTripId = этот
-  // рейс) — состав больше не определяется по датам на закрытии (см. Этап 2/3
-  // архитектуры "заявка → рейс"): что было привязано за время жизни рейса (вручную,
-  // автопривязкой при создании заявки, массовым "Добавить заявки"), то и замораживаем.
   const matched = await prisma.trip.findMany({
     where: { vehicleTripId: trip.id },
-    select: { clientRateAmd: true, clientRate: true },
+    select: { id: true },
   });
-  const finalRevenueAmd = matched.reduce((s, t) => s + Number(t.clientRateAmd ?? t.clientRate ?? 0), 0);
-  const finalExpensesAmd = computeVehicleTripExpensesAmd(trip);
 
   const closed = await prisma.vehicleTrip.update({
     where: { id: trip.id },
@@ -120,8 +113,6 @@ export async function POST(req: NextRequest, { params: paramsPromise }: { params
       status: 'completed',
       closedAt: new Date(),
       closedByUserId: userId ?? null,
-      finalRevenueAmd,
-      finalExpensesAmd,
     },
     include: {
       vehicle: { select: { id: true, plateNumber: true, brand: true, model: true } },

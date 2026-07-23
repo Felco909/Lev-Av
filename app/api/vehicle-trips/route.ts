@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     perDiem, perDiemCurrency, perDiemRate,
     perDiem2, perDiem2Currency, perDiem2Rate,
     perDiem3, perDiem3Currency, perDiem3Rate,
+    perDiem4, perDiem4Currency, perDiem4Rate,
     otherExpenses, otherCurrency, otherRate,
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
@@ -111,6 +112,7 @@ export async function POST(req: NextRequest) {
   const pCur = perDiemCurrency || 'AMD'; const pRate = parseFloat(perDiemRate) || 1;
   const p2Cur = perDiem2Currency || 'AMD'; const p2Rate = parseFloat(perDiem2Rate) || 1;
   const p3Cur = perDiem3Currency || 'AMD'; const p3Rate = parseFloat(perDiem3Rate) || 1;
+  const p4Cur = perDiem4Currency || 'AMD'; const p4Rate = parseFloat(perDiem4Rate) || 1;
   const oCur = otherCurrency || 'AMD'; const oRate = parseFloat(otherRate) || 1;
   const fCur = fuelCurrency || 'AMD'; const fRate = parseFloat(fuelRate) || 1;
 
@@ -139,6 +141,8 @@ export async function POST(req: NextRequest) {
       perDiem2Amd: toAmd(perDiem2, p2Cur, p2Rate),
       perDiem3: perDiem3 ? parseFloat(perDiem3) : null, perDiem3Currency: p3Cur, perDiem3Rate: p3Rate,
       perDiem3Amd: toAmd(perDiem3, p3Cur, p3Rate),
+      perDiem4: perDiem4 ? parseFloat(perDiem4) : null, perDiem4Currency: p4Cur, perDiem4Rate: p4Rate,
+      perDiem4Amd: toAmd(perDiem4, p4Cur, p4Rate),
       otherExpenses: otherExpenses ? parseFloat(otherExpenses) : null, otherCurrency: oCur, otherRate: oRate,
       otherExpensesAmd: toAmd(otherExpenses, oCur, oRate),
       fuelLiters: fuelLiters ? parseFloat(fuelLiters) : null,
@@ -165,11 +169,12 @@ export async function PUT(req: NextRequest) {
   const body = await req.json();
   const { id, vehicleId, driverId, departureDate, departureLat, departureLon, startMileage, startFuel,
     returnDate, returnLat, returnLon, endMileage, endFuel, notes, status: st,
-    tripNumber, finalRevenueAmd, finalExpensesAmd,
+    tripNumber,
     salary, salaryCurrency, salaryRate,
     perDiem, perDiemCurrency, perDiemRate,
     perDiem2, perDiem2Currency, perDiem2Rate,
     perDiem3, perDiem3Currency, perDiem3Rate,
+    perDiem4, perDiem4Currency, perDiem4Rate,
     otherExpenses, otherCurrency, otherRate,
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
@@ -178,6 +183,20 @@ export async function PUT(req: NextRequest) {
   const before = await prisma.vehicleTrip.findUnique({ where: { id } });
   if (!before) return NextResponse.json({ error: '\u0420\u0435\u0439\u0441 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d' }, { status: 404 });
   const wasClosed = before.status === 'completed';
+
+  // \u0421\u043c\u0435\u043d\u0430 \u043c\u0430\u0448\u0438\u043d\u044b \u0443 \u0440\u0435\u0439\u0441\u0430, \u043a \u043a\u043e\u0442\u043e\u0440\u043e\u043c\u0443 \u0443\u0436\u0435 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u044b \u0437\u0430\u044f\u0432\u043a\u0438, \u043e\u0441\u0442\u0430\u0432\u0438\u043b\u0430 \u0431\u044b Trip.vehicleId
+  // (\u043c\u0430\u0448\u0438\u043d\u0430 \u0437\u0430\u044f\u0432\u043a\u0438) \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u044e\u0449\u0438\u043c \u0441 VehicleTrip.vehicleId (\u043c\u0430\u0448\u0438\u043d\u0430 \u0440\u0435\u0439\u0441\u0430) \u2014 \u0434\u043e\u0445\u043e\u0434 \u0432\u0441\u0451
+  // \u0440\u0430\u0432\u043d\u043e \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u0432\u0435\u0440\u043d\u043e (\u043f\u043e vehicleTripId, \u043d\u0435 \u043f\u043e vehicleId), \u043d\u043e \u044d\u0442\u043e \u0432\u0432\u043e\u0434\u044f\u0449\u0435\u0435 \u0432 \u0437\u0430\u0431\u043b\u0443\u0436\u0434\u0435\u043d\u0438\u0435
+  // \u0440\u0430\u0441\u0445\u043e\u0436\u0434\u0435\u043d\u0438\u0435 \u0432 \u0434\u0430\u043d\u043d\u044b\u0445. \u041f\u0440\u043e\u0449\u0435 \u043f\u043e\u0442\u0440\u0435\u0431\u043e\u0432\u0430\u0442\u044c \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0442\u0438/\u043e\u0442\u043a\u0440\u0435\u043f\u0438\u0442\u044c \u0437\u0430\u044f\u0432\u043a\u0438.
+  if (vehicleId !== undefined && vehicleId !== before.vehicleId) {
+    const attachedCount = await prisma.trip.count({ where: { vehicleTripId: id } });
+    if (attachedCount > 0) {
+      return NextResponse.json(
+        { error: `\u041a \u0440\u0435\u0439\u0441\u0443 \u043f\u0440\u0438\u0432\u044f\u0437\u0430\u043d\u043e ${attachedCount} \u0437\u0430\u044f\u0432\u043e\u043a(\u0438) \u2014 \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0438\u0442\u0435 \u0438\u0445 \u0432 \u0434\u0440\u0443\u0433\u043e\u0439 \u0440\u0435\u0439\u0441 \u0447\u0435\u0440\u0435\u0437 "\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0437\u0430\u044f\u0432\u043a\u0438", \u043f\u043e\u0442\u043e\u043c \u043c\u0435\u043d\u044f\u0439\u0442\u0435 \u043c\u0430\u0448\u0438\u043d\u0443` },
+        { status: 400 }
+      );
+    }
+  }
 
   if (startMileage !== undefined || endMileage !== undefined) {
     const effectiveStartMileage = startMileage !== undefined ? (startMileage ? parseInt(startMileage, 10) : null) : before.startMileage;
@@ -234,11 +253,8 @@ export async function PUT(req: NextRequest) {
   if (st !== undefined) data.status = st;
   if (tripNumber !== undefined) data.tripNumber = tripNumber.trim();
 
-  // Доход/расходы редактируются напрямую ТОЛЬКО у уже закрытого рейса (заморожены при
-  // закрытии) — правки логируются ниже. Для активного рейса эти поля live-считаются
-  // (см. GET-роут), сохранять их незачем.
-  if (wasClosed && finalRevenueAmd !== undefined) data.finalRevenueAmd = finalRevenueAmd === '' || finalRevenueAmd == null ? null : parseFloat(finalRevenueAmd);
-  if (wasClosed && finalExpensesAmd !== undefined) data.finalExpensesAmd = finalExpensesAmd === '' || finalExpensesAmd == null ? null : parseFloat(finalExpensesAmd);
+  // Доход/расходы вручную не вводятся никогда — всегда считаются автоматически (доход —
+  // сумма привязанных заявок, расход — статьи ниже), независимо от статуса рейса.
 
   // Per-expense AMD calc helper
   const toAmd = (v: any, cur: string, rate: number) => {
@@ -283,6 +299,15 @@ export async function PUT(req: NextRequest) {
     data.perDiem3Amd = toAmd(perDiem3, c, r);
   }
 
+  // PerDiem №4
+  if (perDiem4 !== undefined) data.perDiem4 = perDiem4 ? parseFloat(perDiem4) : null;
+  if (perDiem4Currency !== undefined) data.perDiem4Currency = perDiem4Currency;
+  if (perDiem4Rate !== undefined) data.perDiem4Rate = parseFloat(perDiem4Rate) || 1;
+  if (perDiem4 !== undefined || perDiem4Currency !== undefined || perDiem4Rate !== undefined) {
+    const c = perDiem4Currency ?? 'AMD'; const r = parseFloat(perDiem4Rate) || 1;
+    data.perDiem4Amd = toAmd(perDiem4, c, r);
+  }
+
   // Other
   if (otherExpenses !== undefined) data.otherExpenses = otherExpenses ? parseFloat(otherExpenses) : null;
   if (otherCurrency !== undefined) data.otherCurrency = otherCurrency;
@@ -311,13 +336,13 @@ export async function PUT(req: NextRequest) {
     },
   });
 
-  // Заморозка: у уже закрытого рейса — никакого авто-пересчёта по Wialon (это ровно то,
-  // что "Доработка логики рейсов" запрещает, п.5/п.6), только журнал ручных правок ниже.
-  // Для активного рейса — прежнее поведение без изменений.
-  if (!wasClosed) {
-    await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
-    await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
-  } else {
+  // Рейс полностью редактируем независимо от статуса (переработка модуля "Рейсы",
+  // 2026-07-23) — авторасчёт по Wialon и синхронизация пробега машины теперь выполняются
+  // при любой правке дат, а не только для ещё не завершённых рейсов. Правки уже
+  // завершённого рейса дополнительно логируются (журнал изменений).
+  await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+  await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
+  if (wasClosed) {
     await logClosedTripEdits(id, userId, before, record);
   }
 

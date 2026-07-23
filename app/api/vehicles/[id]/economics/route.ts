@@ -23,8 +23,8 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
   const vehicleTrips = await prisma.vehicleTrip.findMany({
     where: { vehicleId: params.id },
     select: {
-      id: true, finalRevenueAmd: true, finalExpensesAmd: true,
-      salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true,
+      id: true,
+      salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
       otherExpensesAmd: true, fuelCostAmd: true,
       fleetExpenses: { select: { amountAmd: true } },
     },
@@ -35,8 +35,8 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
   let totalRevenue = 0;
   let totalExpenses = 0;
   for (const vt of vehicleTrips) {
-    const revenue = vt.finalRevenueAmd != null ? Number(vt.finalRevenueAmd) : (incomeByVt.get(vt.id) ?? 0);
-    const expenses = vt.finalExpensesAmd != null ? Number(vt.finalExpensesAmd) : computeVehicleTripExpensesAmd(vt);
+    const revenue = incomeByVt.get(vt.id) ?? 0;
+    const expenses = computeVehicleTripExpensesAmd(vt);
     totalRevenue += revenue;
     totalExpenses += expenses;
   }
