@@ -364,19 +364,28 @@ model ServiceRecord {
   @@map("service_records")
 }
 
+// Ручная корректировка/заправка — вторичная сущность (см. docs про VehicleTrip
+// как источник истины для расхода топлива, wialonFuelLevelBeginL/EndL и
+// calculatedFuelConsumedL ниже). Не основной список раздела "Топливо" —
+// используется отчётами (driver-analytics, vehicle-analytics, vehicle-expenses,
+// trips/[id]/costs) как ручная запись покупки топлива, и опционально может
+// быть привязана к конкретному рейсу через vehicleTripId.
 model FuelRecord {
-  id        String   @id @default(cuid())
-  vehicleId String   @map("vehicle_id")
-  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  date      DateTime @db.Date
-  liters    Decimal  @db.Decimal(10, 2)
-  cost      Decimal  @default(0) @db.Decimal(12, 2)
-  mileage   Int
-  comment   String?
-  createdAt DateTime @default(now()) @map("created_at")
+  id            String       @id @default(cuid())
+  vehicleId     String       @map("vehicle_id")
+  vehicle       Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicleTripId String?      @map("vehicle_trip_id")
+  vehicleTrip   VehicleTrip? @relation(fields: [vehicleTripId], references: [id], onDelete: SetNull)
+  date          DateTime     @db.Date
+  liters        Decimal      @db.Decimal(10, 2)
+  cost          Decimal      @default(0) @db.Decimal(12, 2)
+  mileage       Int
+  comment       String?
+  createdAt     DateTime     @default(now()) @map("created_at")
 
   @@index([vehicleId])
   @@index([date])
+  @@index([vehicleTripId])
   @@map("fuel_records")
 }
 
@@ -629,6 +638,7 @@ model VehicleTrip {
   trips         Trip[]
   fleetExpenses FleetExpense[]
   events        VehicleTripEvent[]
+  fuelRecords   FuelRecord[]
 
   @@index([vehicleId])
   @@index([driverId])

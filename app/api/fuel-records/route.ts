@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
-    const { vehicleId, date, liters, cost, mileage, comment } = body;
+    const { vehicleId, vehicleTripId, date, liters, cost, mileage, comment } = body;
     if (!vehicleId || !date || !liters || mileage === undefined) {
       return NextResponse.json({ error: 'Заполните обязательные поля' }, { status: 400 });
     }
@@ -37,6 +37,7 @@ export async function POST(req: Request) {
     const item = await prisma.fuelRecord.create({
       data: {
         vehicleId,
+        vehicleTripId: vehicleTripId || null,
         date: new Date(date),
         liters: Number(liters),
         cost: cost ? Number(cost) : 0,
