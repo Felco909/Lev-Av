@@ -8,6 +8,7 @@ interface VehicleTripFuelRow {
   tripNumber: string;
   vehicleId: string;
   vehicle: { id: string; plateNumber: string; brand: string; model: string };
+  driver: { id: string; fullName: string } | null;
   departureDate: string;
   returnDate: string | null;
   status: string;
@@ -35,12 +36,18 @@ export default function FuelPage() {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterVehicle, setFilterVehicle] = useState('');
+  const [filterStatus, setFilterStatus] = useState(''); // '' = все, 'active' | 'completed' | 'archived'
   const [form, setForm] = useState({ vehicleId: '', vehicleTripId: '', date: '', liters: '', cost: '', mileage: '', comment: '' });
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
+      const p = new URLSearchParams();
+      if (filterVehicle) p.set('vehicleId', filterVehicle);
+      if (filterStatus) p.set('status', filterStatus);
+      else p.set('showArchived', '1'); // "Все" — включая архив, как на /vehicle-trips
       const [tRes, fRes, vRes] = await Promise.all([
-        fetch('/api/vehicle-trips'),
+        fetch(`/api/vehicle-trips?${p}`),
         fetch('/api/fuel-records'),
         fetch('/api/vehicles'),
       ]);
@@ -49,7 +56,7 @@ export default function FuelPage() {
       setRecords(Array.isArray(fData) ? fData : []);
       setVehicles(Array.isArray(vData) ? vData : []);
     } catch {} finally { setLoading(false); }
-  }, []);
+  }, [filterVehicle, filterStatus]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -127,10 +134,16 @@ export default function FuelPage() {
       </div>
 
       {/* Filter */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background">
           <option value="">Все машины</option>
           {vehicles.map((v: any) => <option key={v.id} value={v.id}>{v.brand} {v.model} ({v.plateNumber})</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-2 text-sm bg-background">
+          <option value="">Все статусы</option>
+          <option value="active">В работе</option>
+          <option value="completed">Завершён</option>
+          <option value="archived">Архив</option>
         </select>
         <span className="text-xs text-muted-foreground">Рейсов: {filteredTrips.length}</span>
       </div>
@@ -147,6 +160,7 @@ export default function FuelPage() {
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-muted-foreground border-b bg-muted/30">
                 <th className="text-left py-3 px-4 font-medium">Машина</th>
+                <th className="text-left py-3 px-4 font-medium">Водитель</th>
                 <th className="text-left py-3 px-4 font-medium">Рейс</th>
                 <th className="text-left py-3 px-4 font-medium">Выезд</th>
                 <th className="text-left py-3 px-4 font-medium">Возврат</th>
@@ -162,7 +176,13 @@ export default function FuelPage() {
                 {filteredTrips.map(t => (
                   <tr key={t.id} className="border-b border-muted last:border-0 hover:bg-muted/50">
                     <td className="py-3 px-4 font-medium">{t.vehicle.brand} {t.vehicle.model}<br/><span className="text-xs text-muted-foreground">{t.vehicle.plateNumber}</span></td>
-                    <td className="py-3 px-4">№{t.tripNumber}{t.status === 'active' && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">в пути</span>}</td>
+                    <td className="py-3 px-4 text-muted-foreground">{t.driver?.fullName || '—'}</td>
+                    <td className="py-3 px-4">
+                      №{t.tripNumber}
+                      <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+                        t.status === 'archived' ? 'bg-slate-100 text-slate-500' : t.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                      }`}>{t.status === 'archived' ? 'Архив' : t.status === 'active' ? 'В работе' : 'Завершён'}</span>
+                    </td>
                     <td className="py-3 px-4">{formatDate(t.departureDate)}</td>
                     <td className="py-3 px-4">{formatDate(t.returnDate)}</td>
                     <td className="py-3 px-4 text-right font-mono">{t.wialonFuelLevelBeginL != null ? `${t.wialonFuelLevelBeginL.toFixed(1)} л` : '—'}</td>
