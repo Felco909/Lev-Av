@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { prisma } from '@/lib/prisma';
 import ExcelJS from 'exceljs';
 
 export async function GET(req: Request) {
@@ -20,6 +21,23 @@ export async function GET(req: Request) {
     const res = await fetch(apiUrl, { headers: { cookie: req.headers.get('cookie') || '' } });
     if (!res.ok) throw new Error('Failed to fetch dashboard data');
     const data = await res.json();
+
+    // Топливо собственного транспорта — источник истины VehicleTrip/Wialon (Аудит топлива,
+    // 2026-07-24), та же величина, что в /api/reports/own-fleet. Отдельный лист, не строка
+    // "Прибыли" — один рейс машины может обслуживать несколько заявок.
+    const dateFrom = searchParams.get('dateFrom');
+    const dateTo = searchParams.get('dateTo');
+    const fuelWhere: any = {};
+    if (dateFrom || dateTo) {
+      fuelWhere.departureDate = {};
+      if (dateFrom) fuelWhere.departureDate.gte = new Date(dateFrom);
+      if (dateTo) fuelWhere.departureDate.lte = new Date(dateTo);
+    }
+    const fuelVehicleTrips = await prisma.vehicleTrip.findMany({
+      where: fuelWhere,
+      include: { vehicle: { select: { plateNumber: true } } },
+      orderBy: { departureDate: 'desc' },
+    });
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'TMS System';
@@ -117,6 +135,22 @@ export async function GET(req: Request) {
       { header: '\u0420\u0430\u0441\u0445\u043e\u0434 \u058f', key: 'expense', width: 16, isNum: true },
       { header: '\u041f\u0440\u0438\u0431\u044b\u043b\u044c \u058f', key: 'profit', width: 16, isNum: true },
     ], data.profitRows ?? []);
+
+    // Sheet 5: Fuel (own fleet, VehicleTrip/Wialon)
+    const fuelRows = fuelVehicleTrips.map(vt => ({
+      tripNumber: vt.tripNumber,
+      vehicle: vt.vehicle.plateNumber,
+      fuelLiters: vt.calculatedFuelConsumedL != null ? Math.round(vt.calculatedFuelConsumedL * 10) / 10 : null,
+      per100Km: vt.wialonAvgFuelConsumptionPer100Km ?? null,
+      fuelCostAmd: Math.round(Number(vt.fuelCostAmd) || 0),
+    }));
+    addSheet('Топливо', 'FFD97706', [
+      { header: 'Заявка', key: 'tripNumber', width: 14 },
+      { header: 'Машина', key: 'vehicle', width: 16 },
+      { header: 'Расход, л', key: 'fuelLiters', width: 14, isNum: true },
+      { header: 'л/100км', key: 'per100Km', width: 12, isNum: true },
+      { header: 'Стоимость ֏', key: 'fuelCostAmd', width: 16, isNum: true },
+    ], fuelRows);
 
     const buffer = await wb.xlsx.writeBuffer();
     return new NextResponse(buffer as any, {

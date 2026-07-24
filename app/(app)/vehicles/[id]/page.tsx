@@ -27,7 +27,10 @@ interface ServiceRecordRow {
   id: string; date: string; mileage: number; cost: number;
   regulation: { name: string } | null; comment: string | null;
 }
-interface Economics { tripsCount: number; totalRevenue: number; totalExpenses: number; profit: number }
+interface Economics {
+  tripsCount: number; totalRevenue: number; totalExpenses: number; profit: number;
+  totalFuelLiters: number; totalFuelCost: number; fuelPer100Km: number | null;
+}
 
 const STALE_MS = 30 * 60 * 1000;
 
@@ -120,7 +123,7 @@ export default function VehicleDetailPage() {
         </TabsList>
 
         <TabsContent value="general">
-          <div className="grid sm:grid-cols-3 gap-3 mb-4">
+          <div className="grid sm:grid-cols-4 gap-3 mb-4">
             <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3">
               <p className="text-[10px] text-emerald-600">Доход (все рейсы)</p>
               <p className="text-base font-bold font-mono text-emerald-700 dark:text-emerald-400">{economics ? formatCurrency(economics.totalRevenue) : '—'}</p>
@@ -132,6 +135,15 @@ export default function VehicleDetailPage() {
             <div className={`rounded-lg p-3 ${economics && economics.profit >= 0 ? 'bg-green-50 dark:bg-green-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
               <p className={`text-[10px] ${economics && economics.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Прибыль автомобиля</p>
               <p className={`text-base font-bold font-mono ${economics && economics.profit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{economics ? formatCurrency(economics.profit) : '—'}</p>
+            </div>
+            <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3">
+              <p className="text-[10px] text-amber-600 flex items-center gap-1"><Fuel className="w-3 h-3" /> Расход топлива (Wialon)</p>
+              <p className="text-base font-bold font-mono text-amber-700 dark:text-amber-400">
+                {economics && economics.totalFuelLiters > 0 ? `${economics.totalFuelLiters} л` : '—'}
+              </p>
+              {economics && economics.fuelPer100Km != null && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">{economics.fuelPer100Km} л/100км · {formatCurrency(economics.totalFuelCost)}</p>
+              )}
             </div>
           </div>
 

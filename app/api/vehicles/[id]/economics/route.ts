@@ -25,7 +25,7 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
     select: {
       id: true,
       salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
-      otherExpensesAmd: true, fuelCostAmd: true,
+      otherExpensesAmd: true, fuelCostAmd: true, calculatedFuelConsumedL: true, calculatedKm: true,
       fleetExpenses: { select: { amountAmd: true } },
     },
   });
@@ -34,11 +34,20 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
 
   let totalRevenue = 0;
   let totalExpenses = 0;
+  // Топливо — источник истины VehicleTrip/Wialon (Аудит топлива, 2026-07-24), не FuelRecord:
+  // литры/км — calculatedFuelConsumedL/calculatedKm (тот же источник, что на /fuel), стоимость —
+  // только fuelCostAmd (та же величина, что "Топливо" в /api/reports/own-fleet и /api/vehicle-analytics).
+  let totalFuelLiters = 0;
+  let totalFuelKm = 0;
+  let totalFuelCost = 0;
   for (const vt of vehicleTrips) {
     const revenue = incomeByVt.get(vt.id) ?? 0;
     const expenses = computeVehicleTripExpensesAmd(vt);
     totalRevenue += revenue;
     totalExpenses += expenses;
+    if (vt.calculatedFuelConsumedL != null) totalFuelLiters += Number(vt.calculatedFuelConsumedL);
+    if (vt.calculatedKm != null) totalFuelKm += Number(vt.calculatedKm);
+    totalFuelCost += Number(vt.fuelCostAmd) || 0;
   }
 
   const profit = totalRevenue - totalExpenses;
@@ -48,5 +57,8 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
     totalRevenue,
     totalExpenses,
     profit,
+    totalFuelLiters: Math.round(totalFuelLiters * 10) / 10,
+    totalFuelCost,
+    fuelPer100Km: totalFuelKm > 0 && totalFuelLiters > 0 ? Math.round((totalFuelLiters / totalFuelKm) * 100 * 10) / 10 : null,
   });
 }

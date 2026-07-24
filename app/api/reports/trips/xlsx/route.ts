@@ -151,6 +151,22 @@ export async function GET(req: Request) {
       orderBy: { tripDate: 'desc' },
     });
 
+    // Топливо собственного транспорта — источник истины VehicleTrip/Wialon (Аудит топлива,
+    // 2026-07-24), та же величина, что в /api/reports/own-fleet. Отдельный лист, т.к. это другая
+    // сущность (рейс машины), чем "Прибыль" (заявка клиента) — один рейс может обслуживать
+    // несколько заявок, суммировать по заявкам нельзя.
+    const fuelWhere: any = {};
+    if (dateFrom || dateTo) {
+      fuelWhere.departureDate = {};
+      if (dateFrom) fuelWhere.departureDate.gte = new Date(dateFrom);
+      if (dateTo) fuelWhere.departureDate.lte = new Date(dateTo);
+    }
+    const fuelVehicleTrips = await prisma.vehicleTrip.findMany({
+      where: fuelWhere,
+      include: { vehicle: { select: { plateNumber: true } } },
+      orderBy: { departureDate: 'desc' },
+    });
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'TMS — Leva Logistics';
     wb.created = new Date();
@@ -273,6 +289,25 @@ export async function GET(req: Request) {
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443 \u058f', key: 'carrierPaid', width: 24, isNumber: true },
       { header: '\u0420\u0430\u0437\u0440\u044b\u0432 \u058f', key: 'gap', width: 16, isNumber: true },
     ], cashGapRows, { headerColor: 'FFDC2626', totalsColumns: ['clientRate', 'clientPaid', 'carrierPaid', 'gap'] });
+
+    // ========== SHEET 5: Fuel (own fleet, VehicleTrip/Wialon) ==========
+    const fuelRows = fuelVehicleTrips.map(vt => ({
+      date: vt.departureDate,
+      tripNumber: vt.tripNumber,
+      vehicle: vt.vehicle.plateNumber,
+      fuelLiters: vt.calculatedFuelConsumedL != null ? Math.round(vt.calculatedFuelConsumedL * 10) / 10 : null,
+      per100Km: vt.wialonAvgFuelConsumptionPer100Km ?? null,
+      fuelCostAmd: Math.round(Number(vt.fuelCostAmd) || 0),
+    }));
+
+    createSheet(wb, 'Топливо (свой транспорт)', [
+      { header: 'Дата', key: 'date', width: 14, isDate: true },
+      { header: '№ рейса', key: 'tripNumber', width: 12 },
+      { header: 'Машина', key: 'vehicle', width: 16 },
+      { header: 'Расход, л', key: 'fuelLiters', width: 14, isNumber: true },
+      { header: 'л/100км', key: 'per100Km', width: 12, isNumber: true },
+      { header: 'Стоимость ֏', key: 'fuelCostAmd', width: 16, isNumber: true },
+    ], fuelRows, { headerColor: 'FFD97706', totalsColumns: ['fuelLiters', 'fuelCostAmd'] });
 
     const buffer = await wb.xlsx.writeBuffer();
     const fromStr = dateFrom || 'all';
