@@ -778,7 +778,17 @@ export default function VehicleTripsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {rows.map(r => {
+          {(() => {
+            // Защита от дублей номеров рейса на уровне отображения — на будущее, вдруг где-то
+            // (кроме API) появится запись мимо @@unique([vehicleId, tripNumber]) в схеме.
+            const groups: Record<string, string[]> = {};
+            for (const r of rows) {
+              const key = `${r.vehicleId}:${r.tripNumber}`;
+              (groups[key] ??= []).push(r.id);
+            }
+            const duplicateIds = new Set(Object.values(groups).filter(ids => ids.length > 1).flat());
+            return rows.map(r => {
+            const isDuplicateNumber = duplicateIds.has(r.id);
             const isActive = r.status === 'active';
             const isExpanded = expandedId === r.id;
             const directTotal = (Number(r.salaryAmd) || 0) + (Number(r.perDiemAmd) || 0) + (Number(r.otherExpensesAmd) || 0) + (Number(r.fuelCostAmd) || 0);
@@ -790,6 +800,11 @@ export default function VehicleTripsPage() {
                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(r.id)}>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-mono text-sm font-bold">{r.tripNumber}</span>
+                        {isDuplicateNumber && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                            <AlertTriangle className="w-3 h-3" />{'Дубль номера'}
+                          </span>
+                        )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
                           r.status === 'archived' ? 'bg-slate-100 text-slate-500 dark:bg-slate-800/40 dark:text-slate-400' : isActive ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
                         }`}>{r.status === 'archived' ? '\u0410\u0440\u0445\u0438\u0432' : isActive ? '\u0412 \u0440\u0430\u0431\u043E\u0442\u0435' : '\u0417\u0430\u0432\u0435\u0440\u0448\u0451\u043D'}</span>
@@ -1035,7 +1050,11 @@ export default function VehicleTripsPage() {
                           </div>
                         </div>
 
-                        <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="grid sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="text-[11px] text-muted-foreground">{'Номер рейса'}</label>
+                            <input type="text" value={detailForm.tripNumber} onChange={e => setDetailForm({...detailForm, tripNumber: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5 font-mono" />
+                          </div>
                           <div>
                             <label className="text-[11px] text-muted-foreground">{'Статус'}</label>
                             <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
@@ -1307,7 +1326,8 @@ export default function VehicleTripsPage() {
                 )}
               </div>
             );
-          })}
+          });
+          })()}
         </div>
       )}
 

@@ -640,6 +640,7 @@ model VehicleTrip {
   events        VehicleTripEvent[]
   fuelRecords   FuelRecord[]
 
+  @@unique([vehicleId, tripNumber])
   @@index([vehicleId])
   @@index([driverId])
   @@index([departureDate])
