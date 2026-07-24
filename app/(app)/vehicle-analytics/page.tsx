@@ -12,6 +12,7 @@ interface VehicleAnalytics {
   profit: number;
   totalFuelLiters: number;
   totalFuelCost: number;
+  fuelPer100Km: number | null;
   avgRevenuePerTrip: number;
   costPerKm: number;
   profitPerKm: number;
@@ -149,6 +150,12 @@ export default function VehicleAnalyticsPage() {
                         <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-3">
                           <div className="text-xs text-muted-foreground flex items-center gap-1"><Fuel className="w-3 h-3" /> Расход топл.</div>
                           <p className="text-sm font-bold font-mono mt-0.5">{va.totalFuelLiters} л</p>
+                        </div>
+                      )}
+                      {va.fuelPer100Km != null && (
+                        <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1"><Fuel className="w-3 h-3" /> Расход л/100км</div>
+                          <p className="text-sm font-bold font-mono mt-0.5">{va.fuelPer100Km} л/100км</p>
                         </div>
                       )}
                       {va.totalFuelCost > 0 && (

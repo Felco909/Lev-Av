@@ -8,36 +8,61 @@ export async function GET(req: NextRequest, { params: paramsPromise }: { params:
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const trip = await prisma.trip.findUnique({ where: { id: params.id }, select: { vehicleId: true, tripDate: true } });
+  const trip = await prisma.trip.findUnique({ where: { id: params.id }, select: { vehicleId: true, tripDate: true, vehicleTripId: true } });
   if (!trip) return NextResponse.json({ error: 'Trip not found' }, { status: 404 });
-  if (!trip.vehicleId || !trip.tripDate) {
-    return NextResponse.json({ fuelCost: 0, maintenanceCost: 0, fuelRecords: [], maintenanceRecords: [], totalCost: 0 });
+
+  // Топливо — источник истины VehicleTrip/Wialon (Аудит топлива, 2026-07-24), по точной связи
+  // Trip.vehicleTripId, а не по старой месячной эвристике vehicleId+tripDate (та задваивала расход,
+  // если у машины несколько заявок в одном месяце). Сумма — целиком на рейс: если рейс обслуживает
+  // несколько заявок, каждая видит полную сумму с пометкой fuelTripsCount (без деления). Рейс без
+  // привязки («Ожидает привязки») — не показываем оценку, fuelSource='unattached'.
+  let fuelCost = 0;
+  let fuelLiters: number | null = null;
+  let fuelPer100Km: number | null = null;
+  let fuelTripsCount = 0;
+  let fuelSource: 'vehicle_trip' | 'unattached' = 'unattached';
+
+  if (trip.vehicleTripId) {
+    const [vt, siblingCount] = await Promise.all([
+      prisma.vehicleTrip.findUnique({
+        where: { id: trip.vehicleTripId },
+        select: { fuelCostAmd: true, calculatedFuelConsumedL: true, wialonAvgFuelConsumptionPer100Km: true },
+      }),
+      prisma.trip.count({ where: { vehicleTripId: trip.vehicleTripId, NOT: { status: 'cancelled' } } }),
+    ]);
+    if (vt) {
+      fuelCost = Number(vt.fuelCostAmd) || 0;
+      fuelLiters = vt.calculatedFuelConsumedL != null ? Number(vt.calculatedFuelConsumedL) : null;
+      fuelPer100Km = vt.wialonAvgFuelConsumptionPer100Km ?? null;
+      fuelTripsCount = siblingCount;
+      fuelSource = 'vehicle_trip';
+    }
   }
 
-  // Find fuel and maintenance records for the vehicle around the trip date (same month)
-  const tripDate = new Date(trip.tripDate);
-  const monthStart = new Date(tripDate.getFullYear(), tripDate.getMonth(), 1);
-  const monthEnd = new Date(tripDate.getFullYear(), tripDate.getMonth() + 1, 0);
-
-  const [fuelRecords, maintenanceRecords] = await Promise.all([
-    prisma.fuelRecord.findMany({
+  // ТО/ремонт — вне периметра этой миграции (нет связи с VehicleTrip), старая месячная эвристика
+  // осталась как была (Аудит топлива, 2026-07-24 — решение: не трогать в этом шаге).
+  let maintenanceCost = 0;
+  let maintenanceRecords: { date: Date; type: string; cost: number; description: string | null }[] = [];
+  if (trip.vehicleId && trip.tripDate) {
+    const tripDate = new Date(trip.tripDate);
+    const monthStart = new Date(tripDate.getFullYear(), tripDate.getMonth(), 1);
+    const monthEnd = new Date(tripDate.getFullYear(), tripDate.getMonth() + 1, 0);
+    const records = await prisma.maintenance.findMany({
       where: { vehicleId: trip.vehicleId, date: { gte: monthStart, lte: monthEnd } },
       orderBy: { date: 'asc' },
-    }),
-    prisma.maintenance.findMany({
-      where: { vehicleId: trip.vehicleId, date: { gte: monthStart, lte: monthEnd } },
-      orderBy: { date: 'asc' },
-    }),
-  ]);
-
-  const fuelCost = fuelRecords.reduce((s: number, r: any) => s + Number(r.cost ?? 0), 0);
-  const maintenanceCost = maintenanceRecords.reduce((s: number, r: any) => s + Number(r.cost ?? 0), 0);
+    });
+    maintenanceCost = records.reduce((s, r) => s + Number(r.cost ?? 0), 0);
+    maintenanceRecords = records.map((r) => ({ date: r.date, type: r.type, cost: Number(r.cost), description: r.description }));
+  }
 
   return NextResponse.json({
     fuelCost: Math.round(fuelCost),
+    fuelLiters,
+    fuelPer100Km,
+    fuelSource,
+    fuelTripsCount,
     maintenanceCost: Math.round(maintenanceCost),
     totalCost: Math.round(fuelCost + maintenanceCost),
-    fuelRecords: fuelRecords.map((r: any) => ({ date: r.date, liters: Number(r.liters), cost: Number(r.cost), mileage: r.mileage })),
-    maintenanceRecords: maintenanceRecords.map((r: any) => ({ date: r.date, type: r.type, cost: Number(r.cost), description: r.description })),
+    maintenanceRecords,
   });
 }

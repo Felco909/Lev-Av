@@ -28,11 +28,14 @@ export async function GET(req: Request) {
     const dateFilter = { gte: dateFrom, lte: dateTo };
     const vFilter = vehicleId ? { vehicleId } : {};
 
-    // Fetch all 4 expense sources in parallel
-    const [fuelRecords, maintenances, serviceRecords, partPurchases, vehicles] = await Promise.all([
-      prisma.fuelRecord.findMany({
-        where: { ...vFilter, date: dateFilter },
-        select: { vehicleId: true, date: true, cost: true, liters: true },
+    // Fetch all 4 expense sources in parallel. Топливо — источник истины VehicleTrip/Wialon
+    // (Аудит топлива, 2026-07-24, жёсткий cutover), не FuelRecord: та же сумма, что в
+    // /api/reports/own-fleet и на карточке рейса, группировка по дате рейса (departureDate),
+    // не по дате заправки.
+    const [vehicleTrips, maintenances, serviceRecords, partPurchases, vehicles] = await Promise.all([
+      prisma.vehicleTrip.findMany({
+        where: { ...vFilter, departureDate: dateFilter },
+        select: { vehicleId: true, departureDate: true, calculatedFuelConsumedL: true, fuelCostAmd: true },
       }),
       prisma.maintenance.findMany({
         where: { ...vFilter, date: dateFilter },
@@ -79,12 +82,13 @@ export async function GET(req: Request) {
       return vehicleMap[vid].months[mk];
     };
 
-    // Fuel
-    for (const r of fuelRecords) {
-      const m = ensureMonth(r.vehicleId, new Date(r.date));
+    // Fuel — VehicleTrip.fuelCostAmd (та же величина, что "Топливо" в /api/reports/own-fleet),
+    // не FuelRecord. FleetExpense — отдельный расходный поток, сюда не входит (как и в own-fleet).
+    for (const r of vehicleTrips) {
+      const m = ensureMonth(r.vehicleId, new Date(r.departureDate));
       if (!m) continue;
-      const cost = Number(r.cost);
-      const liters = Number(r.liters);
+      const cost = Number(r.fuelCostAmd) || 0;
+      const liters = r.calculatedFuelConsumedL != null ? Number(r.calculatedFuelConsumedL) : 0;
       m.fuel += cost;
       m.total += cost;
       m.fuelLiters += liters;

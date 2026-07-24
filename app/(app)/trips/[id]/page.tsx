@@ -605,13 +605,19 @@ export default function TripDetailPage() {
       {/* Себестоимость заявки */}
       {trip?.vehicleId && tripCosts && tripCosts.totalCost > 0 && (
         <div className="bg-card rounded-xl p-5 shadow-sm">
-          <h3 className="text-sm font-semibold flex items-center gap-2 mb-4">
-            <Fuel className="w-4 h-4 text-primary" /> {"\u0421\u0435\u0431\u0435\u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C \u0437\u0430\u044f\u0432\u043a\u0430\u0430"} <span className="text-xs text-muted-foreground font-normal">({"\u0437\u0430 \u043C\u0435\u0441\u044F\u0446 \u0437\u0430\u044f\u0432\u043a\u0430\u0430"})</span>
+          <h3 className="text-sm font-semibold flex items-center gap-2 mb-1">
+            <Fuel className="w-4 h-4 text-primary" /> {"\u0421\u0435\u0431\u0435\u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C \u0437\u0430\u044f\u0432\u043a\u0438"}
           </h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            {"\u0422\u043E\u043F\u043B\u0438\u0432\u043E \u2014 \u043F\u043E \u0440\u0435\u0439\u0441\u0443 \u043C\u0430\u0448\u0438\u043D\u044B (Wialon), \u0422\u041E \u2014 \u043E\u0446\u0435\u043D\u043a\u0430 \u043F\u043E \u043C\u0435\u0441\u044f\u0446\u0443 \u0437\u0430\u044f\u0432\u043a\u0438"}
+          </p>
           <div className="grid grid-cols-3 gap-3 mb-3">
             <div className="text-center p-3 bg-amber-50 dark:bg-amber-950/20 rounded-lg">
               <p className="text-[10px] text-muted-foreground uppercase flex items-center justify-center gap-1"><Fuel className="w-3 h-3" /> {"\u0422\u043E\u043F\u043B\u0438\u0432\u043E"}</p>
               <p className="text-sm font-bold font-mono">{formatCurrency(tripCosts.fuelCost)}</p>
+              {tripCosts.fuelLiters != null && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">{tripCosts.fuelLiters} \u043B{tripCosts.fuelPer100Km != null ? ` \u00B7 ${tripCosts.fuelPer100Km} \u043B/100\u043a\u043C` : ''}</p>
+              )}
             </div>
             <div className="text-center p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg">
               <p className="text-[10px] text-muted-foreground uppercase flex items-center justify-center gap-1"><Wrench className="w-3 h-3" /> {"\u0422\u041E"}</p>
@@ -622,15 +628,15 @@ export default function TripDetailPage() {
               <p className="text-sm font-bold font-mono text-red-700">{formatCurrency(tripCosts.totalCost)}</p>
             </div>
           </div>
-          {tripCosts.fuelRecords?.length > 0 && (
-            <div className="space-y-1 text-xs">
-              {tripCosts.fuelRecords.map((r: any, i: number) => (
-                <div key={i} className="flex items-center justify-between py-1 px-2 hover:bg-muted/50 rounded">
-                  <span className="text-muted-foreground">{new Date(r.date).toLocaleDateString('ru-RU')} &middot; {r.liters}L &middot; {r.mileage}km</span>
-                  <span className="font-mono">{formatCurrency(r.cost)}</span>
-                </div>
-              ))}
-            </div>
+          {tripCosts.fuelSource === 'unattached' && (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              {"\u0417\u0430\u044f\u0432\u043a\u0430 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u0438\u0432\u044f\u0437\u0430\u043D\u0430 \u043a \u0440\u0435\u0439\u0441\u0443 \u043C\u0430\u0448\u0438\u043D\u044B \u2014 \u0442\u043E\u043F\u043B\u0438\u0432\u043E \u043D\u0435 \u043F\u043E\u043a\u0430\u0437\u0430\u043D\u043E"}
+            </p>
+          )}
+          {tripCosts.fuelSource === 'vehicle_trip' && tripCosts.fuelTripsCount > 1 && (
+            <p className="text-xs text-muted-foreground">
+              {`\u0420\u0435\u0439\u0441 \u043E\u0431\u0441\u043B\u0443\u0436\u0438\u0432\u0430\u0435\u0442 ${tripCosts.fuelTripsCount} \u0437\u0430\u044f\u0432\u043E\u043a. \u0420\u0430\u0441\u0445\u043E\u0434 \u0442\u043E\u043F\u043B\u0438\u0432\u0430 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0441\u044f \u043a\u043E \u0432\u0441\u0435\u043C\u0443 \u0440\u0435\u0439\u0441\u0443 \u0438 \u043D\u0435 \u0440\u0430\u0441\u043F\u0440\u0435\u0434\u0435\u043B\u044f\u0435\u0442\u0441\u044f \u043C\u0435\u0436\u0434\u0443 \u043E\u0442\u0434\u0435\u043B\u044C\u043D\u044B\u043C\u0438 \u0437\u0430\u044f\u0432\u043a\u0430\u043C\u0438.`}
+            </p>
           )}
         </div>
       )}

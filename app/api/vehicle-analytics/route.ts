@@ -25,23 +25,15 @@ export async function GET() {
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       select: {
         id: true, vehicleId: true, departureDate: true, returnDate: true, startMileage: true, endMileage: true, calculatedKm: true,
+        calculatedFuelConsumedL: true, fuelCostAmd: true,
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
-        otherExpensesAmd: true, fuelCostAmd: true,
-        fleetExpenses: { select: { amountAmd: true } },
+        otherExpensesAmd: true,
+        fleetExpenses: { select: { amountAmd: true, expenseType: true } },
       },
     });
 
     // Доход всех рейсов одним запросом (не N+1) — по явной связи Trip.vehicleTripId.
     const incomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
-
-    // Топливо (заправки) по машине — тот же приём, что в driver-analytics/route.ts.
-    const fuelRecords = await prisma.fuelRecord.findMany({ select: { vehicleId: true, liters: true, cost: true } });
-    const fuelByVehicle: Record<string, { liters: number; cost: number }> = {};
-    fuelRecords.forEach((f) => {
-      if (!fuelByVehicle[f.vehicleId]) fuelByVehicle[f.vehicleId] = { liters: 0, cost: 0 };
-      fuelByVehicle[f.vehicleId].liters += Number(f.liters);
-      fuelByVehicle[f.vehicleId].cost += Number(f.cost);
-    });
 
     const analytics = vehicles.map((vehicle) => {
       const vTrips = vehicleTrips.filter((vt) => vt.vehicleId === vehicle.id);
@@ -49,6 +41,9 @@ export async function GET() {
       let totalRevenue = 0;
       let totalExpenses = 0;
       let totalMileage = 0;
+      let totalFuelLiters = 0;
+      let totalFuelKm = 0;
+      let totalFuelCost = 0;
       // Финансы каждого рейса считаем один раз (используются и в итоге, и в помесячной разбивке).
       const perTrip = vTrips.map((vt) => {
         const revenue = incomeByVt.get(vt.id) ?? 0;
@@ -58,17 +53,24 @@ export async function GET() {
         // "Итоги рейса" в карточке (см. lib/wialon/calculateTripFuel.ts) — без fallback на
         // разницу одометра, иначе аналитика расходится с карточкой рейса и с самим Wialon.
         const mileage = vt.calculatedKm != null ? Number(vt.calculatedKm) : 0;
-        return { vt, financials, mileage };
+        // Топливо — источник истины VehicleTrip/Wialon (Аудит топлива, 2026-07-24), не FuelRecord:
+        // литры/км — calculatedFuelConsumedL/calculatedKm (тот же источник, что на /fuel),
+        // стоимость — только fuelCostAmd (та же величина, что "Топливо" в /api/reports/own-fleet;
+        // FleetExpense — отдельный расходный поток, туда не подмешиваем, как и там).
+        const fuelLiters = vt.calculatedFuelConsumedL != null ? Number(vt.calculatedFuelConsumedL) : 0;
+        const fuelCostAmd = Number(vt.fuelCostAmd) || 0;
+        return { vt, financials, mileage, fuelLiters, fuelCostAmd };
       });
 
-      for (const { financials, mileage } of perTrip) {
+      for (const { financials, mileage, fuelLiters, fuelCostAmd, vt } of perTrip) {
         totalRevenue += financials.revenue;
         totalExpenses += financials.totalExpenses;
         totalMileage += mileage;
+        totalFuelLiters += fuelLiters;
+        totalFuelCost += fuelCostAmd;
+        if (vt.calculatedKm != null) totalFuelKm += Number(vt.calculatedKm);
       }
       const profit = totalRevenue - totalExpenses;
-
-      const fuel = fuelByVehicle[vehicle.id] ?? { liters: 0, cost: 0 };
 
       // Помесячно, последние 6 месяцев (та же схема, что в driver-analytics/route.ts) —
       // рейс целиком относится к месяцу своей даты выезда (не разбивается по месяцам,
@@ -94,8 +96,9 @@ export async function GET() {
         totalRevenue,
         totalExpenses,
         profit,
-        totalFuelLiters: Math.round(fuel.liters * 10) / 10,
-        totalFuelCost: fuel.cost,
+        totalFuelLiters: Math.round(totalFuelLiters * 10) / 10,
+        totalFuelCost,
+        fuelPer100Km: totalFuelKm > 0 && totalFuelLiters > 0 ? Math.round((totalFuelLiters / totalFuelKm) * 100 * 10) / 10 : null,
         avgRevenuePerTrip: vTrips.length > 0 ? Math.round(totalRevenue / vTrips.length) : 0,
         costPerKm: computeCostPerKmAmd(totalExpenses, totalMileage),
         profitPerKm: computeProfitPerKmAmd(profit, totalMileage),

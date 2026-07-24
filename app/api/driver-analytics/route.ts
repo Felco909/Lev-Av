@@ -15,38 +15,24 @@ export async function GET() {
       where: { driverId: { not: null }, NOT: { status: 'cancelled' } },
       select: { id: true, driverId: true, clientRate: true, clientRateAmd: true, profit: true, profitAmd: true, distance: true, cargoWeight: true, status: true, tripDate: true, tripType: true },
     });
-    // Get fuel expenses from trip expenses
-    const fuelExpenses = await prisma.expense.findMany({
-      where: { expenseType: 'fuel' },
-      select: { tripId: true, amount: true },
-    });
-    const fuelByTrip: Record<string, number> = {};
-    fuelExpenses.forEach(f => { fuelByTrip[f.tripId] = (fuelByTrip[f.tripId] || 0) + Number(f.amount); });
 
-    // Get fuel records per vehicle
-    const fuelRecords = await prisma.fuelRecord.findMany({
-      select: { vehicleId: true, liters: true, cost: true, mileage: true },
+    // Топливо — только источник истины VehicleTrip/Wialon (Аудит топлива, 2026-07-24),
+    // не Expense (расход заявки) и не FuelRecord (вспомогательный журнал заправок).
+    // Стоимость — только fuelCostAmd (та же величина, что "Топливо" в /api/reports/own-fleet
+    // и /api/vehicle-analytics; FleetExpense — отдельный расходный поток, сюда не входит).
+    const vehicleTrips = await prisma.vehicleTrip.findMany({
+      where: { driverId: { not: null } },
+      select: { driverId: true, calculatedFuelConsumedL: true, calculatedKm: true, fuelCostAmd: true },
     });
-    // Build fuel totals by vehicleId
-    const fuelByVehicle: Record<string, { liters: number; cost: number }> = {};
-    fuelRecords.forEach(f => {
-      if (!fuelByVehicle[f.vehicleId]) fuelByVehicle[f.vehicleId] = { liters: 0, cost: 0 };
-      fuelByVehicle[f.vehicleId].liters += Number(f.liters);
-      fuelByVehicle[f.vehicleId].cost += Number(f.cost);
-    });
-
-    // Get trips with vehicleId for fuel association
-    const tripsWithVehicle = await prisma.trip.findMany({
-      where: { driverId: { not: null }, vehicleId: { not: null }, NOT: { status: 'cancelled' } },
-      select: { driverId: true, vehicleId: true },
-    });
-    // Build driver → set of vehicleIds
-    const driverVehicles: Record<string, Set<string>> = {};
-    tripsWithVehicle.forEach(t => {
-      if (t.driverId && t.vehicleId) {
-        if (!driverVehicles[t.driverId]) driverVehicles[t.driverId] = new Set();
-        driverVehicles[t.driverId].add(t.vehicleId);
-      }
+    const fuelByDriver: Record<string, { liters: number; km: number; costAmd: number; vehicleTripsCount: number }> = {};
+    vehicleTrips.forEach(vt => {
+      if (!vt.driverId) return;
+      if (!fuelByDriver[vt.driverId]) fuelByDriver[vt.driverId] = { liters: 0, km: 0, costAmd: 0, vehicleTripsCount: 0 };
+      const f = fuelByDriver[vt.driverId];
+      if (vt.calculatedFuelConsumedL != null) f.liters += vt.calculatedFuelConsumedL;
+      if (vt.calculatedKm != null) f.km += vt.calculatedKm;
+      f.costAmd += Number(vt.fuelCostAmd) || 0;
+      f.vehicleTripsCount += 1;
     });
 
     const analytics = drivers.map(driver => {
@@ -56,17 +42,12 @@ export async function GET() {
       const totalProfit = driverTrips.reduce((s, t) => s + Number(t.profitAmd ?? t.profit ?? 0), 0);
       const totalDistance = driverTrips.reduce((s, t) => s + (t.distance || 0), 0);
       const totalCargo = driverTrips.reduce((s, t) => s + Number(t.cargoWeight || 0), 0);
-      const totalFuelCost = driverTrips.reduce((s, t) => s + (fuelByTrip[t.id] || 0), 0);
       const completedTrips = driverTrips.filter(t => t.status === 'completed' || t.status === 'paid').length;
 
-      // Fuel efficiency from fuel records of associated vehicles
-      const vIds = driverVehicles[driver.id] ?? new Set();
-      let totalLiters = 0;
-      let totalFuelRecordCost = 0;
-      vIds.forEach(vid => {
-        const fv = fuelByVehicle[vid];
-        if (fv) { totalLiters += fv.liters; totalFuelRecordCost += fv.cost; }
-      });
+      // Топливо — по физическим рейсам машины (VehicleTrip.driverId), не по заявкам:
+      // у одного водителя количество VehicleTrip обычно не равно totalTrips (заявок).
+      const fuel = fuelByDriver[driver.id] ?? { liters: 0, km: 0, costAmd: 0, vehicleTripsCount: 0 };
+      const totalFuelCost = fuel.costAmd;
 
       // Monthly breakdown (last 6 months)
       const months: { month: string; trips: number; profit: number; distance: number }[] = [];
@@ -91,11 +72,13 @@ export async function GET() {
         totalTrips, completedTrips, totalRevenue, totalProfit, totalDistance, totalCargo, totalFuelCost,
         avgProfitPerTrip: totalTrips > 0 ? Math.round(totalProfit / totalTrips) : 0,
         avgDistancePerTrip: totalTrips > 0 ? Math.round(totalDistance / totalTrips) : 0,
-        // KPI: fuel efficiency (L/100km), profit per km, cost per trip
-        fuelEfficiency: totalDistance > 0 && totalLiters > 0 ? Math.round((totalLiters / totalDistance) * 100 * 10) / 10 : null,
+        // KPI: fuel efficiency (L/100km), profit per km, cost per trip.
+        // Расход/пробег — Wialon (VehicleTrip.calculatedKm), не distance заявки (другая величина).
+        fuelEfficiency: fuel.km > 0 && fuel.liters > 0 ? Math.round((fuel.liters / fuel.km) * 100 * 10) / 10 : null,
         profitPerKm: totalDistance > 0 ? Math.round(totalProfit / totalDistance) : 0,
-        costPerTrip: totalTrips > 0 ? Math.round(totalFuelRecordCost / totalTrips) : 0,
-        totalFuelLiters: Math.round(totalLiters * 10) / 10,
+        // На рейс (VehicleTrip), не на заявку — топливные данные привязаны к физическому рейсу машины.
+        costPerTrip: fuel.vehicleTripsCount > 0 ? Math.round(totalFuelCost / fuel.vehicleTripsCount) : 0,
+        totalFuelLiters: Math.round(fuel.liters * 10) / 10,
         months,
       };
     });

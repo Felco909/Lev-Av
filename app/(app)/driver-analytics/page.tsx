@@ -126,7 +126,7 @@ export default function DriverAnalyticsPage() {
                         <p className="text-sm font-bold font-mono mt-0.5">{da.profitPerKm} {"\u058F"}</p>
                       </div>
                       <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-3">
-                        <div className="text-xs text-muted-foreground flex items-center gap-1"><Zap className="w-3 h-3" /> {"\u0417\u0430\u0442\u0440. \u0442\u043E\u043F\u043B./\u0437\u0430\u044f\u0432\u043a\u0443"}</div>
+                        <div className="text-xs text-muted-foreground flex items-center gap-1"><Zap className="w-3 h-3" /> {"\u0417\u0430\u0442\u0440. \u0442\u043E\u043F\u043B./\u0440\u0435\u0439\u0441"}</div>
                         <p className="text-sm font-bold font-mono mt-0.5">{formatCurrency(da.costPerTrip)}</p>
                       </div>
                       {da.totalFuelLiters > 0 && (
