@@ -128,9 +128,9 @@ function toYerevanLocalInputValue(value: string | Date | null | undefined): stri
 function wialonHintText(reason?: string, rangeDistanceKm?: number | null): string {
   if (reason === 'too_old') {
     if (rangeDistanceKm != null) {
-      return `Дата старше 45 дней — точный одометр по треку недоступен, но пробег рейса по официальному отчёту Wialon: ${Math.round(rangeDistanceKm).toLocaleString('ru-RU')} км (та же цифра, что даёт «Пересчитать по Wialon»). Одометр введите вручную.`;
+      return `Дата старше 150 дней — точный одометр по треку недоступен, но пробег рейса по официальному отчёту Wialon: ${Math.round(rangeDistanceKm).toLocaleString('ru-RU')} км (та же цифра, что даёт «Пересчитать по Wialon»). Одометр введите вручную.`;
     }
-    return 'Дата слишком старая для расчёта пробега по треку (>45 дней) — введите вручную, либо нажмите «Пересчитать по Wialon» для пробега рейса';
+    return 'Дата слишком старая для расчёта пробега по треку (>150 дней) — введите вручную, либо нажмите «Пересчитать по Wialon» для пробега рейса';
   }
   if (reason === 'wialon_error') return 'Wialon сейчас недоступен — введите вручную';
   return 'Нет данных Wialon на эту дату — введите вручную';
