@@ -2,17 +2,19 @@ import { prisma } from '@/lib/prisma';
 import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
 
 /**
- * Автоматический расчёт итогов рейса при сохранении с обеими датами заполненными.
- * Обёрнуто в try/catch намеренно — сбой Wialon не должен блокировать сохранение
- * самого рейса (ручной ввод продолжает работать как раньше). Дальше данные можно
- * пересчитать вручную кнопкой "Пересчитать по Wialon".
+ * Автоматический расчёт итогов рейса при сохранении. Для закрытого рейса (обе даты) считается
+ * полный официальный отчёт Wialon; для ещё активного (только departureDate) — как минимум
+ * остаток топлива на момент выезда (см. calculateVehicleTripTotals). Обёрнуто в try/catch
+ * намеренно — сбой Wialon не должен блокировать сохранение самого рейса (ручной ввод
+ * продолжает работать как раньше). Дальше данные можно пересчитать вручную кнопкой
+ * "Пересчитать по Wialon".
  *
  * Вынесено из app/api/vehicle-trips/route.ts, чтобы тот же код переиспользовал
  * фоновый сервис lib/company-base/baseCheck.ts при автозакрытии рейса по GPS-возврату
  * на базу — не дублировать эту логику в двух местах.
  */
 export async function maybeCalculateTotals(tripId: string, departureDate: Date | null, returnDate: Date | null) {
-  if (!departureDate || !returnDate) return;
+  if (!departureDate) return;
   try {
     await calculateVehicleTripTotals(tripId);
   } catch (e) {

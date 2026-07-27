@@ -1070,8 +1070,12 @@ export default function VehicleTripsPage() {
                         </div>
 
                         {/* Итоги рейса — автоматический расчёт из Wialon. Рейс полностью редактируем
-                            независимо от статуса, поэтому пересчёт доступен всегда. */}
-                        {detail.returnDate && (
+                            независимо от статуса, поэтому пересчёт доступен всегда. Пока рейс в
+                            работе (нет returnDate), полный официальный отчёт Wialon недоступен
+                            (нужна закрытая правая граница интервала) — но остаток топлива на
+                            момент выезда можно получить уже сейчас (разовый снимок сенсора на
+                            дату), поэтому блок больше не скрыт целиком до закрытия рейса. */}
+                        {detail.departureDate && (
                           <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 text-xs space-y-1">
                             <div className="flex items-center justify-between gap-2">
                               <p className="font-semibold text-emerald-700 dark:text-emerald-400">{'Итоги рейса'}</p>
@@ -1098,8 +1102,22 @@ export default function VehicleTripsPage() {
                                   </p>
                                 )}
                               </>
+                            ) : detail.wialonFuelLevelBeginL != null ? (
+                              <>
+                                <p>{'Уровень топлива на выезд: '}{`${detail.wialonFuelLevelBeginL.toLocaleString('ru-RU')} л`}</p>
+                                <p className="text-muted-foreground">{'Рейс ещё в работе — пробег, расход, заправки/сливы и уровень на возврат появятся после закрытия рейса.'}</p>
+                                {detail.fuelCalcAt && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {'Получено: '}{new Date(detail.fuelCalcAt).toLocaleString('ru-RU')}
+                                  </p>
+                                )}
+                              </>
                             ) : (
-                              <p className="text-amber-600">{'Не рассчитано — официальный отчёт Wialon недоступен для этого периода.'}</p>
+                              <p className="text-amber-600">
+                                {detail.returnDate
+                                  ? 'Не рассчитано — официальный отчёт Wialon недоступен для этого периода.'
+                                  : 'Остаток топлива на выезд ещё не получен — нажмите «Пересчитать по Wialon».'}
+                              </p>
                             )}
                           </div>
                         )}

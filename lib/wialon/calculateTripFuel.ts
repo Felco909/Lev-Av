@@ -13,7 +13,7 @@
  * а не приблизительную собственную цифру.
  */
 import { prisma } from '@/lib/prisma';
-import { getOfficialTripReport } from '@/lib/wialon/client';
+import { getOfficialTripReport, getFuelLevelAtDate } from '@/lib/wialon/client';
 
 export interface TripFuelCalcResult {
   calculatedKm: number | null;
@@ -76,6 +76,18 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
       console.error('[calculateTripFuel] Официальный отчёт Wialon не удался:', e);
       // Намеренно без fallback на собственный расчёт — лучше явное "не рассчитано" в карточке,
       // чем цифра, которая не совпадает с Wialon (см. заголовочный комментарий).
+    }
+  } else if (trip.vehicle.wialonUnitId && trip.departureDate && !trip.returnDate) {
+    // Рейс ещё в работе (нет returnDate) — официальный отчёт Wialon по интервалу здесь
+    // недоступен (нужна закрытая правая граница), но остаток топлива НА МОМЕНТ ВЫЕЗДА —
+    // разовый снимок показания датчика на дату (getFuelLevelAtDate), от возврата не зависит.
+    // Раньше при активном рейсе этот блок вообще не вызывался, поэтому "Топливо выезд"
+    // оставалось пустым до самого закрытия рейса — здесь показываем то, что уже можно узнать.
+    try {
+      const fuel = await getFuelLevelAtDate(Number(trip.vehicle.wialonUnitId), trip.departureDate);
+      result.wialonFuelLevelBeginL = fuel.fuelLevelL;
+    } catch (e) {
+      console.error('[calculateTripFuel] Остаток топлива на выезд (активный рейс) не удалось получить:', e);
     }
   }
 
