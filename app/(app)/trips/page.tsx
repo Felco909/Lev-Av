@@ -165,7 +165,9 @@ export default function TripsPage() {
             {t?.contact?.name && <div className="text-[10px] text-muted-foreground truncate">{t.contact.name}</div>}
           </CrumbLink>
         </td>
-        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">{t?.routeFrom ?? ''} → {t?.routeTo ?? ''}</td>
+        <td className="px-4 py-3 text-muted-foreground hidden md:table-cell max-w-[220px]">
+          <div className="truncate" title={`${t?.routeFrom ?? ''} → ${t?.routeTo ?? ''}`}>{t?.routeFrom ?? ''} → {t?.routeTo ?? ''}</div>
+        </td>
         <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{formatDate(sortBy === 'createdAt' ? t?.createdAt : t?.tripDate)}</td>
         <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${t?.tripType === 'own_transport' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{TRIP_TYPE_MAP[t?.tripType] ?? ''}</span></td>
         <td className="px-4 py-3">
