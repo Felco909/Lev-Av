@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Pencil, MapPin, Package, Truck, Building2, DollarSign, FileText, Loader2, Paperclip, Download, X, ChevronRight, ClipboardList, Copy, Fuel, Wrench, Info, Lock } from 'lucide-react';
 import { formatCurrency, formatCurrencyRaw, formatDate, STATUS_MAP, STATUS_ORDER, TRIP_TYPE_MAP } from '@/lib/utils';
 import { generateSumInWordsLine } from '@/lib/number-to-words';
+import { detectTripAttachmentSection, TRIP_ATTACHMENT_SECTION_LABELS } from '@/lib/trip-attachment-section';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import Breadcrumbs from '@/components/nav/breadcrumbs';
 import SmartBackButton from '@/components/nav/smart-back';
@@ -667,7 +668,7 @@ export default function TripDetailPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{att.fileName}</p>
                     <p className="text-xs text-muted-foreground">
-                      {att.description && <span>{att.description} · </span>}
+                      <span>{TRIP_ATTACHMENT_SECTION_LABELS[detectTripAttachmentSection(att)]} · </span>
                       {new Date(att.uploadedAt).toLocaleDateString('ru-RU')}
                     </p>
                   </div>
