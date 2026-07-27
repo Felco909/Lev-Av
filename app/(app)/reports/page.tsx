@@ -468,8 +468,8 @@ export default function ReportsPage() {
                       return (
                         <tr key={i} className="border-b hover:bg-muted/30 transition">
                           <td className="py-2.5 px-4 text-xs whitespace-nowrap">{r.date}</td>
-                          <td className="py-2.5 px-3">
-                            <CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline text-xs">{r.routeFrom} → {r.routeTo}</CrumbLink>
+                          <td className="py-2.5 px-3 max-w-[220px]">
+                            <CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="block truncate text-primary hover:underline text-xs" title={`${r.routeFrom} → ${r.routeTo}`}>{r.routeFrom} → {r.routeTo}</CrumbLink>
                           </td>
                           <td className="py-2.5 px-3 text-xs text-muted-foreground hidden sm:table-cell">{r.client}</td>
                           <td className="py-2.5 px-3">
@@ -596,7 +596,7 @@ export default function ReportsPage() {
                     {ownFleetRows.map((r: any, i: number) => (
                       <tr key={i} className="border-b hover:bg-muted/30 transition">
                         <td className="py-2 px-4 text-xs whitespace-nowrap">{r.date}</td>
-                        <td className="py-2 px-3"><CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline text-xs">{r.routeFrom} → {r.routeTo}</CrumbLink></td>
+                        <td className="py-2 px-3 max-w-[220px]"><CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="block truncate text-primary hover:underline text-xs" title={`${r.routeFrom} → ${r.routeTo}`}>{r.routeFrom} → {r.routeTo}</CrumbLink></td>
                         <td className="py-2 px-3 text-xs text-muted-foreground hidden sm:table-cell">{r.client}</td>
                         <td className="py-2 px-3 text-right font-mono text-xs">{fmtAmd(Number(r.clientRateAmd || r.clientRate || 0))}</td>
                       </tr>
@@ -717,8 +717,8 @@ export default function ReportsPage() {
                     {cashGapRows.map((r: any, i: number) => (
                       <tr key={i} className="border-b hover:bg-muted/30 transition">
                         <td className="py-2.5 px-4 text-xs whitespace-nowrap">{r.date}</td>
-                        <td className="py-2.5 px-3">
-                          <CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline text-xs">{r.routeFrom} → {r.routeTo}</CrumbLink>
+                        <td className="py-2.5 px-3 max-w-[220px]">
+                          <CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="block truncate text-primary hover:underline text-xs" title={`${r.routeFrom} → ${r.routeTo}`}>{r.routeFrom} → {r.routeTo}</CrumbLink>
                         </td>
                         <td className="py-2.5 px-3 text-xs">{r.client}</td>
                         <td className="py-2.5 px-3 text-right font-mono text-xs">{fmtAmd(Number(r.clientRateAmd ?? r.clientRate ?? 0))}</td>
