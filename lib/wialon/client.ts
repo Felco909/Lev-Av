@@ -259,10 +259,24 @@ export interface WialonFuelSensor {
 
 const FUEL_SENSOR_NAME_RE = /бак|tank|fuel|թ?բաք/i;
 
-/** Датчики топлива машины (по эвристике имени) — с калибровочной таблицей. */
+/**
+ * Определение "это датчик топлива" ТОЛЬКО по эвристике имени пропускало реальные датчики
+ * с другими локализованными названиями — например, у 37EH031 (юнит 26673716) датчик назван
+ * "Վառելիքի ծավալ" ("объём топлива" по-армянски, другое слово, не "բաք"/tank), из-за чего
+ * "Топливо выезд" молча оставалось пустым, хотя калиброванный ДУТ в Wialon есть. Wialon сам
+ * помечает тип датчика служебным полем `t` (независимо от локализации имени) — у настоящих
+ * датчиков уровня топлива это `'fuel level'`. Проверяем ОБА признака (тип ИЛИ имя), чтобы не
+ * потерять уже работавшие датчики, у которых тип почему-то не проставлен, но имя подходит.
+ */
+function isFuelLevelSensor(s: { n: string; t?: string; tbl?: WialonSensorTableEntry[] }): boolean {
+  if (!Array.isArray(s.tbl) || s.tbl.length === 0) return false;
+  return s.t === 'fuel level' || FUEL_SENSOR_NAME_RE.test(s.n);
+}
+
+/** Датчики топлива машины (по типу датчика в Wialon + эвристике имени) — с калибровочной таблицей. */
 export async function getFuelSensors(sid: string, unitId: number): Promise<WialonFuelSensor[]> {
   const data = await callWialon<{
-    items?: Array<{ id: number; sens?: Record<string, { id: number; n: string; p: string; tbl?: WialonSensorTableEntry[] }> }>;
+    items?: Array<{ id: number; sens?: Record<string, { id: number; n: string; t?: string; p: string; tbl?: WialonSensorTableEntry[] }> }>;
   }>(
     'core/search_items',
     {
@@ -278,7 +292,7 @@ export async function getFuelSensors(sid: string, unitId: number): Promise<Wialo
   const item = (data.items ?? [])[0];
   const sensors = item?.sens ? Object.values(item.sens) : [];
   return sensors
-    .filter((s) => FUEL_SENSOR_NAME_RE.test(s.n) && Array.isArray(s.tbl) && s.tbl.length > 0)
+    .filter(isFuelLevelSensor)
     .map((s) => ({ id: s.id, name: s.n, param: s.p, table: s.tbl! }));
 }
 
@@ -896,7 +910,7 @@ export async function getFleetSnapshot(): Promise<WialonFleetSnapshotItem[]> {
   return items.map((it): WialonFleetSnapshotItem => {
     const sensors: WialonFuelSensor[] = it.sens
       ? Object.values(it.sens as Record<string, any>)
-          .filter((s: any) => FUEL_SENSOR_NAME_RE.test(s.n) && Array.isArray(s.tbl) && s.tbl.length > 0)
+          .filter(isFuelLevelSensor)
           .map((s: any) => ({ id: s.id, name: s.n, param: s.p, table: s.tbl }))
       : [];
 
