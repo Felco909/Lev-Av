@@ -133,9 +133,9 @@ export default function PaymentHistoryPage() {
             {payments.map(p => (
               <tr key={p.id} className="border-b border-border/50 hover:bg-muted/30 transition">
                 <td className="px-3 py-2 text-xs whitespace-nowrap">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('ru-RU') : '—'}</td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 max-w-[220px]">
                   <CrumbLink href={`/trips/${p.trip.id}`} fromLabel="Оплаты" fromKey="payment-history" className="text-primary hover:underline font-mono text-xs">{p.trip.tripNumber}</CrumbLink>
-                  <div className="text-[11px] text-muted-foreground">{p.trip.routeFrom} → {p.trip.routeTo}</div>
+                  <div className="text-[11px] text-muted-foreground truncate" title={`${p.trip.routeFrom} → ${p.trip.routeTo}`}>{p.trip.routeFrom} → {p.trip.routeTo}</div>
                 </td>
                 <td className="px-3 py-2">
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
