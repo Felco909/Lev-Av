@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import ExcelJS from 'exceljs';
+import { computeClientDueAmd, computeCarrierDueAmd, computeDebtAmd } from '@/lib/finance/formulas';
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return '';
@@ -134,19 +135,22 @@ export async function GET(req: Request) {
       orderBy: { tripDate: 'desc' },
     });
 
-    // Fetch client debts (all time, unpaid)
+    // Fetch client debts — тот же период (dateWhere), что и остальные листы этого файла
+    // (аудит "Отчёты": раньше долги молча игнорировали dateFrom/dateTo, пока "Прибыль" и
+    // "Топливо" в том же экспорте их применяли).
     const clientDebtTrips = await prisma.trip.findMany({
-      where: { clientPaymentStatus: { in: ['not_paid', 'partially_paid'] }, NOT: { status: 'cancelled' } },
-      include: { client: { select: { name: true, phone: true } } },
+      where: { ...dateWhere, clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
+      include: { client: { select: { name: true, phone: true } }, expenses: { select: { amountAmd: true, description: true } } },
       orderBy: { tripDate: 'desc' },
     });
 
-    // Fetch carrier debts (all time, unpaid)
+    // Fetch carrier debts — тот же период (dateWhere), см. комментарий выше.
     const carrierDebtTrips = await prisma.trip.findMany({
-      where: { tripType: 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] }, NOT: { status: 'cancelled' } },
+      where: { ...dateWhere, tripType: 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
       include: {
         carrier: { select: { name: true } },
         client: { select: { name: true } },
+        expenses: { select: { amountAmd: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
     });
@@ -172,8 +176,11 @@ export async function GET(req: Request) {
     wb.created = new Date();
 
     // ========== SHEET 1: Client Debts ==========
+    // \u0421\u0443\u043c\u043c\u0430 \u043a \u043e\u043f\u043b\u0430\u0442\u0435 = \u0441\u0442\u0430\u0432\u043a\u0430 + \u043f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u043c\u044b\u0435 \u043a\u043b\u0438\u0435\u043d\u0442\u0441\u043a\u0438\u0435 \u0440\u0430\u0441\u0445\u043e\u0434\u044b (computeClientDueAmd,
+    // \u0442\u0430 \u0436\u0435 \u0444\u043e\u0440\u043c\u0443\u043b\u0430, \u0447\u0442\u043e /api/debts \u0438 /api/dashboard \u2014 \u0430\u0443\u0434\u0438\u0442 "\u041e\u0442\u0447\u0451\u0442\u044b": \u0440\u0430\u043d\u044c\u0448\u0435 \u0437\u0434\u0435\u0441\u044c \u0441\u0447\u0438\u0442\u0430\u043b\u0438
+    // \u0433\u043e\u043b\u0443\u044e \u0441\u0442\u0430\u0432\u043a\u0443 \u0431\u0435\u0437 \u0440\u0430\u0441\u0445\u043e\u0434\u043e\u0432, \u0438\u0437-\u0437\u0430 \u0447\u0435\u0433\u043e \u0434\u043e\u043b\u0433 \u0432 Excel \u0431\u044b\u043b \u0437\u0430\u043d\u0438\u0436\u0435\u043d \u043e\u0442\u043d\u043e\u0441\u0438\u0442\u0435\u043b\u044c\u043d\u043e /debts).
     const clientDebtRows = clientDebtTrips.map(t => {
-      const rate = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
+      const rate = computeClientDueAmd(Number((t as any).clientRateAmd ?? t.clientRate ?? 0), (t as any).expenses ?? []);
       const paid = Number((t as any).clientPaidAmountAmd ?? 0);
       return {
         client: t.client?.name || '',
@@ -183,7 +190,7 @@ export async function GET(req: Request) {
         date: t.tripDate,
         rate: Math.round(rate),
         paid: Math.round(paid),
-        remaining: Math.round(Math.max(0, rate - paid)),
+        remaining: Math.round(computeDebtAmd(rate, paid)),
       };
     });
 
@@ -199,8 +206,10 @@ export async function GET(req: Request) {
     ], clientDebtRows, { headerColor: 'FF2563EB', totalsColumns: ['rate', 'paid', 'remaining'] });
 
     // ========== SHEET 2: Carrier Debts ==========
+    // \u0421\u0443\u043c\u043c\u0430 \u043a \u043e\u043f\u043b\u0430\u0442\u0435 = \u0441\u0442\u0430\u0432\u043a\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430 + \u043f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u043c\u044b\u0435 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u0446\u043a\u0438\u0435 \u0440\u0430\u0441\u0445\u043e\u0434\u044b
+    // (computeCarrierDueAmd) \u2014 \u0441\u043c. \u043a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439 \u0443 Sheet 1.
     const carrierDebtRows = carrierDebtTrips.map(t => {
-      const rate = Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0);
+      const rate = computeCarrierDueAmd(Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0), (t as any).expenses ?? []);
       const paid = Number((t as any).carrierPaidAmountAmd ?? (t as any).carrierPaidAmount ?? 0);
       return {
         carrier: t.carrier?.name || '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d',
@@ -210,7 +219,7 @@ export async function GET(req: Request) {
         date: t.tripDate,
         rate: Math.round(rate),
         paid: Math.round(paid),
-        remaining: Math.round(Math.max(0, rate - paid)),
+        remaining: Math.round(computeDebtAmd(rate, paid)),
       };
     });
 

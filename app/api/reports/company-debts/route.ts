@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { computeCarrierDueAmd, computeDebtAmd } from '@/lib/finance/formulas';
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return '';
@@ -40,14 +41,17 @@ export async function GET(req: Request) {
       include: {
         carrier: { select: { id: true, name: true } },
         client: { select: { id: true, name: true } },
+        expenses: { select: { amountAmd: true, description: true } },
       },
       orderBy: { tripDate: 'desc' },
     });
 
+    // computeCarrierDueAmd/computeDebtAmd \u2014 \u0442\u0430 \u0436\u0435 \u0444\u043E\u0440\u043C\u0443\u043B\u0430, \u0447\u0442\u043E /api/debts \u0438 /api/dashboard
+    // (\u0430\u0443\u0434\u0438\u0442 "\u041E\u0442\u0447\u0451\u0442\u044B": \u0440\u0430\u043D\u044C\u0448\u0435 \u0437\u0434\u0435\u0441\u044C \u0441\u0447\u0438\u0442\u0430\u043B\u0438 \u0433\u043E\u043B\u0443\u044E \u0441\u0442\u0430\u0432\u043A\u0443 \u0431\u0435\u0437 \u043F\u0435\u0440\u0435\u0432\u044B\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0445 \u0440\u0430\u0441\u0445\u043E\u0434\u043E\u0432 \u0438 \u043D\u0435
+    // \u043A\u043B\u044D\u043C\u043F\u0438\u043B\u0438 \u043F\u0435\u0440\u0435\u043F\u043B\u0430\u0442\u0443 \u043A \u043D\u0443\u043B\u044E \u2014 \u0440\u0430\u0441\u0445\u043E\u0434\u0438\u043B\u043E\u0441\u044C \u0441 /api/debts \u0438 \u0441 /api/reports/supplier-debts).
     const carrierRows = carrierTrips.map((t) => {
-      const carrierRate = Number(t.carrierRateAmd ?? t.carrierRate ?? 0);
+      const carrierRate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses ?? []);
       const paidAmount = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
-      const debt = carrierRate - paidAmount;
       return {
         id: t.id,
         carrierName: t.carrier?.name || '\u041D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D',
@@ -56,7 +60,7 @@ export async function GET(req: Request) {
         clientName: t.client?.name || '',
         carrierRate,
         paidAmount,
-        debt: debt > 0 ? debt : 0,
+        debt: computeDebtAmd(carrierRate, paidAmount),
         date: fmtDate(t.tripDate),
         status: t.carrierPaymentStatus || 'not_paid',
       };
@@ -85,7 +89,6 @@ export async function GET(req: Request) {
     const supplierRows = purchases.map((p) => {
       const totalAmount = Number(p.totalAmount ?? 0);
       const paidAmount = Number(p.paidAmount ?? 0);
-      const debt = totalAmount - paidAmount;
       return {
         id: p.id,
         supplierName: p.supplier?.name || '\u041D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D',
@@ -94,7 +97,7 @@ export async function GET(req: Request) {
         partName: p.partName,
         totalAmount,
         paidAmount,
-        debt: debt > 0 ? debt : 0,
+        debt: computeDebtAmd(totalAmount, paidAmount),
         date: fmtDate(p.date),
         status: p.paymentStatus,
       };
