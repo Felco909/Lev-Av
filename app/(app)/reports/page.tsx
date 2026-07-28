@@ -484,13 +484,13 @@ export default function ReportsPage() {
       rows.push(['--- ДОЛГИ КЛИЕНТОВ ---']);
       rows.push(['Заявка', 'Клиент', 'Дата', 'Долг ֏', 'Просрочено']);
       for (const d of (debtsData?.clientDebts ?? [])) {
-        rows.push([d.tripNumber, d.clientName, d.tripDate, String(Math.round(d.remaining)), d.isOverdue ? 'да' : 'нет']);
+        rows.push([d.tripNumber, d.clientName, formatDate(d.tripDate), String(Math.round(d.remaining)), d.isOverdue ? 'да' : 'нет']);
       }
       rows.push([]);
       rows.push(['--- ДОЛГИ ПЕРЕВОЗЧИКАМ ---']);
       rows.push(['Заявка', 'Перевозчик', 'Дата', 'Долг ֏']);
       for (const d of (debtsData?.carrierDebts ?? [])) {
-        rows.push([d.tripNumber, d.carrierName, d.tripDate, String(Math.round(d.remaining))]);
+        rows.push([d.tripNumber, d.carrierName, formatDate(d.tripDate), String(Math.round(d.remaining))]);
       }
     } else {
       // overview — сводный лист
@@ -1318,7 +1318,7 @@ export default function ReportsPage() {
                         <tbody>
                           {allCashGapTrips.map((d: any) => (
                             <tr key={d.id} className="border-b hover:bg-muted/30 transition">
-                              <td className="py-2 px-4 text-xs whitespace-nowrap">{d.tripDate}</td>
+                              <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(d.tripDate)}</td>
                               <td className="py-2 px-3 text-xs"><CrumbLink href={`/trips/${d.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline">{d.tripNumber}</CrumbLink></td>
                               <td className="py-2 px-3 text-xs">{d.clientName}</td>
                               <td className="py-2 px-3 text-right font-mono text-xs">{fmtAmd(d.rateAmd)}</td>
