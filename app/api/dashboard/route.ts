@@ -33,23 +33,74 @@ export async function GET(req: Request) {
     if (clientId) where.clientId = clientId;
     if (tripType) where.tripType = tripType;
 
-    // \u2500\u2500 1. CLIENT DEBTS \u2500\u2500
+    // \u2500\u2500 1-4. \u041d\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043c\u044b\u0435 \u0437\u0430\u043f\u0440\u043e\u0441\u044b \u043f\u043e \u0437\u0430\u044f\u0432\u043a\u0430\u043c (\u0434\u043e\u043b\u0433\u0438 \u043a\u043b\u0438\u0435\u043d\u0442\u0430/\u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430, \u043f\u0440\u0438\u0431\u044b\u043b\u044c,
+    // \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u043d\u044b\u0435/\u043a\u0430\u0441\u0441\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0440\u044b\u0432) \u2014 \u043e\u0434\u0438\u043d Promise.all \u0432\u043c\u0435\u0441\u0442\u043e 4 \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0445 await
+    // \u043f\u043e\u0434\u0440\u044f\u0434 (\u0430\u0443\u0434\u0438\u0442 "\u0414\u0430\u0448\u0431\u043e\u0440\u0434": \u044d\u0442\u043e \u0441\u0430\u043c\u0430\u044f \u043d\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u0430\u044f \u043f\u043e \u0447\u0438\u0441\u043b\u0443 \u043f\u043e\u0445\u043e\u0434\u043e\u0432 \u0432 \u0411\u0414 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0430
+    // \u0441\u0438\u0441\u0442\u0435\u043c\u044b, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u043f\u0440\u0438 \u043a\u0430\u0436\u0434\u043e\u043c \u0432\u0445\u043e\u0434\u0435).
     const clientDebtWhere = {
       ...where,
       clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
     };
-    const clientDebtTrips = await prisma.trip.findMany({
-      where: clientDebtWhere,
-      select: {
-        id: true, tripNumber: true, clientRateAmd: true, clientRate: true,
-        clientPaidAmountAmd: true, clientPaidAmount: true,
-        clientId: true,
-        client: { select: { name: true } },
-        expenses: { select: { amountAmd: true, description: true } },
-      },
-      orderBy: { tripDate: 'desc' },
-    });
+    const carrierDebtWhere: any = {
+      ...where,
+      tripType: where.tripType ?? 'expedition',
+      carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
+    };
+    if (tripType === 'own_transport') {
+      carrierDebtWhere.tripType = 'own_transport';
+    }
 
+    const [clientDebtTrips, carrierDebtTrips, allTrips, problemTrips] = await Promise.all([
+      prisma.trip.findMany({
+        where: clientDebtWhere,
+        select: {
+          id: true, tripNumber: true, clientRateAmd: true, clientRate: true,
+          clientPaidAmountAmd: true, clientPaidAmount: true,
+          clientId: true,
+          client: { select: { name: true } },
+          expenses: { select: { amountAmd: true, description: true } },
+        },
+        orderBy: { tripDate: 'desc' },
+      }),
+      prisma.trip.findMany({
+        where: carrierDebtWhere,
+        select: {
+          id: true, tripNumber: true, carrierRateAmd: true, carrierRate: true,
+          carrierPaidAmountAmd: true, carrierPaidAmount: true,
+          carrier: { select: { name: true } },
+          expenses: { select: { amountAmd: true, description: true } },
+        },
+        orderBy: { tripDate: 'desc' },
+      }),
+      prisma.trip.findMany({
+        where,
+        select: {
+          id: true, tripNumber: true, tripType: true,
+          clientRateAmd: true, clientRate: true,
+          carrierRateAmd: true, carrierRate: true,
+          profitAmd: true, profit: true,
+          client: { select: { name: true } },
+          expenses: { select: { amountAmd: true, description: true } },
+        },
+        orderBy: { profitAmd: 'desc' },
+      }),
+      prisma.trip.findMany({
+        where: {
+          ...where,
+          tripType: where.tripType ?? 'expedition',
+        },
+        select: {
+          id: true, tripNumber: true,
+          clientPaidAmountAmd: true, clientPaidAmount: true,
+          carrierPaidAmountAmd: true, carrierPaidAmount: true,
+          client: { select: { name: true } },
+          carrier: { select: { name: true } },
+        },
+        orderBy: { tripDate: 'desc' },
+      }),
+    ]);
+
+    // \u2500\u2500 1. CLIENT DEBTS \u2500\u2500
     const clientDebts = clientDebtTrips.map(t => {
       // Сумма к оплате = ставка + перевыставляемые клиентские расходы (см. CLAUDE.md).
       const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses);
@@ -77,25 +128,6 @@ export async function GET(req: Request) {
       .slice(0, 5);
 
     // \u2500\u2500 2. CARRIER DEBTS \u2500\u2500
-    const carrierDebtWhere: any = {
-      ...where,
-      tripType: where.tripType ?? 'expedition',
-      carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-    };
-    if (tripType === 'own_transport') {
-      carrierDebtWhere.tripType = 'own_transport';
-    }
-    const carrierDebtTrips = await prisma.trip.findMany({
-      where: carrierDebtWhere,
-      select: {
-        id: true, tripNumber: true, carrierRateAmd: true, carrierRate: true,
-        carrierPaidAmountAmd: true, carrierPaidAmount: true,
-        carrier: { select: { name: true } },
-        expenses: { select: { amountAmd: true, description: true } },
-      },
-      orderBy: { tripDate: 'desc' },
-    });
-
     const carrierDebts = carrierDebtTrips.map(t => {
       const rate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses);
       const paid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
@@ -108,19 +140,6 @@ export async function GET(req: Request) {
     const totalCarrierDebt = carrierDebts.reduce((s, r) => s + r.remaining, 0);
 
     // \u2500\u2500 3. PROFIT \u2500\u2500
-    const allTrips = await prisma.trip.findMany({
-      where,
-      select: {
-        id: true, tripNumber: true, tripType: true,
-        clientRateAmd: true, clientRate: true,
-        carrierRateAmd: true, carrierRate: true,
-        profitAmd: true, profit: true,
-        client: { select: { name: true } },
-        expenses: { select: { amountAmd: true, description: true } },
-      },
-      orderBy: { profitAmd: 'desc' },
-    });
-
     const profitRows = allTrips.map(t => {
       // Клиентские расходы — доход (перевыставляются), перевозчицкие — расход.
       // Для own_transport вообще нет расходной части (см. computeTripProfitAmd/CLAUDE.md).
@@ -140,21 +159,6 @@ export async function GET(req: Request) {
     const totalExpense = profitRows.reduce((s, r) => s + r.expense, 0);
 
     // \u2500\u2500 4. PROBLEM TRIPS (cash gap) \u2500\u2500
-    const problemTrips = await prisma.trip.findMany({
-      where: {
-        ...where,
-        tripType: where.tripType ?? 'expedition',
-      },
-      select: {
-        id: true, tripNumber: true,
-        clientPaidAmountAmd: true, clientPaidAmount: true,
-        carrierPaidAmountAmd: true, carrierPaidAmount: true,
-        client: { select: { name: true } },
-        carrier: { select: { name: true } },
-      },
-      orderBy: { tripDate: 'desc' },
-    });
-
     const problemRows = problemTrips
       .map(t => {
         const clientPaid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
@@ -188,40 +192,42 @@ export async function GET(req: Request) {
       if (clientId) prevWhere.clientId = clientId;
       if (tripType) prevWhere.tripType = tripType;
 
-      // Previous client debts
-      const prevClientDebtTrips = await prisma.trip.findMany({
-        where: { ...prevWhere, clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
-        select: { clientRateAmd: true, clientRate: true, clientPaidAmountAmd: true, clientPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
-      });
+      // Предыдущий период — те же 4 независимых запроса, тоже одним Promise.all
+      // (аудит "Дашборд"), а не последовательно.
+      const prevCarrierWhere: any = { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] } };
+      if (tripType === 'own_transport') prevCarrierWhere.tripType = 'own_transport';
+
+      const [prevClientDebtTrips, prevCarrierDebtTrips, prevProfitAgg, prevProblemTrips] = await Promise.all([
+        prisma.trip.findMany({
+          where: { ...prevWhere, clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
+          select: { clientRateAmd: true, clientRate: true, clientPaidAmountAmd: true, clientPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
+        }),
+        prisma.trip.findMany({
+          where: prevCarrierWhere,
+          select: { carrierRateAmd: true, carrierRate: true, carrierPaidAmountAmd: true, carrierPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
+        }),
+        prisma.trip.aggregate({
+          where: prevWhere,
+          _sum: { profitAmd: true },
+        }),
+        prisma.trip.findMany({
+          where: { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition' },
+          select: { clientPaidAmountAmd: true, clientPaidAmount: true, carrierPaidAmountAmd: true, carrierPaidAmount: true },
+        }),
+      ]);
+
       const prevTotalClientDebt = prevClientDebtTrips.reduce((s, t) => {
         const r = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses) - Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
         return s + (r > 0 ? r : 0);
       }, 0);
 
-      // Previous carrier debts
-      const prevCarrierWhere: any = { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] } };
-      if (tripType === 'own_transport') prevCarrierWhere.tripType = 'own_transport';
-      const prevCarrierDebtTrips = await prisma.trip.findMany({
-        where: prevCarrierWhere,
-        select: { carrierRateAmd: true, carrierRate: true, carrierPaidAmountAmd: true, carrierPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
-      });
       const prevTotalCarrierDebt = prevCarrierDebtTrips.reduce((s, t) => {
         const r = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses) - Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
         return s + (r > 0 ? r : 0);
       }, 0);
 
-      // Previous profit
-      const prevProfitAgg = await prisma.trip.aggregate({
-        where: prevWhere,
-        _sum: { profitAmd: true },
-      });
       const prevTotalProfit = Number(prevProfitAgg._sum?.profitAmd ?? 0);
 
-      // Previous cash gap
-      const prevProblemTrips = await prisma.trip.findMany({
-        where: { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition' },
-        select: { clientPaidAmountAmd: true, clientPaidAmount: true, carrierPaidAmountAmd: true, carrierPaidAmount: true },
-      });
       const prevTotalCashGap = prevProblemTrips.reduce((s, t) => {
         const cp = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
         const crp = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);

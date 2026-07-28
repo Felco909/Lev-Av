@@ -58,7 +58,12 @@ export async function GET() {
       orderBy: { tripDate: 'desc' },
     });
 
-    const clientDebts = clientUnpaid.map(t => {
+    // Формула считается один раз на заявку (rateAmd/paidAmd/remaining/cashGap/dueState) и
+    // переиспользуется и плоским списком (clientDebts), и группировкой по клиенту ниже —
+    // раньше группировка пересчитывала ту же формулу заново вторым проходом по тем же
+    // заявкам (аудит "Отчёты": groupedCarrier ниже уже строился из готового carrierDebts,
+    // а groupedMap для клиентов — нет, несогласованность внутри одного файла).
+    const clientDebtComputed = clientUnpaid.map(t => {
       const clientRateAmd = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
       const rateAmd = computeClientDueAmd(clientRateAmd, (t as any).expenses ?? []);
       const paidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
@@ -66,7 +71,12 @@ export async function GET() {
       const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays, t.status);
       const carrierPaidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
       const cashGap = t.tripType === 'expedition' && carrierPaidAmd > paidAmd ? carrierPaidAmd - paidAmd : 0;
-      return {
+      return { trip: t, rateAmd, paidAmd, remaining, cashGap, dueState };
+    });
+
+    const clientDebts = clientDebtComputed
+      .filter(c => c.remaining > 0)
+      .map(({ trip: t, rateAmd, paidAmd, remaining, cashGap, dueState }) => ({
         id: t.id,
         tripNumber: t.tripNumber,
         clientName: t.client?.name ?? '—',
@@ -79,23 +89,15 @@ export async function GET() {
         status: t.status,
         cashGap,
         ...dueState,
-      };
-    }).filter(t => t.remaining > 0);
+      }));
 
     const totalClientDebt = clientDebts.reduce((s, t) => s + t.remaining, 0);
 
-    // Grouped by client
+    // Grouped by client — из уже посчитанного clientDebtComputed, без повторного расчёта.
     const groupedMap = new Map<string, any>();
-    for (const t of clientUnpaid) {
-      const _clientRate = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
-      const rateAmd = computeClientDueAmd(_clientRate, (t as any).expenses ?? []);
-      const paidAmd = Number((t as any).clientPaidAmountAmd ?? 0);
-      const remaining = Math.round((rateAmd - paidAmd) * 100) / 100;
+    for (const { trip: t, rateAmd, paidAmd, remaining, cashGap, dueState } of clientDebtComputed) {
       if (remaining <= 0) continue;
       const cId = t.client?.id ?? 'unknown';
-      const carrierPaidAmd = Number((t as any).carrierPaidAmountAmd ?? 0);
-      const cashGap = t.tripType === 'expedition' && carrierPaidAmd > paidAmd ? carrierPaidAmd - paidAmd : 0;
-      const dueState = calcDueState((t as any).paymentDueDate, (t as any).unloadDate, (t.client as any)?.paymentTermsDays, t.status);
       if (!groupedMap.has(cId)) {
         groupedMap.set(cId, {
           client: { id: cId, name: t.client?.name ?? '—', phone: (t.client as any)?.phone ?? null, email: (t.client as any)?.email ?? null },
