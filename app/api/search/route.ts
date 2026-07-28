@@ -11,11 +11,11 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get('q') || '').trim();
-    if (q.length < 2) return NextResponse.json({ trips: [], clients: [], carriers: [] });
+    if (q.length < 2) return NextResponse.json({ trips: [], clients: [], carriers: [], vehicles: [], drivers: [] });
 
     const like = `%${q}%`;
 
-    const [trips, clients, carriers] = await Promise.all([
+    const [trips, clients, carriers, vehicles, drivers] = await Promise.all([
       prisma.trip.findMany({
         where: {
           OR: [
@@ -41,9 +41,32 @@ export async function GET(req: Request) {
         take: 5,
         orderBy: { name: 'asc' },
       }),
+      prisma.vehicle.findMany({
+        where: {
+          OR: [
+            { plateNumber: { contains: q, mode: 'insensitive' } },
+            { brand: { contains: q, mode: 'insensitive' } },
+            { model: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true, plateNumber: true, brand: true, model: true },
+        take: 5,
+        orderBy: { plateNumber: 'asc' },
+      }),
+      prisma.driver.findMany({
+        where: {
+          OR: [
+            { fullName: { contains: q, mode: 'insensitive' } },
+            { phone: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true, fullName: true, phone: true },
+        take: 5,
+        orderBy: { fullName: 'asc' },
+      }),
     ]);
 
-    return NextResponse.json({ trips, clients, carriers });
+    return NextResponse.json({ trips, clients, carriers, vehicles, drivers });
   } catch (e: any) {
     console.error('Search error:', e);
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

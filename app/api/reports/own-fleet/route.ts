@@ -46,6 +46,7 @@ export async function GET(req: Request) {
         vehicle: { select: { plateNumber: true } },
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
+        calculatedFuelConsumedL: true, calculatedKm: true,
         fleetExpenses: {
           select: { id: true, date: true, expenseType: true, amount: true, currency: true, exchangeRate: true, amountAmd: true, comment: true },
         },
@@ -76,6 +77,8 @@ export async function GET(req: Request) {
     let totalFuelAmd = 0;
     let totalOtherAmd = 0;
     let totalFleetExpAmd = 0;
+    let totalFuelLiters = 0;
+    let totalFuelKm = 0;
 
     const vehicleTripRows = vehicleTrips.map((vt) => {
       const incomeAmd = roundMoney(incomeByVt.get(vt.id) ?? 0);
@@ -94,6 +97,8 @@ export async function GET(req: Request) {
       totalFuelAmd += fuelAmd;
       totalOtherAmd += otherAmd;
       totalFleetExpAmd += fleetExpAmd;
+      if (vt.calculatedFuelConsumedL != null) totalFuelLiters += vt.calculatedFuelConsumedL;
+      if (vt.calculatedKm != null) totalFuelKm += vt.calculatedKm;
 
       return {
         id: vt.id,
@@ -149,6 +154,14 @@ export async function GET(req: Request) {
           fuel: roundMoney(totalFuelAmd),
           other: roundMoney(totalOtherAmd),
           fleetExpenses: roundMoney(totalFleetExpAmd),
+        },
+        // л/100км считается по агрегированным литрам/км за период (не средним по отдельным
+        // рейсам) — точнее, тот же принцип, что computeCostPerKmAmd в lib/finance/formulas.ts,
+        // но для топлива, а не денег. Оба слагаемых уже хранятся (Wialon), новых полей нет.
+        fuel: {
+          liters: roundMoney(totalFuelLiters),
+          km: roundMoney(totalFuelKm),
+          per100Km: totalFuelKm > 0 ? roundMoney((totalFuelLiters / totalFuelKm) * 100) : null,
         },
       },
     });
