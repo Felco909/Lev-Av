@@ -3,9 +3,10 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { computeClientDueAmd, computeCarrierDueAmd, splitExpensesAmd } from '@/lib/finance/formulas';
+import { computeClientDueAmd, computeCarrierDueAmd, computeCashGapAmd, splitExpensesAmd } from '@/lib/finance/formulas';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
+import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
 
 export async function GET(req: Request) {
   try {
@@ -37,41 +38,11 @@ export async function GET(req: Request) {
     // \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u043d\u044b\u0435/\u043a\u0430\u0441\u0441\u043e\u0432\u044b\u0439 \u0440\u0430\u0437\u0440\u044b\u0432) \u2014 \u043e\u0434\u0438\u043d Promise.all \u0432\u043c\u0435\u0441\u0442\u043e 4 \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0445 await
     // \u043f\u043e\u0434\u0440\u044f\u0434 (\u0430\u0443\u0434\u0438\u0442 "\u0414\u0430\u0448\u0431\u043e\u0440\u0434": \u044d\u0442\u043e \u0441\u0430\u043c\u0430\u044f \u043d\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u0430\u044f \u043f\u043e \u0447\u0438\u0441\u043b\u0443 \u043f\u043e\u0445\u043e\u0434\u043e\u0432 \u0432 \u0411\u0414 \u0441\u0442\u0440\u0430\u043d\u0438\u0446\u0430
     // \u0441\u0438\u0441\u0442\u0435\u043c\u044b, \u043e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u0442\u0441\u044f \u043f\u0440\u0438 \u043a\u0430\u0436\u0434\u043e\u043c \u0432\u0445\u043e\u0434\u0435).
-    const clientDebtWhere = {
-      ...where,
-      clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-    };
-    const carrierDebtWhere: any = {
-      ...where,
-      tripType: where.tripType ?? 'expedition',
-      carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-    };
-    if (tripType === 'own_transport') {
-      carrierDebtWhere.tripType = 'own_transport';
-    }
+    const debtFilters = { dateFrom, dateTo, clientId, tripType };
 
-    const [clientDebtTrips, carrierDebtTrips, allTrips, problemTrips] = await Promise.all([
-      prisma.trip.findMany({
-        where: clientDebtWhere,
-        select: {
-          id: true, tripNumber: true, clientRateAmd: true, clientRate: true,
-          clientPaidAmountAmd: true, clientPaidAmount: true,
-          clientId: true,
-          client: { select: { name: true } },
-          expenses: { select: { amountAmd: true, description: true } },
-        },
-        orderBy: { tripDate: 'desc' },
-      }),
-      prisma.trip.findMany({
-        where: carrierDebtWhere,
-        select: {
-          id: true, tripNumber: true, carrierRateAmd: true, carrierRate: true,
-          carrierPaidAmountAmd: true, carrierPaidAmount: true,
-          carrier: { select: { name: true } },
-          expenses: { select: { amountAmd: true, description: true } },
-        },
-        orderBy: { tripDate: 'desc' },
-      }),
+    const [clientRows, carrierRows, allTrips, problemTrips] = await Promise.all([
+      getClientDebtRows(prisma, new Date(), debtFilters),
+      getCarrierDebtRows(prisma, new Date(), debtFilters),
       prisma.trip.findMany({
         where,
         select: {
@@ -101,18 +72,13 @@ export async function GET(req: Request) {
     ]);
 
     // \u2500\u2500 1. CLIENT DEBTS \u2500\u2500
-    const clientDebts = clientDebtTrips.map(t => {
-      // Сумма к оплате = ставка + перевыставляемые клиентские расходы (см. CLAUDE.md).
-      const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses);
-      const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
-      return {
-        id: t.id, tripNumber: t.tripNumber,
-        clientName: t.client?.name ?? '', clientId: t.clientId,
-        rate, paid, remaining: rate - paid,
-      };
-    }).filter(r => r.remaining > 0);
+    const clientDebts = clientRows.map(r => ({
+      id: r.id, tripNumber: r.tripNumber,
+      clientName: r.entityName, clientId: r.entityId,
+      rate: r.rateAmd, paid: r.paidAmd, remaining: r.remaining,
+    }));
 
-    const totalClientDebt = clientDebts.reduce((s, r) => s + r.remaining, 0);
+    const totalClientDebt = sumDebt(clientRows);
 
     // \u2500\u2500 TOP-5 DEBTORS \u2500\u2500
     const debtorMap: Record<string, { clientId: string; clientName: string; totalDebt: number; tripCount: number }> = {};
@@ -128,16 +94,12 @@ export async function GET(req: Request) {
       .slice(0, 5);
 
     // \u2500\u2500 2. CARRIER DEBTS \u2500\u2500
-    const carrierDebts = carrierDebtTrips.map(t => {
-      const rate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses);
-      const paid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
-      return {
-        id: t.id, tripNumber: t.tripNumber, carrierName: t.carrier?.name ?? '',
-        rate, paid, remaining: rate - paid,
-      };
-    }).filter(r => r.remaining > 0);
+    const carrierDebts = carrierRows.map(r => ({
+      id: r.id, tripNumber: r.tripNumber, carrierName: r.entityName,
+      rate: r.rateAmd, paid: r.paidAmd, remaining: r.remaining,
+    }));
 
-    const totalCarrierDebt = carrierDebts.reduce((s, r) => s + r.remaining, 0);
+    const totalCarrierDebt = sumDebt(carrierRows);
 
     // \u2500\u2500 3. PROFIT \u2500\u2500
     const profitRows = allTrips.map(t => {
@@ -163,7 +125,7 @@ export async function GET(req: Request) {
       .map(t => {
         const clientPaid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
         const carrierPaid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
-        const diff = carrierPaid - clientPaid;
+        const diff = computeCashGapAmd(clientPaid, carrierPaid);
         return {
           id: t.id, tripNumber: t.tripNumber,
           clientName: t.client?.name ?? '', carrierName: t.carrier?.name ?? '',
@@ -243,80 +205,18 @@ export async function GET(req: Request) {
     // Never flag a trip as overdue if it is still in-progress/new/unloaded, or if the due date is not set.
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
-    const [clientPaymentTrips, carrierPaymentTrips] = await Promise.all([
-      prisma.trip.findMany({
-        where: {
-          status: 'completed',
-          paymentDueDate: { not: null },
-          clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-        },
-        select: {
-          id: true, tripNumber: true, paymentDueDate: true,
-          clientRateAmd: true, clientRate: true,
-          clientPaidAmountAmd: true, clientPaidAmount: true,
-          client: { select: { name: true } },
-          expenses: { select: { amountAmd: true, description: true } },
-        },
-        orderBy: { paymentDueDate: 'asc' },
-      }),
-      prisma.trip.findMany({
-        where: {
-          status: 'completed',
-          carrierPaymentDate: { not: null },
-          carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-        },
-        select: {
-          id: true, tripNumber: true, carrierPaymentDate: true,
-          carrierRateAmd: true, carrierRate: true,
-          carrierPaidAmountAmd: true, carrierPaidAmount: true,
-          carrier: { select: { name: true } },
-          expenses: { select: { amountAmd: true, description: true } },
-        },
-        orderBy: { carrierPaymentDate: 'asc' },
-      }),
-    ]);
-
-    const clientOverdueArr: any[] = [];
-    const clientDueArr: any[] = [];
-    for (const t of clientPaymentTrips) {
-      const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses);
-      const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
-      const remaining = rate - paid;
-      if (remaining <= 0) continue;
-      const due = new Date(t.paymentDueDate!); due.setHours(0, 0, 0, 0);
-      const daysLeft = Math.ceil((due.getTime() - todayStart.getTime()) / 86400000);
-      const row = {
-        id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '',
-        amount: remaining,
-        paymentDueDate: due.toISOString().split('T')[0],
-        daysLeft,
-      };
-      if (daysLeft < 0) clientOverdueArr.push(row); else clientDueArr.push(row);
-    }
-
-    const carrierOverdueArr: any[] = [];
-    const carrierDueArr: any[] = [];
-    for (const t of carrierPaymentTrips) {
-      const rate = computeCarrierDueAmd(Number(t.carrierRateAmd ?? t.carrierRate ?? 0), t.expenses);
-      const paid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
-      const remaining = rate - paid;
-      if (remaining <= 0) continue;
-      const due = new Date(t.carrierPaymentDate!); due.setHours(0, 0, 0, 0);
-      const daysLeft = Math.ceil((due.getTime() - todayStart.getTime()) / 86400000);
-      const row = {
-        id: t.id, tripNumber: t.tripNumber, carrierName: t.carrier?.name ?? '',
-        amount: remaining,
-        paymentDueDate: due.toISOString().split('T')[0],
-        daysLeft,
-      };
-      if (daysLeft < 0) carrierOverdueArr.push(row); else carrierDueArr.push(row);
-    }
-
+    // Единый источник ожидаемых/просроченных платежей — lib/dashboard-payment-reminders.ts
+    // (buildClientPaymentReminderBuckets/buildCarrierPaymentReminderBuckets). Этот модуль уже
+    // существовал (журнал-first, тот же canonical-правило, что и в client-overdue-logic.ts),
+    // но нигде не вызывался — здесь была собственная копия, ограниченная только status='completed'
+    // (аудит раздела "Долги": заявка на "Сверке"/"Ожидает оплаты" тоже может быть просрочена,
+    // не только "Завершённая" — старая версия такие случаи пропускала).
+    const paymentReminders = await getPaymentReminders(prisma, todayStart);
     const reminders = {
-      overduePayments: clientOverdueArr.slice(0, 10),
-      paymentDueTrips: clientDueArr.slice(0, 15),
-      carrierOverduePayments: carrierOverdueArr.slice(0, 10),
-      carrierPaymentDueTrips: carrierDueArr.slice(0, 15),
+      overduePayments: paymentReminders.clientOverdue.slice(0, 10),
+      paymentDueTrips: paymentReminders.clientDueSoon.slice(0, 15),
+      carrierOverduePayments: paymentReminders.carrierOverdue.slice(0, 10),
+      carrierPaymentDueTrips: paymentReminders.carrierDueSoon.slice(0, 15),
     };
 
     // \u2500\u2500 7. EXPIRING DOCUMENTS \u2500\u2500

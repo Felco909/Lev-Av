@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeDebtAmd } from '@/lib/finance/formulas';
+import { getSupplierDebtRows } from '@/lib/finance/debts-service';
 
 export async function GET(req: Request) {
   try {
@@ -15,19 +16,7 @@ export async function GET(req: Request) {
     const vehicleId = searchParams.get('vehicleId');
     const paymentStatus = searchParams.get('paymentStatus');
 
-    const where: any = {};
-    if (supplierId) where.supplierId = supplierId;
-    if (vehicleId) where.vehicleId = vehicleId;
-    if (paymentStatus) where.paymentStatus = paymentStatus;
-
-    const purchases = await prisma.partPurchase.findMany({
-      where,
-      include: {
-        vehicle: { select: { id: true, plateNumber: true, brand: true, model: true } },
-        supplier: { select: { id: true, name: true, contactPerson: true, phone: true } },
-      },
-      orderBy: { date: 'desc' },
-    });
+    const purchases = await getSupplierDebtRows(prisma, { supplierId, vehicleId, paymentStatus });
 
     // Aggregate per supplier
     const supplierMap: Record<string, { supplier: any; totalAmount: number; paidAmount: number; debtAmount: number; count: number }> = {};
@@ -40,7 +29,7 @@ export async function GET(req: Request) {
       grandTotal += total;
       grandPaid += paid;
 
-      const sid = p.supplierId || '_none';
+      const sid = p.supplier?.id || '_none';
       if (!supplierMap[sid]) {
         supplierMap[sid] = {
           supplier: p.supplier || { id: '_none', name: '\u0411\u0435\u0437 \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430' },
