@@ -7,6 +7,7 @@ import { computeClientDueAmd, computeCarrierDueAmd, computeCashGapAmd, splitExpe
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
+import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
 
 export async function GET(req: Request) {
   try {
@@ -247,6 +248,10 @@ export async function GET(req: Request) {
       return {
         id: i.id, docName: i.docName, entityName: nameMap[i.entityId] || '\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e',
         expiryDate: i.expiryDate, daysLeft: days,
+        // docType \u0443\u0436\u0435 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0438\u0440\u043e\u0432\u0430\u043d \u0432 \u0411\u0414 (osago|kasko|techosmotr|license|permit|other) \u2014
+        // \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f Command Center v3, \u0447\u0442\u043e\u0431\u044b \u0440\u0430\u0437\u043b\u043e\u0436\u0438\u0442\u044c \u043e\u0434\u0438\u043d \u0438 \u0442\u043e\u0442 \u0436\u0435 \u0441\u043f\u0438\u0441\u043e\u043a \u043d\u0430 3 \u0440\u0430\u0437\u043d\u044b\u0435
+        // \u0441\u0442\u0440\u043e\u043a\u0438 \u0440\u0438\u0441\u043a\u0430 (\u0441\u0442\u0440\u0430\u0445\u043e\u0432\u043a\u0438/\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u044f/\u0442\u0435\u0445\u043e\u0441\u043c\u043e\u0442\u0440\u044b) \u0431\u0435\u0437 \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430.
+        docType: (i as any).docType ?? 'other',
       };
     });
 
@@ -342,11 +347,28 @@ export async function GET(req: Request) {
       .slice(0, 10)
       .map((t) => ({ id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '\u2014' }));
 
+    // ── 11. ENTERPRISE COMMAND CENTER v3: operational/idle/stuck/wialon ──
+    // Единый первый запрос Dashboard (Phase 3 спецификации v3) — тот же getOperationalSummary,
+    // что и /api/reports/overview (не второй запрос той же сводки), плюс два лёгких сравнения
+    // уже хранимых дат (простаивающие машины / аномально долгие рейсы), плюс свежесть Wialon
+    // по MAX(geofenceStatusAt) — все три без единой новой бизнес-формулы.
+    const todayStartCC = new Date(); todayStartCC.setHours(0, 0, 0, 0);
+    const [operational, idleVehicles, stuckVehicleTrips, lastWialonSync] = await Promise.all([
+      getOperationalSummary(prisma, todayStartCC),
+      getIdleVehicles(prisma, 5),
+      getStuckVehicleTrips(prisma, 14),
+      prisma.vehicleTrip.aggregate({ _max: { geofenceStatusAt: true } }),
+    ]);
+
     const commandCenter = {
       attention: { noInvoiceActTrips, noAttachmentTrips },
+      idleVehicles,
+      stuckVehicleTrips,
     };
 
     return NextResponse.json({
+      operational,
+      lastWialonSyncAt: lastWialonSync._max.geofenceStatusAt,
       kpi: { totalClientDebt, totalCarrierDebt, totalProfit, totalCashGap },
       prevKpi,
       totals: { totalIncome, totalExpense },

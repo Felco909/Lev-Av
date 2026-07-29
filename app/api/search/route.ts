@@ -23,6 +23,10 @@ export async function GET(req: Request) {
             { routeFrom: { contains: q, mode: 'insensitive' } },
             { routeTo: { contains: q, mode: 'insensitive' } },
             { client: { name: { contains: q, mode: 'insensitive' } } },
+            // Dashboard v3: номер счёта/акта — те же поля, что уже хранит Trip, поиск не создаёт
+            // новую бизнес-логику, просто расширяет условие WHERE.
+            { invoiceDocNumber: { contains: q, mode: 'insensitive' } },
+            { actDocNumber: { contains: q, mode: 'insensitive' } },
           ],
         },
         select: { id: true, tripNumber: true, routeFrom: true, routeTo: true, client: { select: { name: true } } },
@@ -36,7 +40,7 @@ export async function GET(req: Request) {
         orderBy: { name: 'asc' },
       }),
       prisma.carrier.findMany({
-        where: { name: { contains: q, mode: 'insensitive' } },
+        where: { OR: [{ name: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] },
         select: { id: true, name: true },
         take: 5,
         orderBy: { name: 'asc' },

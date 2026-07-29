@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { getOperationalSummary } from '@/lib/dashboard/operational-summary';
 
 function round1(value: number): number {
   return Math.round((Number(value) || 0) * 10) / 10;
@@ -34,27 +35,9 @@ export async function GET(req: Request) {
     // 'today' — periodStart = todayStart (по умолчанию выше)
 
     // ── Операционная сводка (состояние ПРЯМО СЕЙЧАС, не зависит от фильтра периода отчёта) ──
-    const [activeVehicleTrips, totalActiveVehicles, statusGroups, completedToday] = await Promise.all([
-      prisma.vehicleTrip.findMany({ where: { status: 'active' }, select: { vehicleId: true }, distinct: ['vehicleId'] }),
-      prisma.vehicle.count({ where: { status: 'active' } }),
-      prisma.trip.groupBy({ by: ['status'], _count: { _all: true }, where: { NOT: { status: 'cancelled' } } }),
-      prisma.trip.count({ where: { status: 'completed', updatedAt: { gte: todayStart } } }),
-    ]);
-    const vehiclesInTrip = activeVehicleTrips.length;
-    const vehiclesFree = Math.max(0, totalActiveVehicles - vehiclesInTrip);
-    const tripsByStatus: Record<string, number> = {};
-    for (const g of statusGroups) tripsByStatus[g.status] = g._count._all;
-    const tripsInProgress = (tripsByStatus['new'] || 0) + (tripsByStatus['in_progress'] || 0) + (tripsByStatus['unloaded'] || 0);
-
-    const operational = {
-      vehiclesInTrip,
-      vehiclesFree,
-      totalActiveVehicles,
-      tripsInProgress,
-      tripsSverka: tripsByStatus['sverka'] || 0,
-      tripsAwaitingPayment: tripsByStatus['awaiting_payment'] || 0,
-      completedToday,
-    };
+    // Вынесена в lib/dashboard/operational-summary.ts — тот же источник использует и
+    // /api/dashboard (Enterprise Command Center v3), чтобы не заводить две копии одних count().
+    const operational = await getOperationalSummary(prisma, todayStart);
 
     // ── "Что изменилось" — только count(), без новой логики ──
     const [newTrips, completedVehicleTrips, newPayments] = await Promise.all([
