@@ -29,6 +29,15 @@ export const VEHICLE_TRIP_FINANCIAL_ROLES = CRITICAL_FINANCE_FIELDS_ROLES;
 export const CLIENT_GLOBAL_DOC_NUMBERING_ROLES = ['admin', 'owner', 'director', 'accountant'] as const;
 
 /**
+ * Реквизиты компании в /settings (название, ИНН, адрес, телефон, банковские реквизиты,
+ * руководитель) — печатаются на счетах/актах клиентам, поэтому та же роль, что и критичные
+ * финансовые поля заявки (см. аудит, п.7). Персональные ключи Setting того же эндпоинта
+ * (dashboard_mode:<email>, dashboard_widgets:<email>, reports_widgets:<email>) этой проверкой
+ * не затрагиваются — см. COMPANY_SETTING_KEYS в app/api/settings/route.ts.
+ */
+export const COMPANY_REQUISITES_ROLES = CRITICAL_FINANCE_FIELDS_ROLES;
+
+/**
  * Номера счёта/акта на заявке + генерация PDF/DOCX по этим номерам.
  * Включает dispatcher — операционный персонал, который уже работает с заявками.
  */

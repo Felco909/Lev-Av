@@ -9,10 +9,15 @@ export async function GET() {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
+    // Отменённые рейсы исключаются везде в системе (reports/trips, trips/stats, dashboard,
+    // driver-analytics, analytics/clients и т.д., см. аудит п.5) — раньше здесь этого фильтра
+    // не было, и /statistics считал количество рейсов иначе, чем /reports.
+    const NOT_CANCELLED = { NOT: { status: 'cancelled' } };
+
     // Driver stats
     const driverTrips = await prisma.trip.groupBy({
       by: ['driverId'],
-      where: { driverId: { not: null } },
+      where: { driverId: { not: null }, ...NOT_CANCELLED },
       _count: true,
       _sum: { profitAmd: true, clientRateAmd: true },
     });
@@ -29,7 +34,7 @@ export async function GET() {
     // Vehicle stats
     const vehicleTrips = await prisma.trip.groupBy({
       by: ['vehicleId'],
-      where: { vehicleId: { not: null } },
+      where: { vehicleId: { not: null }, ...NOT_CANCELLED },
       _count: true,
       _sum: { profitAmd: true, clientRateAmd: true },
     });
@@ -46,7 +51,7 @@ export async function GET() {
     // Carrier stats
     const carrierTrips = await prisma.trip.groupBy({
       by: ['carrierId'],
-      where: { carrierId: { not: null } },
+      where: { carrierId: { not: null }, ...NOT_CANCELLED },
       _count: true,
       _sum: { profitAmd: true, clientRateAmd: true, carrierRateAmd: true },
     });

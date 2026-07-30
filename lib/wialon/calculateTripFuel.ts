@@ -29,6 +29,11 @@ export interface TripFuelCalcResult {
   wialonFilledL: number | null;
   wialonTheftsCount: number | null;
   wialonTheftedL: number | null;
+  /** true — получены свежие данные от Wialon и записаны в БД; false — Wialon недоступен/не
+   *  настроен, в БД ничего не менялось, поля result.* ниже — это то, что уже было сохранено
+   *  раньше (см. аудит, п.4 — раньше сбой Wialon затирал ранее рассчитанные значения null'ами). */
+  success: boolean;
+  error: string | null;
 }
 
 export async function calculateVehicleTripTotals(vehicleTripId: string): Promise<TripFuelCalcResult> {
@@ -40,20 +45,24 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     throw new Error(`VehicleTrip ${vehicleTripId} не найден`);
   }
 
+  // Стартуем с уже сохранённых значений (а не null) — если Wialon окажется недоступен,
+  // result вернётся ровно с тем, что было в БД, и update ниже просто не будет вызван.
   const result: TripFuelCalcResult = {
-    calculatedKm: null,
-    calculatedFuelConsumedL: null,
-    calculatedIdleMinutes: null,
-    fuelCalcSource: null,
-    fuelCalcAt: new Date(),
-    wialonFuelLevelBeginL: null,
-    wialonFuelLevelEndL: null,
-    wialonEngineHoursSec: null,
-    wialonAvgFuelConsumptionPer100Km: null,
-    wialonFillingsCount: null,
-    wialonFilledL: null,
-    wialonTheftsCount: null,
-    wialonTheftedL: null,
+    calculatedKm: trip.calculatedKm,
+    calculatedFuelConsumedL: trip.calculatedFuelConsumedL,
+    calculatedIdleMinutes: trip.calculatedIdleMinutes,
+    fuelCalcSource: trip.fuelCalcSource as TripFuelCalcResult['fuelCalcSource'],
+    fuelCalcAt: trip.fuelCalcAt ?? new Date(),
+    wialonFuelLevelBeginL: trip.wialonFuelLevelBeginL,
+    wialonFuelLevelEndL: trip.wialonFuelLevelEndL,
+    wialonEngineHoursSec: trip.wialonEngineHoursSec,
+    wialonAvgFuelConsumptionPer100Km: trip.wialonAvgFuelConsumptionPer100Km,
+    wialonFillingsCount: trip.wialonFillingsCount,
+    wialonFilledL: trip.wialonFilledL,
+    wialonTheftsCount: trip.wialonTheftsCount,
+    wialonTheftedL: trip.wialonTheftedL,
+    success: false,
+    error: null,
   };
 
   if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
@@ -72,10 +81,14 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
       result.wialonFilledL = report.filledL;
       result.wialonTheftsCount = report.theftsCount;
       result.wialonTheftedL = report.theftedL;
-    } catch (e) {
-      console.error('[calculateTripFuel] Официальный отчёт Wialon не удался:', e);
+      result.success = true;
+    } catch (e: any) {
+      result.error = e?.message ?? String(e);
+      console.error(`[calculateTripFuel] Официальный отчёт Wialon не удался для рейса ${vehicleTripId} — ранее рассчитанные значения сохранены без изменений:`, e);
       // Намеренно без fallback на собственный расчёт — лучше явное "не рассчитано" в карточке,
-      // чем цифра, которая не совпадает с Wialon (см. заголовочный комментарий).
+      // чем цифра, которая не совпадает с Wialon (см. заголовочный комментарий). И намеренно
+      // без записи null поверх result — на ошибке result остаётся тем, чем был проинициализирован
+      // выше (текущие значения из БД), поэтому update ниже их не затрёт.
     }
   } else if (trip.vehicle.wialonUnitId && trip.departureDate && !trip.returnDate) {
     // Рейс ещё в работе (нет returnDate) — официальный отчёт Wialon по интервалу здесь
@@ -86,29 +99,37 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
     try {
       const fuel = await getFuelLevelAtDate(Number(trip.vehicle.wialonUnitId), trip.departureDate);
       result.wialonFuelLevelBeginL = fuel.fuelLevelL;
-    } catch (e) {
-      console.error('[calculateTripFuel] Остаток топлива на выезд (активный рейс) не удалось получить:', e);
+      result.success = true;
+    } catch (e: any) {
+      result.error = e?.message ?? String(e);
+      console.error(`[calculateTripFuel] Остаток топлива на выезд (активный рейс ${vehicleTripId}) не удалось получить — предыдущее значение сохранено:`, e);
     }
+  } else {
+    result.error = 'У машины не указан Wialon ID или не заданы даты рейса';
   }
 
-  await prisma.vehicleTrip.update({
-    where: { id: vehicleTripId },
-    data: {
-      calculatedKm: result.calculatedKm,
-      calculatedFuelConsumedL: result.calculatedFuelConsumedL,
-      calculatedIdleMinutes: result.calculatedIdleMinutes,
-      fuelCalcSource: result.fuelCalcSource,
-      fuelCalcAt: result.fuelCalcAt,
-      wialonFuelLevelBeginL: result.wialonFuelLevelBeginL,
-      wialonFuelLevelEndL: result.wialonFuelLevelEndL,
-      wialonEngineHoursSec: result.wialonEngineHoursSec,
-      wialonAvgFuelConsumptionPer100Km: result.wialonAvgFuelConsumptionPer100Km,
-      wialonFillingsCount: result.wialonFillingsCount,
-      wialonFilledL: result.wialonFilledL,
-      wialonTheftsCount: result.wialonTheftsCount,
-      wialonTheftedL: result.wialonTheftedL,
-    },
-  });
+  // Пишем в БД только при реальном успехе — сбой/недоступность Wialon не должны стирать
+  // ранее корректно рассчитанные calculatedKm/calculatedFuelConsumedL/wialon* (см. аудит, п.4).
+  if (result.success) {
+    await prisma.vehicleTrip.update({
+      where: { id: vehicleTripId },
+      data: {
+        calculatedKm: result.calculatedKm,
+        calculatedFuelConsumedL: result.calculatedFuelConsumedL,
+        calculatedIdleMinutes: result.calculatedIdleMinutes,
+        fuelCalcSource: result.fuelCalcSource,
+        fuelCalcAt: result.fuelCalcAt,
+        wialonFuelLevelBeginL: result.wialonFuelLevelBeginL,
+        wialonFuelLevelEndL: result.wialonFuelLevelEndL,
+        wialonEngineHoursSec: result.wialonEngineHoursSec,
+        wialonAvgFuelConsumptionPer100Km: result.wialonAvgFuelConsumptionPer100Km,
+        wialonFillingsCount: result.wialonFillingsCount,
+        wialonFilledL: result.wialonFilledL,
+        wialonTheftsCount: result.wialonTheftsCount,
+        wialonTheftedL: result.wialonTheftedL,
+      },
+    });
+  }
 
   return result;
 }

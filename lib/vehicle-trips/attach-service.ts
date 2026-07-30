@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { recordTripHistory } from '@/lib/trip-history';
 
 /**
  * Сервис привязки заявок собственного транспорта к рейсам машины (архитектура
@@ -191,6 +192,15 @@ export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: s
  * в "Ожидают привязки". Не трогает ничего, кроме самой связи — сумма/статус заявки
  * не меняются, доход старого рейса пересчитывается автоматически (уже не включает её).
  */
-export async function detachTripFromVehicleTrip(tripId: string): Promise<void> {
+/**
+ * userId/userName — для записи в TripHistory (аудит, средний приоритет: раньше отвязка не
+ * оставляла следа, кто и когда это сделал — в отличие от закрытия рейса, которое логируется
+ * в VehicleTripEvent).
+ */
+export async function detachTripFromVehicleTrip(tripId: string, userId: string | null = null, userName: string | null = null): Promise<void> {
+  const before = await prisma.trip.findUnique({ where: { id: tripId }, select: { vehicleTripId: true } });
   await prisma.trip.update({ where: { id: tripId }, data: { vehicleTripId: null } });
+  await recordTripHistory(tripId, 'vehicle_trip_detached', userId, userName, [
+    { field: 'vehicleTripId', oldValue: before?.vehicleTripId ?? null, newValue: null },
+  ]);
 }

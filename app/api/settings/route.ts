@@ -3,6 +3,22 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { assertRole, COMPANY_REQUISITES_ROLES } from '@/lib/auth/role-guard';
+
+/**
+ * Реквизиты компании (печатаются на счетах/актах) — правка только admin/owner/director/
+ * accountant (см. аудит, п.7). Всё остальное в этой же таблице Setting — персональные
+ * ключи вида dashboard_mode:<email>/dashboard_widgets:<email>/reports_widgets:<email> —
+ * доступно любому авторизованному пользователю, как и раньше.
+ */
+const COMPANY_SETTING_KEYS = new Set([
+  'company_name',
+  'company_inn',
+  'company_address',
+  'company_phone',
+  'company_bank',
+  'company_director',
+]);
 
 export async function GET() {
   try {
@@ -25,6 +41,12 @@ export async function PUT(req: Request) {
     const body = await req.json();
     const { key, value } = body;
     if (!key || typeof value !== 'string') return NextResponse.json({ error: 'key и value обязательны' }, { status: 400 });
+
+    if (COMPANY_SETTING_KEYS.has(key)) {
+      const guard = assertRole(session, COMPANY_REQUISITES_ROLES, 'изменение реквизитов компании');
+      if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
     await prisma.setting.upsert({
       where: { key },
       update: { value },

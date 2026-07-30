@@ -10,8 +10,12 @@ export async function GET(req: Request) {
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const driverFilter = searchParams.get('driverId');
+    const showArchived = searchParams.get('showArchived');
     const where: any = {};
     if (driverFilter) where.driverId = driverFilter;
+    // Архивные машины (мягкое удаление, см. DELETE ниже) скрыты по умолчанию —
+    // тот же паттерн, что showArchived у /api/vehicle-trips и /api/trips.
+    if (showArchived !== '1') where.status = { not: 'archived' };
     const vehicles = await prisma.vehicle.findMany({
       where,
       include: { driver: { select: { id: true, fullName: true, phone: true } } },

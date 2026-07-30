@@ -9,6 +9,7 @@ import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertInitialTripWorkflowStatus } from '@/lib/trip-workflow-guards';
 import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
+import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 
 export async function GET(req: Request) {
   try {
@@ -181,6 +182,14 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
     const body = await req.json();
+
+    // Та же проверка, что и в PATCH /api/trips/[id] — денормализованные поля оплаты
+    // нельзя устанавливать уже на создании заявки в обход роли (см. аудит, п.2).
+    const touchedPaymentFields = getTouchedDenormalizedPaymentFields(body);
+    if (touchedPaymentFields.length > 0) {
+      const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'установка оплаты при создании заявки');
+      if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
 
     const initialStatusCheck = assertInitialTripWorkflowStatus(body?.status);
     if (!initialStatusCheck.ok) {

@@ -211,6 +211,13 @@ model Trip {
   @@index([currency])
   @@index([contactId])
   @@index([vehicleTripId])
+  // Самая крупная/часто фильтруемая таблица схемы — эти 4 внешних ключа фильтруются
+  // напрямую в vehicle-analytics/driver-analytics/reports/carrier-ranking/поиске и т.д.,
+  // индексов на них не было (аудит, средний приоритет).
+  @@index([clientId])
+  @@index([vehicleId])
+  @@index([driverId])
+  @@index([carrierId])
   @@map("trips")
 }
 

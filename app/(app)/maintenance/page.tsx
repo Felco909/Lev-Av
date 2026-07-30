@@ -204,7 +204,7 @@ export default function MaintenancePage() {
     } catch {} finally { setSaving(false); }
   };
   const deleteReg = async (id: string) => {
-    if (!confirm('Удалить регламент? Все связанные записи будут удалены.')) return;
+    if (!confirm('Удалить регламент? Связанные записи ТО не удаляются, а становятся записями без регламента (внеплановый ремонт).')) return;
     await fetch(`/api/service-regulations/${id}`, { method: 'DELETE' });
     await loadAll();
   };

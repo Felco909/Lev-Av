@@ -133,10 +133,19 @@ export async function GET(req: Request) {
       ])
     );
 
+    // Единая методология для верхнего KPI (аудит, п.6): раньше revenueAmd/expenseAmd/profitAmd
+    // брались из breakdown/aggregate по ВСЕМ заявкам, где own_transport считается через
+    // computeOwnTransportProfitAmd прямо по полям Trip (без реальных расходов парка —
+    // зарплата/суточные/топливо/FleetExpense лежат на VehicleTrip, а не на Trip). Это давало
+    // на одной странице два разных числа "прибыль собственного транспорта": здесь — по сути
+    // выручку, и чуть ниже в блоке ownTransport — настоящую прибыль (через ownFleetIncomeAmd/
+    // ownFleetExpenseAmd). Теперь верхний KPI = экспедиция (breakdown.expedition, как и раньше)
+    // + собственный транспорт по ТЕЙ ЖЕ методологии, что и блок ownTransport ниже — одна и та
+    // же пара чисел используется дважды, а не пересчитывается по-разному.
     const kpi = {
-      revenueAmd: breakdown.totalIncomeAmd,
-      expenseAmd: breakdown.totalExpenseAmd,
-      profitAmd: aggregate.totalProfitAmd,
+      revenueAmd: breakdown.expedition.incomeAmd + ownFleetIncomeAmd,
+      expenseAmd: breakdown.expedition.expenseAmd + ownFleetExpenseAmd,
+      profitAmd: breakdown.expedition.profitAmd + (ownFleetIncomeAmd - ownFleetExpenseAmd),
       clientDebtAmd: aggregate.totalClientDebtAmd,
       carrierDebtAmd: aggregate.totalCarrierDebtAmd,
       cashGapAmd: aggregate.totalCashGapAmd,

@@ -29,6 +29,8 @@ const EVENT_FIELD_LABEL: Record<string, string> = {
 /** Журнал ручных правок/закрытия/пересчёта дохода ("Доработка логики рейсов", п.7). */
 function manualEventText(ev: { action: string; field: string | null; oldValue: string | null; newValue: string | null }): string {
   if (ev.action === 'closed') return 'Рейс закрыт';
+  if (ev.action === 'archived') return 'Рейс отправлен в архив';
+  if (ev.action === 'restored') return 'Рейс возвращён из архива';
   if (ev.action === 'income_recalculated') return `Пересчёт дохода: ${ev.oldValue ?? '—'} → ${ev.newValue ?? '—'} AMD`;
   if (ev.action === 'manual_edit' && ev.field) {
     const label = EVENT_FIELD_LABEL[ev.field] || ev.field;
@@ -400,8 +402,12 @@ export default function VehicleTripsPage() {
     if (!detail?.id) return;
     setRecalculating(true);
     try {
-      await fetch(`/api/vehicle-trips/${detail.id}/recalculate-fuel`, { method: 'POST' });
+      const res = await fetch(`/api/vehicle-trips/${detail.id}/recalculate-fuel`, { method: 'POST' });
+      const data = await res.json().catch(() => null);
       await loadDetail(detail.id);
+      if (data && data.success === false) {
+        alert(`Wialon недоступен, данные не изменены: ${data.error ?? 'ошибка запроса'}`);
+      }
     } catch {} finally { setRecalculating(false); }
   };
 

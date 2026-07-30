@@ -17,12 +17,24 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const qty = Number(quantity) || 1;
     const price = Number(unitPrice) || 0;
     const total = qty * price;
+
+    // Пересчёт статуса оплаты после правки суммы (аудит, средний приоритет) — раньше
+    // paidAmount/paymentStatus не трогались при PUT, поэтому правка цены/количества после
+    // отметки "оплачено" могла оставить закупку помеченной оплаченной, хотя фактически
+    // образовался новый долг. Та же логика, что и в payments/route.ts (POST/DELETE платежа).
+    const existingPayments = await prisma.partPayment.findMany({ where: { partPurchaseId: id } });
+    const totalPaid = existingPayments.reduce((s, p) => s + Number(p.amount), 0);
+    let paymentStatus = 'unpaid';
+    if (totalPaid >= total && total > 0) paymentStatus = 'paid';
+    else if (totalPaid > 0) paymentStatus = 'partial';
+
     const item = await prisma.partPurchase.update({
       where: { id },
       data: {
         vehicleId, supplierId: supplierId || null,
         date: new Date(date), partName,
         quantity: qty, unitPrice: price, totalAmount: total,
+        paidAmount: totalPaid, paymentStatus,
         notes: notes || null,
       },
       include: {

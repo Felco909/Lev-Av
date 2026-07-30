@@ -87,14 +87,50 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
   }
 }
 
+/**
+ * DELETE — мягкое удаление (архивирование), а не физическое. Физическое удаление машины
+ * каскадно сносит VehicleTrip/FleetExpense/FuelRecord/Maintenance/ServiceRecord/PartPurchase/
+ * DriverVehicleHistory (ON DELETE CASCADE в БД) и молча обнуляет Trip.vehicleId/vehicleTripId
+ * (ON DELETE SET NULL) — заявки задним числом выпадают из дохода собственного транспорта без
+ * следа. Архивирование ничего не удаляет и не теряет историю: машина лишь скрывается из
+ * активных списков (см. GET выше, showArchived) и может быть восстановлена.
+ */
 export async function DELETE(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
-    await prisma.vehicle.delete({ where: { id: params?.id } });
-    return NextResponse.json({ success: true });
+    const vehicleId = params?.id;
+
+    const existing = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { id: true, status: true } });
+    if (!existing) return NextResponse.json({ error: 'Не найдена' }, { status: 404 });
+    if (existing.status === 'archived') return NextResponse.json({ success: true, archived: true, message: 'Машина уже в архиве.' });
+
+    const [vehicleTrips, fleetExpenses, fuelRecords, maintenances, serviceRecords, tireSets, partPurchases, driverHistory, trips] = await Promise.all([
+      prisma.vehicleTrip.count({ where: { vehicleId } }),
+      prisma.fleetExpense.count({ where: { vehicleId } }),
+      prisma.fuelRecord.count({ where: { vehicleId } }),
+      prisma.maintenance.count({ where: { vehicleId } }),
+      prisma.serviceRecord.count({ where: { vehicleId } }),
+      prisma.tireSet.count({ where: { vehicleId } }),
+      prisma.partPurchase.count({ where: { vehicleId } }),
+      prisma.driverVehicleHistory.count({ where: { vehicleId } }),
+      prisma.trip.count({ where: { vehicleId } }),
+    ]);
+    const totalDependents = vehicleTrips + fleetExpenses + fuelRecords + maintenances + serviceRecords + tireSets + partPurchases + driverHistory + trips;
+
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'archived' } });
+
+    if (totalDependents > 0) {
+      return NextResponse.json({
+        success: true,
+        archived: true,
+        message: `Машина архивирована (не удалена) — сохранена история: рейсов ${vehicleTrips}, заявок ${trips}, расходов парка ${fleetExpenses}, заправок ${fuelRecords}, ТО ${maintenances + serviceRecords}, шин ${tireSets}, закупок запчастей ${partPurchases}, смен водителя ${driverHistory}.`,
+      });
+    }
+    return NextResponse.json({ success: true, archived: true, message: 'Машина архивирована.' });
   } catch (e: any) {
-    return NextResponse.json({ error: 'Невозможно удалить' }, { status: 500 });
+    console.error('Vehicle archive error:', e);
+    return NextResponse.json({ error: 'Не удалось архивировать машину' }, { status: 500 });
   }
 }

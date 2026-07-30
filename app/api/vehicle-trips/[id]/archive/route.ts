@@ -26,6 +26,16 @@ export async function POST(_req: Request, { params: paramsPromise }: { params: P
       data: { status: 'archived' },
     });
 
+    // Журнал событий рейса (аудит, средний приоритет) — раньше архивация не оставляла
+    // следа, кто и когда её выполнил, в отличие от закрытия рейса (action: 'closed' ниже).
+    await prisma.vehicleTripEvent.create({
+      data: {
+        vehicleTripId: vt.id, action: 'archived', field: 'status',
+        oldValue: 'completed', newValue: 'archived',
+        userId: (session as any)?.user?.id ?? null,
+      },
+    });
+
     return NextResponse.json({ success: true, status: updated.status });
   } catch (e) {
     console.error('POST /api/vehicle-trips/[id]/archive', e);
@@ -49,6 +59,14 @@ export async function PUT(_req: Request, { params: paramsPromise }: { params: Pr
     const updated = await prisma.vehicleTrip.update({
       where: { id: vt.id },
       data: { status: 'completed' },
+    });
+
+    await prisma.vehicleTripEvent.create({
+      data: {
+        vehicleTripId: vt.id, action: 'restored', field: 'status',
+        oldValue: 'archived', newValue: 'completed',
+        userId: (session as any)?.user?.id ?? null,
+      },
     });
 
     return NextResponse.json({ success: true, status: updated.status });

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { convertHtmlToPdf } from '@/lib/pdf-convert';
+import { computeClientDueAmd } from '@/lib/finance/formulas';
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -28,19 +29,20 @@ export async function GET(req: NextRequest) {
   const trips = await prisma.trip.findMany({
     where,
     orderBy: { tripDate: 'asc' },
-    include: { payments: true },
-  });
-
-  const payments = await prisma.payment.findMany({
-    where: { trip: { clientId } },
-    orderBy: { paymentDate: 'asc' },
+    include: { expenses: true },
   });
 
   let totalIncome = 0;
   let totalPaid = 0;
+  // \u0415\u0434\u0438\u043d\u044b\u0439 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0434\u0430\u043d\u043d\u044b\u0445 (\u0441\u043c. \u0430\u0443\u0434\u0438\u0442, \u043f.3): \u00ab\u041d\u0430\u0447\u0438\u0441\u043b\u0435\u043d\u043e\u00bb \u2014 \u0442\u0430 \u0436\u0435 computeClientDueAmd()
+  // (\u0441\u0442\u0430\u0432\u043a\u0430 + \u043f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u043c\u044b\u0435 \u043a\u043b\u0438\u0435\u043d\u0442\u0443 \u0440\u0430\u0441\u0445\u043e\u0434\u044b), \u0447\u0442\u043e \u0438 \u0432 lib/finance/debts-service.ts \u0438
+  // Excel-\u044d\u043a\u0441\u043f\u043e\u0440\u0442\u0435 /api/reports/trips/xlsx. \u00ab\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e\u00bb \u2014 \u0434\u0435\u043d\u043e\u0440\u043c\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u043d\u043e\u0435 \u043f\u043e\u043b\u0435
+  // clientPaidAmountAmd (\u0442\u043e\u043b\u044c\u043a\u043e \u043f\u043b\u0430\u0442\u0435\u0436\u0438 \u043a\u043b\u0438\u0435\u043d\u0442\u0430), \u0430 \u043d\u0435 \u0441\u044b\u0440\u0430\u044f \u0441\u0443\u043c\u043c\u0430 Payment \u2014 \u0442\u0430\u043c \u0434\u043b\u044f
+  // \u0440\u0435\u0439\u0441\u043e\u0432-\u044d\u043a\u0441\u043f\u0435\u0434\u0438\u0446\u0438\u0439 \u043c\u043e\u0433\u0443\u0442 \u0431\u044b\u0442\u044c \u0438 \u043f\u043b\u0430\u0442\u0435\u0436\u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443 \u043f\u043e \u044d\u0442\u043e\u0439 \u0436\u0435 \u0437\u0430\u044f\u0432\u043a\u0435. \u042d\u0442\u043e \u0434\u0435\u043b\u0430\u0435\u0442 \u0410\u043a\u0442
+  // \u0441\u0432\u0435\u0440\u043a\u0438 \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u043d\u044b\u043c \u0441 \u0440\u0430\u0437\u0434\u0435\u043b\u043e\u043c \u00ab\u0414\u043e\u043b\u0433\u0438\u00bb, Dashboard \u0438 Excel-\u044d\u043a\u0441\u043f\u043e\u0440\u0442\u043e\u043c \u0437\u0430 \u0442\u043e\u0442 \u0436\u0435 \u043f\u0435\u0440\u0438\u043e\u0434.
   const rows = trips.map((t: any) => {
-    const rate = Number(t.clientRateAmd ?? 0);
-    const paid = (t.payments ?? []).reduce((s: number, p: any) => s + Number(p.amountAmd ?? p.amount ?? 0), 0);
+    const rate = computeClientDueAmd(Number(t.clientRateAmd ?? t.clientRate ?? 0), t.expenses ?? []);
+    const paid = Number(t.clientPaidAmountAmd ?? 0);
     totalIncome += rate;
     totalPaid += paid;
     return {
@@ -86,10 +88,15 @@ export async function GET(req: NextRequest) {
   // Render locally via LibreOffice headless (no external/paid service — see lib/pdf-convert.ts).
   try {
     const pdfBuf = await convertHtmlToPdf(html);
+    // Обнаружено при финальной проверке (Этап 4): имя клиента почти всегда кириллица/армянский —
+    // Content-Disposition с сырым non-ASCII именем файла бросает исключение в fetch/Headers,
+    // из-за чего Акт сверки падал с 500 для подавляющего большинства клиентов. Тот же паттерн
+    // RFC 5987, что уже используется в /api/reports/trips/xlsx и /api/files.
+    const filename = encodeURIComponent(`reconciliation_${client.name}_${today}.pdf`);
     return new NextResponse(pdfBuf, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="reconciliation_${client.name}_${today}.pdf"`,
+        'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
       },
     });
   } catch (err) {

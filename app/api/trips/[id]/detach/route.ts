@@ -14,7 +14,7 @@ export async function POST(_req: Request, { params: paramsPromise }: { params: P
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
-    await detachTripFromVehicleTrip(params.id);
+    await detachTripFromVehicleTrip(params.id, (session as any)?.user?.id ?? null, (session as any)?.user?.name ?? 'Система');
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error('[trips/detach] error:', e);

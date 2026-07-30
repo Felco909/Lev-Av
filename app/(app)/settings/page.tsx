@@ -207,11 +207,16 @@ export default function SettingsPage() {
   const handleSave = async (key: string) => {
     setSaving(key);
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value: values[key] || '' }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || 'Не удалось сохранить');
+        return;
+      }
       setSaved(key);
       setTimeout(() => setSaved(null), 2000);
     } catch { alert('Ошибка сохранения'); } finally { setSaving(null); }

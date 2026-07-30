@@ -9,6 +9,30 @@ import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
 import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
 
+/**
+ * Доход/расход/прибыль собственного транспорта за период VehicleTrip.departureDate — единая
+ * методология (getVehicleTripsIncomeAmdBulk + computeVehicleTripExpensesAmd, та же, что и
+ * /api/director-finance, /api/vehicle-analytics, /api/vehicles/[id]/economics). Вынесено в
+ * функцию, т.к. нужно дважды — для текущего периода (детальный breakdown) и для предыдущего
+ * (только для сравнения тренда прибыли, см. аудит п.6). Ни одна формула здесь не меняется —
+ * это тот же расчёт, что уже был в разделе "Свой транспорт" ниже, просто переиспользуемый.
+ */
+async function computeOwnFleetTotals(vtWhere: any) {
+  const vehicleTrips = await prisma.vehicleTrip.findMany({
+    where: vtWhere,
+    select: {
+      id: true,
+      salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
+      otherExpensesAmd: true, fuelCostAmd: true,
+      fleetExpenses: { select: { amountAmd: true } },
+    },
+  });
+  const incomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
+  const revenue = vehicleTrips.reduce((sum, vt) => sum + (incomeByVt.get(vt.id) ?? 0), 0);
+  const expenses = vehicleTrips.reduce((sum, vt) => sum + computeVehicleTripExpensesAmd(vt), 0);
+  return { vehicleTrips, revenue, expenses, profit: revenue - expenses };
+}
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -117,9 +141,10 @@ export async function GET(req: Request) {
       };
     });
 
-    const totalProfit = profitRows.reduce((s, r) => s + r.profit, 0);
-    const totalIncome = profitRows.reduce((s, r) => s + r.income, 0);
-    const totalExpense = profitRows.reduce((s, r) => s + r.expense, 0);
+    // totalProfit/totalIncome/totalExpense (верхние KPI) считаются ниже, после блока
+    // "Свой транспорт" — см. аудит п.6: для own_transport Trip.profitAmd фактически равен
+    // выручке (расходы парка не хранятся на Trip), поэтому верхний KPI не может просто
+    // суммировать profitAmd по всем заявкам без разбора типа.
 
     // \u2500\u2500 4. PROBLEM TRIPS (cash gap) \u2500\u2500
     const problemRows = problemTrips
@@ -155,12 +180,20 @@ export async function GET(req: Request) {
       if (clientId) prevWhere.clientId = clientId;
       if (tripType) prevWhere.tripType = tripType;
 
-      // Предыдущий период — те же 4 независимых запроса, тоже одним Promise.all
+      // Предыдущий период — те же независимые запросы, одним Promise.all
       // (аудит "Дашборд"), а не последовательно.
       const prevCarrierWhere: any = { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition', carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] } };
       if (tripType === 'own_transport') prevCarrierWhere.tripType = 'own_transport';
 
-      const [prevClientDebtTrips, prevCarrierDebtTrips, prevProfitAgg, prevProblemTrips] = await Promise.all([
+      // Прибыль экспедиции за прошлый период — отдельно от собственного транспорта (см. п.6:
+      // единая методология для тренда "Прибыль выросла/упала на X%" — иначе сравнивали бы
+      // текущий период по новой формуле с прошлым по старой profitAmd-по-всем-заявкам).
+      // Если явно запрошен фильтр tripType='own_transport' — экспедиции в этом представлении
+      // нет вообще, вклад даёт только "Свой транспорт" ниже.
+      const skipPrevExpedition = tripType === 'own_transport';
+      const prevVtWhere: any = { departureDate: { gte: prevFrom, lte: prevTo } };
+
+      const [prevClientDebtTrips, prevCarrierDebtTrips, prevExpeditionProfitAgg, prevProblemTrips, prevOwnFleetTotals] = await Promise.all([
         prisma.trip.findMany({
           where: { ...prevWhere, clientPaymentStatus: { in: ['not_paid', 'partially_paid'] } },
           select: { clientRateAmd: true, clientRate: true, clientPaidAmountAmd: true, clientPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
@@ -170,13 +203,14 @@ export async function GET(req: Request) {
           select: { carrierRateAmd: true, carrierRate: true, carrierPaidAmountAmd: true, carrierPaidAmount: true, expenses: { select: { amountAmd: true, description: true } } },
         }),
         prisma.trip.aggregate({
-          where: prevWhere,
+          where: { ...prevWhere, tripType: 'expedition' },
           _sum: { profitAmd: true },
         }),
         prisma.trip.findMany({
           where: { ...prevWhere, tripType: prevWhere.tripType ?? 'expedition' },
           select: { clientPaidAmountAmd: true, clientPaidAmount: true, carrierPaidAmountAmd: true, carrierPaidAmount: true },
         }),
+        computeOwnFleetTotals(prevVtWhere),
       ]);
 
       const prevTotalClientDebt = prevClientDebtTrips.reduce((s, t) => {
@@ -189,7 +223,8 @@ export async function GET(req: Request) {
         return s + (r > 0 ? r : 0);
       }, 0);
 
-      const prevTotalProfit = Number(prevProfitAgg._sum?.profitAmd ?? 0);
+      const prevExpeditionProfit = skipPrevExpedition ? 0 : Number(prevExpeditionProfitAgg._sum?.profitAmd ?? 0);
+      const prevTotalProfit = prevExpeditionProfit + prevOwnFleetTotals.profit;
 
       const prevTotalCashGap = prevProblemTrips.reduce((s, t) => {
         const cp = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
@@ -269,20 +304,7 @@ export async function GET(req: Request) {
       if (dateFrom) vtWhere.departureDate.gte = new Date(dateFrom);
       if (dateTo) vtWhere.departureDate.lte = new Date(dateTo + 'T23:59:59');
     }
-    const ownFleetVehicleTrips = await prisma.vehicleTrip.findMany({
-      where: vtWhere,
-      select: {
-        id: true,
-        salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
-        otherExpensesAmd: true, fuelCostAmd: true,
-        fleetExpenses: { select: { amountAmd: true } },
-      },
-    });
-    const ownFleetIncomeByVt = await getVehicleTripsIncomeAmdBulk(ownFleetVehicleTrips.map((vt) => vt.id));
-    const ownFleetRevenue = ownFleetVehicleTrips.reduce(
-      (sum, vt) => sum + (ownFleetIncomeByVt.get(vt.id) ?? 0),
-      0
-    );
+    const { vehicleTrips: ownFleetVehicleTrips, revenue: ownFleetRevenue, expenses: ownFleetExpenses, profit: ownFleetProfit } = await computeOwnFleetTotals(vtWhere);
     const ownFleetSalary = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
     // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
     const ownFleetPerDiem = ownFleetVehicleTrips.reduce(
@@ -291,11 +313,6 @@ export async function GET(req: Request) {
     );
     const ownFleetOther = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.otherExpensesAmd) || 0), 0);
     const ownFleetFuel = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.fuelCostAmd) || 0), 0);
-    const ownFleetExpenses = ownFleetVehicleTrips.reduce(
-      (sum, vt) => sum + computeVehicleTripExpensesAmd(vt),
-      0
-    );
-    const ownFleetProfit = ownFleetRevenue - ownFleetExpenses;
 
     const ownFleet = {
       revenue: ownFleetRevenue,
@@ -305,6 +322,34 @@ export async function GET(req: Request) {
       tripCount: ownFleetTripCount,
       vtCount: ownFleetVehicleTrips.length,
     };
+
+    // ── ЕДИНАЯ МЕТОДОЛОГИЯ ДЛЯ ВЕРХНИХ KPI (аудит, п.6) ──
+    // Раньше totalProfit суммировал Trip.profitAmd по ВСЕМ заявкам без разбора типа. Для
+    // own_transport это поле фактически равно выручке (расходы парка — зарплата/суточные/
+    // топливо/FleetExpense — хранятся на VehicleTrip, а не на Trip, и в profitAmd не входят),
+    // поэтому верхний KPI "Прибыль" незаметно смешивал выручку и прибыль. Теперь: экспедиция —
+    // как раньше (profitAmd/clientRateAmd/carrierRateAmd построчно из allTrips), собственный
+    // транспорт — ТЕ ЖЕ revenue/expenses/profit, что и в блоке "Свой транспорт" выше (единая
+    // методология getVehicleTripsIncomeAmdBulk/computeVehicleTripExpensesAmd, та же, что
+    // /api/director-finance и /api/vehicle-analytics). Формулы не менялись — это только
+    // правильная точка сборки уже существующих чисел.
+    const expeditionIncome = allTrips.reduce((s: number, t: any) => {
+      if (t.tripType !== 'expedition') return s;
+      const { clientExpensesAmd } = splitExpensesAmd(t.expenses);
+      return s + Number(t.clientRateAmd ?? t.clientRate ?? 0) + clientExpensesAmd;
+    }, 0);
+    const expeditionExpense = allTrips.reduce((s: number, t: any) => {
+      if (t.tripType !== 'expedition') return s;
+      const { carrierExpensesAmd } = splitExpensesAmd(t.expenses);
+      return s + Number(t.carrierRateAmd ?? t.carrierRate ?? 0) + carrierExpensesAmd;
+    }, 0);
+    const expeditionProfit = allTrips.reduce((s: number, t: any) => (
+      t.tripType === 'expedition' ? s + Number(t.profitAmd ?? t.profit ?? 0) : s
+    ), 0);
+
+    const totalIncome = expeditionIncome + ownFleetRevenue;
+    const totalExpense = expeditionExpense + ownFleetExpenses;
+    const totalProfit = expeditionProfit + ownFleetProfit;
 
     // \u2500\u2500 9. CLIENTS LIST for filter \u2500\u2500
     const clients = await prisma.client.findMany({

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter, Info } from 'lucide-react';
+import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter, Info, ArchiveRestore } from 'lucide-react';
 
 interface Driver { id: string; fullName: string; phone?: string | null; }
 interface VehicleItem {
@@ -24,6 +24,7 @@ export default function VehiclesPage() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [historyVehicle, setHistoryVehicle] = useState<VehicleItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -42,12 +43,15 @@ export default function VehiclesPage() {
 
   const load = useCallback(async () => {
     try {
-      const url = driverFilter ? `/api/vehicles?driverId=${driverFilter}` : '/api/vehicles';
-      const res = await fetch(url);
+      const params = new URLSearchParams();
+      if (driverFilter) params.set('driverId', driverFilter);
+      if (showArchived) params.set('showArchived', '1');
+      const qs = params.toString();
+      const res = await fetch(`/api/vehicles${qs ? `?${qs}` : ''}`);
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
     } catch {} finally { setLoading(false); }
-  }, [driverFilter]);
+  }, [driverFilter, showArchived]);
 
   useEffect(() => { load(); loadDrivers(); }, [load, loadDrivers]);
 
@@ -86,8 +90,20 @@ export default function VehiclesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Удалить машину?')) return;
-    try { await fetch(`/api/vehicles/${id}`, { method: 'DELETE' }); load(); } catch {}
+    if (!confirm('Архивировать машину? Она будет скрыта из активного автопарка, но вся история рейсов, расходов и топлива сохранится — физического удаления не произойдёт.')) return;
+    try {
+      const res = await fetch(`/api/vehicles/${id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (data?.message) alert(data.message);
+      load();
+    } catch {}
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await fetch(`/api/vehicles/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+      load();
+    } catch {}
   };
 
   const handleDriverChange = async (vehicleId: string, newDriverId: string | null) => {
@@ -163,6 +179,10 @@ export default function VehiclesPage() {
               <button onClick={() => setDriverFilter('')} className="p-1 hover:bg-muted rounded"><X className="w-4 h-4" /></button>
             )}
           </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap px-1">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="rounded" />
+            Показать архивные
+          </label>
         </div>
       </div>
 
@@ -178,8 +198,8 @@ export default function VehiclesPage() {
                     <p className="text-xs font-mono text-muted-foreground">{v.plateNumber}</p>
                   </div>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                  {v.status === 'active' ? 'Активна' : 'Неактивна'}
+                <span className={`text-xs px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-green-100 text-green-700' : v.status === 'archived' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                  {v.status === 'active' ? 'Активна' : v.status === 'archived' ? 'В архиве' : 'Неактивна'}
                 </span>
               </div>
 
@@ -236,12 +256,20 @@ export default function VehiclesPage() {
                 <button onClick={() => openHistory(v)} className="p-1.5 hover:bg-muted rounded-md transition" title="История водителей">
                   <History className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
-                <button onClick={() => openModal(v)} className="p-1.5 hover:bg-muted rounded-md transition" title="Редактировать">
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-                <button onClick={() => handleDelete(v.id)} className="p-1.5 hover:bg-red-50 rounded-md transition" title="Удалить">
-                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                </button>
+                {v.status === 'archived' ? (
+                  <button onClick={() => handleRestore(v.id)} className="p-1.5 hover:bg-emerald-50 rounded-md transition" title="Восстановить из архива">
+                    <ArchiveRestore className="w-3.5 h-3.5 text-emerald-600" />
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => openModal(v)} className="p-1.5 hover:bg-muted rounded-md transition" title="Редактировать">
+                      <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                    <button onClick={() => handleDelete(v.id)} className="p-1.5 hover:bg-red-50 rounded-md transition" title="Архивировать">
+                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
