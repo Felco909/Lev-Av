@@ -391,12 +391,39 @@ async function logClosedTripEdits(vehicleTripId: string, userId: string | undefi
   });
 }
 
+/**
+ * Безопасная блокировка удаления (аудит, п.6) — та же логика, что уже используется у
+ * клиента (409, если есть заявки). Физическое удаление рейса каскадно сносит его
+ * FleetExpense/FuelRecord/VehicleTripEvent (ON DELETE CASCADE в БД) и молча отвязывает
+ * заявки (Trip.vehicleTripId → SetNull), которые считались в доходе собственного
+ * транспорта именно через этот рейс. У рейса уже есть штатный механизм архивирования
+ * (status='archived', см. app/api/vehicle-trips/[id]/archive/route.ts) — при наличии
+ * зависимостей нужно использовать его (или сначала открепить заявки), а не удалять рейс
+ * физически. Пустой, ещё не тронутый рейс (только что созданный, без заявок/расходов/
+ * событий) можно удалить сразу — терять нечего.
+ */
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'ID обязателен' }, { status: 400 });
+
+  const [trips, fleetExpenses, fuelRecords, events] = await Promise.all([
+    prisma.trip.count({ where: { vehicleTripId: id } }),
+    prisma.fleetExpense.count({ where: { vehicleTripId: id } }),
+    prisma.fuelRecord.count({ where: { vehicleTripId: id } }),
+    prisma.vehicleTripEvent.count({ where: { vehicleTripId: id } }),
+  ]);
+  const totalDependents = trips + fleetExpenses + fuelRecords + events;
+  if (totalDependents > 0) {
+    return NextResponse.json(
+      {
+        error: `Невозможно удалить рейс — с ним связаны: заявок ${trips}, расходов парка ${fleetExpenses}, заправок ${fuelRecords}, событий ${events}. Сначала открепите заявки или отправьте рейс в архив.`,
+      },
+      { status: 409 }
+    );
+  }
 
   await prisma.vehicleTrip.delete({ where: { id } });
   return NextResponse.json({ ok: true });

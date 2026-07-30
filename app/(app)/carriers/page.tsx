@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Building2, Phone, Mail, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Building2, Phone, Mail, X, ArchiveRestore } from 'lucide-react';
 
 export default function CarriersPage() {
   const [items, setItems] = useState<any[]>([]);
@@ -9,14 +9,15 @@ export default function CarriersPage() {
   const [editItem, setEditItem] = useState<any>(null);
   const [form, setForm] = useState({ name: '', contactPerson: '', phone: '', email: '', inn: '', address: '', bankDetails: '' });
   const [saving, setSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/carriers');
+      const res = await fetch(`/api/carriers${showArchived ? '?showArchived=1' : ''}`);
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
     } catch {} finally { setLoading(false); }
-  }, []);
+  }, [showArchived]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -44,8 +45,20 @@ export default function CarriersPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Удалить перевозчика?')) return;
-    try { await fetch(`/api/carriers/${id}`, { method: 'DELETE' }); load(); } catch {}
+    if (!confirm('Архивировать перевозчика? Он будет скрыт из активного списка, но вся история заявок, платежей и расходов сохранится — физического удаления не произойдёт.')) return;
+    try {
+      const res = await fetch(`/api/carriers/${id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (data?.message) alert(data.message);
+      load();
+    } catch {}
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await fetch(`/api/carriers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+      load();
+    } catch {}
   };
 
   return (
@@ -60,6 +73,11 @@ export default function CarriersPage() {
         </button>
       </div>
 
+      <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap px-1">
+        <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="rounded" />
+        Показать архивные
+      </label>
+
       {loading ? <div className="p-8 text-center text-muted-foreground">Загрузка...</div> : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {(items ?? []).map((c: any) => (
@@ -70,11 +88,18 @@ export default function CarriersPage() {
                   <div>
                     <h3 className="font-semibold text-sm">{c?.name ?? '—'}</h3>
                     {c?.contactPerson && <p className="text-xs text-muted-foreground">{c.contactPerson}</p>}
+                    {c?.status === 'archived' && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">В архиве</span>}
                   </div>
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={() => openModal(c)} className="p-1.5 hover:bg-muted rounded-md transition"><Pencil className="w-3.5 h-3.5 text-muted-foreground" /></button>
-                  <button onClick={() => handleDelete(c?.id)} className="p-1.5 hover:bg-red-50 rounded-md transition"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                  {c?.status === 'archived' ? (
+                    <button onClick={() => handleRestore(c?.id)} className="p-1.5 hover:bg-emerald-50 rounded-md transition" title="Восстановить из архива"><ArchiveRestore className="w-3.5 h-3.5 text-emerald-600" /></button>
+                  ) : (
+                    <>
+                      <button onClick={() => openModal(c)} className="p-1.5 hover:bg-muted rounded-md transition"><Pencil className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                      <button onClick={() => handleDelete(c?.id)} className="p-1.5 hover:bg-red-50 rounded-md transition" title="Архивировать"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="space-y-1.5 text-xs text-muted-foreground">

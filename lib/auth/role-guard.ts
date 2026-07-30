@@ -69,6 +69,33 @@ export function getTouchedDenormalizedPaymentFields(body: unknown): string[] {
   return TRIP_DENORMALIZED_PAYMENT_FIELDS.filter((key) => Object.prototype.hasOwnProperty.call(o, key));
 }
 
+/**
+ * Финансовые настройки нумерации документов клиента — см. CLIENT_GLOBAL_DOC_NUMBERING_ROLES.
+ * Форма клиента (app/(app)/clients/page.tsx) — один общий form-объект и на создание, и на
+ * редактирование, поэтому эти поля присутствуют в теле запроса ВСЕГДА (даже если пользователь
+ * их не трогал) — проверка на "поле присутствует" здесь не годится (в отличие от денормали-
+ * зованных полей оплаты заявки, которые trip-form.tsx в норме вообще не отправляет). Роль
+ * нужно требовать только если значение реально ИЗМЕНИЛОСЬ — см. diffClientDocNumberingFields.
+ */
+export const CLIENT_GLOBAL_DOC_NUMBERING_FIELDS = [
+  'invoicePrefix',
+  'actPrefix',
+  'numberFormat',
+  'resetNumberingYearly',
+] as const;
+
+/** Сравнивает присланные значения с базовыми (текущая запись при PUT, значения по
+ *  умолчанию при POST) и возвращает список реально изменённых полей нумерации. */
+export function diffClientDocNumberingFields(
+  base: Record<string, unknown>,
+  submitted: Record<string, unknown>
+): string[] {
+  return CLIENT_GLOBAL_DOC_NUMBERING_FIELDS.filter((key) => {
+    if (!Object.prototype.hasOwnProperty.call(submitted, key)) return false;
+    return String(base[key] ?? '') !== String(submitted[key] ?? '');
+  });
+}
+
 function normalizeRole(role: unknown): string {
   return String(role ?? '').trim().toLowerCase();
 }

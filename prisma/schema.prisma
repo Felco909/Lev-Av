@@ -118,6 +118,9 @@ model Carrier {
   inn           String?
   address       String?
   bankDetails   String?  @map("bank_details") @db.Text
+  // Мягкое удаление (архивирование), та же архитектура, что у Vehicle/Driver — см.
+  // app/api/carriers/[id]/route.ts DELETE. Значения: active | archived.
+  status        String   @default("active")
   createdAt     DateTime @default(now()) @map("created_at")
   trips         Trip[]
 

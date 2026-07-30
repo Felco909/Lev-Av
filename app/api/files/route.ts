@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { isLocalStoragePath, localFileAbsolutePath } from '@/lib/attachment-service';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 function contentTypeByExt(fileName: string): string {
   const ext = path.extname(fileName).toLowerCase();
@@ -19,11 +20,6 @@ function contentTypeByExt(fileName: string): string {
   if (ext === '.txt') return 'text/plain; charset=utf-8';
   if (ext === '.csv') return 'text/csv; charset=utf-8';
   return 'application/octet-stream';
-}
-
-function asciiFileName(name: string): string {
-  const cleaned = name.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_').trim();
-  return cleaned || 'file';
 }
 
 export async function GET(request: Request) {
@@ -46,7 +42,7 @@ export async function GET(request: Request) {
       status: 200,
       headers: {
         'Content-Type': contentTypeByExt(fileName),
-        'Content-Disposition': `inline; filename="${asciiFileName(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Content-Disposition': buildContentDisposition('inline', fileName),
         'Cache-Control': 'private, no-store',
       },
     });

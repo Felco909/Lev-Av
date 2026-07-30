@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { convertHtmlToPdf } from '@/lib/pdf-convert';
 import { computeClientDueAmd } from '@/lib/finance/formulas';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -88,15 +89,12 @@ export async function GET(req: NextRequest) {
   // Render locally via LibreOffice headless (no external/paid service — see lib/pdf-convert.ts).
   try {
     const pdfBuf = await convertHtmlToPdf(html);
-    // Обнаружено при финальной проверке (Этап 4): имя клиента почти всегда кириллица/армянский —
-    // Content-Disposition с сырым non-ASCII именем файла бросает исключение в fetch/Headers,
-    // из-за чего Акт сверки падал с 500 для подавляющего большинства клиентов. Тот же паттерн
-    // RFC 5987, что уже используется в /api/reports/trips/xlsx и /api/files.
-    const filename = encodeURIComponent(`reconciliation_${client.name}_${today}.pdf`);
+    // Имя клиента почти всегда кириллица/армянский — единый механизм имени файла
+    // (lib/content-disposition.ts, аудит п.5), а не свой инлайн-вариант.
     return new NextResponse(pdfBuf, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+        'Content-Disposition': buildContentDisposition('attachment', `reconciliation_${client.name}_${today}.pdf`),
       },
     });
   } catch (err) {

@@ -13,6 +13,7 @@ import {
   type CarrierApplicationLang,
 } from '@/lib/carrier-application-pdf';
 import { carrierRequestDocx, type DocData, type OrderForCarrierRequest } from '@/lib/doc-generators';
+import { buildContentDisposition } from '@/lib/content-disposition';
 import {
   GoogleGenerativeAI,
   GoogleGenerativeAIFetchError,
@@ -291,7 +292,7 @@ async function handleCarrierApplicationPdf(body: Record<string, unknown>) {
   return new NextResponse(Buffer.from(pdfBytes), {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+      'Content-Disposition': buildContentDisposition('attachment', fileName),
     },
   });
 }
@@ -431,7 +432,7 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
   return new NextResponse(buffer, {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+      'Content-Disposition': buildContentDisposition('attachment', fileName),
     },
   });
 }

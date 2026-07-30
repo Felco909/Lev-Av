@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { convertHtmlToPdf } from '@/lib/pdf-convert';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 function fmtNum(n: number): string {
   return Math.round(n).toLocaleString('ru-RU');
@@ -99,7 +100,7 @@ export async function GET(req: Request) {
     return new NextResponse(pdfBuffer as any, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="dashboard_${new Date().toISOString().slice(0, 10)}.pdf"`,
+        'Content-Disposition': buildContentDisposition('attachment', `dashboard_${new Date().toISOString().slice(0, 10)}.pdf`),
       },
     });
   } catch (e: any) {

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getCustomTemplate, processDocxTemplate, getCompanySettings } from '@/lib/template-processor';
+import { buildContentDisposition } from '@/lib/content-disposition';
 import {
   Document, Packer, Paragraph, TextRun, AlignmentType,
   Table, TableRow, TableCell, WidthType, BorderStyle, TabStopType, TabStopPosition
@@ -194,7 +195,7 @@ export async function POST(request: Request) {
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+        'Content-Disposition': buildContentDisposition('attachment', fileName),
       },
     });
   } catch (error) {

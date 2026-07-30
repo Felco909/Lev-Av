@@ -58,6 +58,16 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     const guard = assertRole(session, CRITICAL_PAYMENTS_ROLES, '\u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043a\u0443\u043f\u043a\u0438 \u0437\u0430\u043f\u0447\u0430\u0441\u0442\u0435\u0439');
     if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const { id } = await params;
+    // Безопасная блокировка (аудит, п.6) — PartPayment.partPurchase каскадно удаляется
+    // вместе с закупкой (ON DELETE CASCADE), т.е. физическое удаление закупки с уже
+    // записанными платежами молча стирает и историю этих платежей.
+    const paymentsCount = await prisma.partPayment.count({ where: { partPurchaseId: id } });
+    if (paymentsCount > 0) {
+      return NextResponse.json(
+        { error: `Невозможно удалить — по закупке уже записано платежей: ${paymentsCount}. Сначала удалите платежи.` },
+        { status: 409 }
+      );
+    }
     await prisma.partPurchase.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e: any) {

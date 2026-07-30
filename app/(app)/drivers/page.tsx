@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, UserCheck, Phone, X, CreditCard, FileText, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, UserCheck, Phone, X, CreditCard, FileText, Loader2, ArchiveRestore } from 'lucide-react';
 
 export default function DriversPage() {
   const [items, setItems] = useState<any[]>([]);
@@ -10,6 +10,7 @@ export default function DriversPage() {
   const [form, setForm] = useState({ fullName: '', phone: '', licenseNumber: '', status: 'active' });
   const [saving, setSaving] = useState(false);
   const [generatingDoc, setGeneratingDoc] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const handleDriverDoc = useCallback(async (driverId: string, documentType: string, driverName: string) => {
     if (generatingDoc) return;
@@ -45,11 +46,11 @@ export default function DriversPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/drivers');
+      const res = await fetch(`/api/drivers${showArchived ? '?showArchived=1' : ''}`);
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
     } catch {} finally { setLoading(false); }
-  }, []);
+  }, [showArchived]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -77,8 +78,20 @@ export default function DriversPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Удалить водителя?')) return;
-    try { await fetch(`/api/drivers/${id}`, { method: 'DELETE' }); load(); } catch {}
+    if (!confirm('Архивировать водителя? Он будет скрыт из активного списка, но вся история рейсов, расходов и журнал смен сохранятся — физического удаления не произойдёт.')) return;
+    try {
+      const res = await fetch(`/api/drivers/${id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => null);
+      if (data?.message) alert(data.message);
+      load();
+    } catch {}
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await fetch(`/api/drivers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) });
+      load();
+    } catch {}
   };
 
   return (
@@ -93,6 +106,11 @@ export default function DriversPage() {
         </button>
       </div>
 
+      <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap px-1">
+        <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="rounded" />
+        Показать архивные
+      </label>
+
       {loading ? <div className="p-8 text-center text-muted-foreground">Загрузка...</div> : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {(items ?? []).map((d: any) => (
@@ -102,12 +120,18 @@ export default function DriversPage() {
                   <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center"><UserCheck className="w-5 h-5 text-green-600" /></div>
                   <div>
                     <h3 className="font-semibold text-sm">{d?.fullName ?? '—'}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${d?.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{d?.status === 'active' ? 'Активен' : 'Неактивен'}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${d?.status === 'active' ? 'bg-green-100 text-green-700' : d?.status === 'archived' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>{d?.status === 'active' ? 'Активен' : d?.status === 'archived' ? 'В архиве' : 'Неактивен'}</span>
                   </div>
                 </div>
                 <div className="flex gap-1">
-                  <button onClick={() => openModal(d)} className="p-1.5 hover:bg-muted rounded-md transition"><Pencil className="w-3.5 h-3.5 text-muted-foreground" /></button>
-                  <button onClick={() => handleDelete(d?.id)} className="p-1.5 hover:bg-red-50 rounded-md transition"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                  {d?.status === 'archived' ? (
+                    <button onClick={() => handleRestore(d?.id)} className="p-1.5 hover:bg-emerald-50 rounded-md transition" title="Восстановить из архива"><ArchiveRestore className="w-3.5 h-3.5 text-emerald-600" /></button>
+                  ) : (
+                    <>
+                      <button onClick={() => openModal(d)} className="p-1.5 hover:bg-muted rounded-md transition"><Pencil className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                      <button onClick={() => handleDelete(d?.id)} className="p-1.5 hover:bg-red-50 rounded-md transition" title="Архивировать"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="space-y-1.5 text-xs text-muted-foreground">

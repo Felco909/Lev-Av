@@ -4,11 +4,17 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
-    const carriers = await prisma.carrier.findMany({ orderBy: { name: 'asc' } });
+    const { searchParams } = new URL(req.url);
+    const showArchived = searchParams.get('showArchived');
+    const where: any = {};
+    // Архивные перевозчики (мягкое удаление, см. DELETE в [id]/route.ts) скрыты по
+    // умолчанию — тот же паттерн, что уже используется для /api/vehicles и /api/drivers.
+    if (showArchived !== '1') where.status = { not: 'archived' };
+    const carriers = await prisma.carrier.findMany({ where, orderBy: { name: 'asc' } });
     return NextResponse.json(carriers ?? []);
   } catch (e: any) {
     return NextResponse.json({ error: 'Ошибка' }, { status: 500 });

@@ -13,6 +13,7 @@ import {
   type DocData, type DocOverrides as GenOverrides, type OrderForCarrierRequest,
 } from '@/lib/doc-generators';
 import { convertDocxBufferToPdf, convertHtmlToPdf } from '@/lib/pdf-convert';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 async function buildProgrammaticDocxBuffer(
   documentType: string,
@@ -199,7 +200,7 @@ export async function POST(request: Request) {
         return new NextResponse(buffer, {
           headers: {
             'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+            'Content-Disposition': buildContentDisposition('attachment', fileName),
           },
         });
       }
@@ -218,7 +219,7 @@ export async function POST(request: Request) {
       return new NextResponse(buffer, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+          'Content-Disposition': buildContentDisposition('attachment', fileName),
         },
       });
     }
@@ -238,7 +239,7 @@ export async function POST(request: Request) {
       return new NextResponse(buffer, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+          'Content-Disposition': buildContentDisposition('attachment', fileName),
         },
       });
     }
@@ -285,7 +286,7 @@ export async function POST(request: Request) {
     return new NextResponse(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+        'Content-Disposition': buildContentDisposition('attachment', fileName),
       },
     });
   } catch (error) {

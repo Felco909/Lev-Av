@@ -555,10 +555,18 @@ export default function VehicleTripsPage() {
   const deleteTrip = async (id: string) => {
     if (!confirm('Удалить рейс машины?')) return;
     setDeleting(id);
-    await fetch(`/api/vehicle-trips?id=${id}`, { method: 'DELETE' });
-    setDeleting(null);
-    if (expandedId === id) { setExpandedId(null); setDetail(null); }
-    load();
+    try {
+      const res = await fetch(`/api/vehicle-trips?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || 'Не удалось удалить рейс');
+        return;
+      }
+      if (expandedId === id) { setExpandedId(null); setDetail(null); }
+      load();
+    } finally {
+      setDeleting(null);
+    }
   };
 
   // --- Detail / Expand — единственное место редактирования после создания ---

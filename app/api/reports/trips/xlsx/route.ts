@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import ExcelJS from 'exceljs';
 import { computeClientDueAmd, computeCarrierDueAmd, computeDebtAmd } from '@/lib/finance/formulas';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return '';
@@ -321,12 +322,11 @@ export async function GET(req: Request) {
     const buffer = await wb.xlsx.writeBuffer();
     const fromStr = dateFrom || 'all';
     const toStr = dateTo || 'all';
-    const filename = encodeURIComponent(`\u041e\u0442\u0447\u0451\u0442_${fromStr}_${toStr}.xlsx`);
 
     return new NextResponse(buffer as any, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+        'Content-Disposition': buildContentDisposition('attachment', `\u041e\u0442\u0447\u0451\u0442_${fromStr}_${toStr}.xlsx`),
       },
     });
   } catch (e) {

@@ -464,7 +464,12 @@ export default function MaintenancePage() {
   };
   const deletePart = async (id: string) => {
     if (!confirm('\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c?')) return;
-    await fetch(`/api/part-purchases/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/part-purchases/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c');
+      return;
+    }
     await loadParts();
   };
 

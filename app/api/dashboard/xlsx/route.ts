@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import ExcelJS from 'exceljs';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 export async function GET(req: Request) {
   try {
@@ -156,7 +157,7 @@ export async function GET(req: Request) {
     return new NextResponse(buffer as any, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="dashboard_${new Date().toISOString().slice(0, 10)}.xlsx"`,
+        'Content-Disposition': buildContentDisposition('attachment', `dashboard_${new Date().toISOString().slice(0, 10)}.xlsx`),
       },
     });
   } catch (e: any) {

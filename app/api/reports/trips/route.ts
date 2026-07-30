@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { buildContentDisposition } from '@/lib/content-disposition';
 
 export async function GET(req: Request) {
   try {
@@ -229,7 +230,7 @@ export async function GET(req: Request) {
       return new NextResponse(csv, {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="report_trips.csv"`,
+          'Content-Disposition': buildContentDisposition('attachment', 'report_trips.csv'),
         },
       });
     }
