@@ -14,12 +14,12 @@ function roundMoney(value: number): number {
 /**
  * GET /api/reports/own-fleet — доход/расход/прибыль собственного транспорта за период
  * для вкладки "Свой автопарк" (/reports). Единственный источник — та же связка, что уже
- * используется в /api/director-finance ("ownTransport"), /api/dashboard ("ownFleet"),
+ * используется в /api/dashboard ("ownFleet"),
  * /api/vehicle-analytics, /api/vehicles/[id]/economics: доход — сумма заявок, ЯВНО
  * привязанных к рейсу (Trip.vehicleTripId, lib/finance/own-fleet-income.ts), расход —
  * computeVehicleTripExpensesAmd (lib/vehicle-trips/close-trip.ts, зарплата + суточные×4 +
  * прочее + топливо + FleetExpense). Период фильтрует рейсы по VehicleTrip.departureDate —
- * так же, как director-finance, а не заявки по Trip.tripDate (см. аудит: до этого доход
+ * так же, как в остальных потребителях, а не заявки по Trip.tripDate (см. аудит: до этого доход
  * и расход на /reports считались по двум независимым, несвязанным выборкам и могли
  * расходиться с остальными разделами).
  */

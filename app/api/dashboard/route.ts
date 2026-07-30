@@ -12,7 +12,7 @@ import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/
 /**
  * Доход/расход/прибыль собственного транспорта за период VehicleTrip.departureDate — единая
  * методология (getVehicleTripsIncomeAmdBulk + computeVehicleTripExpensesAmd, та же, что и
- * /api/director-finance, /api/vehicle-analytics, /api/vehicles/[id]/economics). Вынесено в
+ * /api/vehicle-analytics, /api/vehicles/[id]/economics). Вынесено в
  * функцию, т.к. нужно дважды — для текущего периода (детальный breakdown) и для предыдущего
  * (только для сравнения тренда прибыли, см. аудит п.6). Ни одна формула здесь не меняется —
  * это тот же расчёт, что уже был в разделе "Свой транспорт" ниже, просто переиспользуемый.
@@ -292,8 +292,8 @@ export async function GET(req: Request) {
 
     // \u2500\u2500 8. OWN FLEET SUMMARY \u2500\u2500
     // Этап 3 миграции на архитектуру "заявка → рейс": доход и расход считаются по ОДНОМУ
-    // И ТОМУ ЖЕ набору рейсов машин (та же формула, что и /api/director-finance,
-    // /api/vehicle-analytics, /api/vehicles/[id]/economics) — раньше доход считался
+    // И ТОМУ ЖЕ набору рейсов машин (та же формула, что и /api/vehicle-analytics,
+    // /api/vehicles/[id]/economics) — раньше доход считался
     // напрямую по заявкам own_transport, а расход отдельно по VehicleTrip за период
     // (и даже без FleetExpense) — две независимые, слегка разные суммы.
     const ownFleetTripCount = allTrips.filter((t: any) => t.tripType === 'own_transport').length;
@@ -331,7 +331,7 @@ export async function GET(req: Request) {
     // как раньше (profitAmd/clientRateAmd/carrierRateAmd построчно из allTrips), собственный
     // транспорт — ТЕ ЖЕ revenue/expenses/profit, что и в блоке "Свой транспорт" выше (единая
     // методология getVehicleTripsIncomeAmdBulk/computeVehicleTripExpensesAmd, та же, что
-    // /api/director-finance и /api/vehicle-analytics). Формулы не менялись — это только
+    // /api/vehicle-analytics). Формулы не менялись — это только
     // правильная точка сборки уже существующих чисел.
     const expeditionIncome = allTrips.reduce((s: number, t: any) => {
       if (t.tripType !== 'expedition') return s;

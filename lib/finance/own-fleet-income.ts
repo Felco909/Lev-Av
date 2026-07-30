@@ -79,7 +79,7 @@ export async function getVehicleIncomeAmd(vehicleId: string, dateRange?: DateRan
   return total;
 }
 
-/** Доход по всем собственным машинам сразу — для director-finance/dashboard/reports. */
+/** Доход по всем собственным машинам сразу — для dashboard/reports. */
 export async function getFleetIncomeAmd(dateRange?: DateRangeFilter): Promise<number> {
   const vtWhere: any = {};
   if (dateRange?.from || dateRange?.to) {

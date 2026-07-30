@@ -11,7 +11,7 @@ import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
  * (карточка машины). Доход — сумма заявок, ЯВНО привязанных к каждому рейсу
  * (Trip.vehicleTripId, см. lib/finance/own-fleet-income.ts), даты в расчёте не участвуют.
  * Расходы — computeVehicleTripExpensesAmd (lib/vehicle-trips/close-trip.ts), та же функция,
- * что у карточки рейса, /api/vehicle-analytics и /api/director-finance. Не путать с
+ * что у карточки рейса и /api/vehicle-analytics. Не путать с
  * computeExpeditionProfitAmd/computeOwnTransportProfitAmd в lib/finance/finance-metrics-service.ts —
  * это другая, не идентичная логика для другого модуля (см. CLAUDE.md).
  */

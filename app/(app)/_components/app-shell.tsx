@@ -9,7 +9,7 @@ import { useServerSync } from '@/hooks/use-server-sync';
 import {
   LayoutDashboard, Route, Users, Car, UserCheck, Building2,
   Menu, X, LogOut, ChevronRight, ChevronDown, BarChart3, Settings, FolderOpen,
-  CalendarDays, PieChart, Wrench, MapPinned, Fuel, ShieldAlert, UserCog, Bell,
+  CalendarDays, Wrench, MapPinned, Fuel, ShieldAlert, UserCog, Bell,
   Search, Wallet, TrendingUp, Bot, Radar,
 } from 'lucide-react';
 
@@ -44,7 +44,6 @@ const navGroups: NavGroup[] = [
   { group: 'Главное', items: [
     { href: '/dashboard', label: 'Главная', icon: LayoutDashboard },
     { href: '/day-tasks', label: 'Лист дня', icon: CalendarDays },
-    { href: '/director-finance', label: 'Финансы директора', icon: PieChart },
     { href: '/trips', label: 'Заявки', icon: Route },
     { href: '/calendar', label: 'Календарь', icon: CalendarDays },
     { href: '/documents', label: 'Документы', icon: FolderOpen },
