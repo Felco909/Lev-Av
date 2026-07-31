@@ -1,119 +1,77 @@
-export interface DayTaskItem {
+export type Priority = 'normal' | 'attention' | 'urgent' | 'overdue';
+export type GpsStatus = 'moving' | 'stopped' | 'no_signal';
+
+export interface TripTask {
   id: string;
-  label: string;
-  href?: string;
-  tone?: 'default' | 'warning' | 'danger' | 'success';
-  meta?: string;
-}
-
-export interface DayTaskBlock {
-  title: string;
-  emptyText: string;
-  items: DayTaskItem[];
-}
-
-export interface DayTaskPanelData {
-  roleTitle: string;
-  roleSubtitle: string;
-  blocks: DayTaskBlock[];
-}
-
-export interface DashboardResponse {
-  kpi?: {
-    totalClientDebt: number;
-    totalCarrierDebt: number;
-    totalProfit: number;
-    totalCashGap: number;
-  };
-  totals?: {
-    totalIncome: number;
-    totalExpense: number;
-  };
-  clientDebts?: Array<{
-    id: string;
-    tripNumber: string;
-    clientName?: string;
-    remaining: number;
-  }>;
-  problemRows?: Array<{
-    id: string;
-    tripNumber: string;
-    diff: number;
-  }>;
-  reminders?: {
-    overduePayments?: Array<{
-      id: string;
-      tripNumber: string;
-      clientName?: string;
-      amount?: number;
-      daysLeft?: number;
-    }>;
-    paymentDueTrips?: Array<{
-      id: string;
-      tripNumber: string;
-      clientName?: string;
-      amount?: number;
-      daysLeft?: number;
-    }>;
-    carrierOverduePayments?: Array<{
-      id: string;
-      tripNumber: string;
-      carrierName?: string;
-      amount?: number;
-      daysLeft?: number;
-    }>;
-    carrierPaymentDueTrips?: Array<{
-      id: string;
-      tripNumber: string;
-      carrierName?: string;
-      amount?: number;
-      daysLeft?: number;
-    }>;
-  };
-  commandCenter?: {
-    today?: {
-      loadings: number;
-      unloadings: number;
-      expectedPayments: number;
-      problems: number;
-    };
-    attention?: {
-      noInvoiceActTrips?: Array<{ id: string; tripNumber: string; clientName: string }>;
-      noAttachmentTrips?: Array<{ id: string; tripNumber: string; clientName: string }>;
-      overduePayments?: Array<{ id: string; tripNumber: string; clientName?: string; amount?: number; daysLeft?: number }>;
-      unpaidTrips?: Array<{ id: string; tripNumber: string; clientName?: string; remaining: number }>;
-      statusProblemsCount?: number;
-      idleVehiclesCount?: number;
-      vehiclesWithoutDocs?: number;
-    };
-  };
-}
-
-export interface DebtsResponse {
-  totalClientDebt?: number;
-  totalCarrierDebt?: number;
-}
-
-export interface FinanceAuditResponse {
-  endpointConsistency?: {
-    hasMismatch?: boolean;
-    mismatches?: Array<{
-      metric: string;
-      diffAmd: number;
-      left: { endpoint: string; value: number };
-      right: { endpoint: string; value: number };
-    }>;
-  };
-  summary?: {
-    tripConflictCount?: number;
-  };
-}
-
-export interface TripRow {
-  id: string;
+  tripId: string;
   tripNumber: string;
-  routeFrom: string;
-  routeTo: string;
+  route: string;
+  clientName: string | null;
+  carrierName: string | null;
+  vehiclePlate: string | null;
+  driverName: string | null;
   status: string;
-  client?: { name?: string } | null;
+  nextAction: string;
+  dueAt: string | null;
+  priority: Priority;
+  gpsStatus: GpsStatus | null;
+  clientPhone: string | null;
+  driverPhone: string | null;
+  amountAmd: number | null;
 }
+
+export interface LogistCategory {
+  category: string;
+  icon: string;
+  count: number;
+  items: TripTask[];
+}
+
+export interface AccountantStage {
+  stage: string;
+  count: number;
+  items: TripTask[];
+}
+
+export interface AttentionItem {
+  key: string;
+  label: string;
+  count: number;
+  amountAmd: number | null;
+  href: string;
+}
+
+export interface DirectorData {
+  kpi: {
+    incomeAmd: number;
+    expenseAmd: number;
+    profitAmd: number;
+    clientDebtAmd: number;
+    carrierDebtAmd: number;
+    cashGapAmd: number;
+    vehiclesOnTrip: number;
+    vehiclesFree: number;
+    totalActiveVehicles: number;
+    criticalEventsCount: number;
+  };
+  attention: AttentionItem[];
+}
+
+export interface DayTasksSummary {
+  date: string;
+  weekday: string;
+  activeTripsCount: number;
+  tasksTodayCount: number;
+  overdueTasksCount: number;
+  criticalEventsCount: number;
+  lastUpdated: string;
+}
+
+export interface DayTasksResponse {
+  summary: DayTasksSummary;
+  logist: LogistCategory[];
+  accountant: AccountantStage[];
+  director: DirectorData;
+}
+
+export type PeriodFilter = 'today' | 'tomorrow' | 'week' | 'all';
