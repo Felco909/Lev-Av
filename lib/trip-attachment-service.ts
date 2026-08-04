@@ -28,10 +28,3 @@ export function tripSectionToStorageCategory(section: TripAttachmentSection): Tr
   return TRIP_ATTACHMENT_STORAGE_CATEGORY[section];
 }
 
-export function tripDescriptionToStorageCategory(description: string): TripAttachmentStorageCategory {
-  if (description.includes('DOC_TYPE:contract_request') || description.includes('DOC_TYPE:contract')) return 'contracts';
-  if (description.includes('DOC_TYPE:invoice')) return 'invoices';
-  if (description.includes('DOC_TYPE:act')) return 'acts';
-  if (description.includes('DOC_TYPE:signed')) return 'signed';
-  return 'other';
-}

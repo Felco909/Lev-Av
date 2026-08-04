@@ -84,7 +84,37 @@ export async function POST(req: NextRequest) {
   const computedAmountAmd = cur === 'AMD' ? Number(amount) : Math.round(Number(amount) * rate * 100) / 100;
   const paymentType = type === 'carrier' ? 'carrier' : 'client';
 
-  const payment = await prisma.$transaction(async (tx) => {
+  const paymentDateObj = new Date(paymentDate);
+
+  const { payment, isDuplicate } = await prisma.$transaction(async (tx) => {
+    // Advisory-лок по tripId сериализует конкурентные запросы на создание платежа по
+    // ОДНОЙ и той же заявке — без него две параллельные вкладки/двойной клик проходят
+    // проверку "дубля нет" одновременно и обе создают платёж (классический race condition).
+    // hashtext() детерминированно превращает tripId (cuid-строку) в int для pg_advisory_xact_lock.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tripId}))`;
+
+    // Защита от повторной отправки (двойной клик/ретрай сети/resubmit формы, аудит
+    // 01.08.2026, п.3 — реальный дубль в БД на TMS-2026-0105): если платёж с теми же
+    // tripId+type+amount+currency+paymentDate уже создан в последние 15 секунд —
+    // считаем это повторной отправкой ТОГО ЖЕ платежа и возвращаем существующий,
+    // а не создаём новый. 15 сек достаточно для двойного клика/ретрая, но не блокирует
+    // легитимный повторный платёж той же суммой, введённый позже осознанно.
+    const dupWindowStart = new Date(Date.now() - 15_000);
+    const existing = await tx.payment.findFirst({
+      where: {
+        tripId,
+        type: paymentType,
+        amount: new Decimal(Number(amount)),
+        currency: cur,
+        paymentDate: paymentDateObj,
+        createdAt: { gte: dupWindowStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) {
+      return { payment: existing, isDuplicate: true };
+    }
+
     const created = await tx.payment.create({
       data: {
         tripId,
@@ -93,20 +123,22 @@ export async function POST(req: NextRequest) {
         amountAmd: computedAmountAmd,
         currency: cur,
         exchangeRate: rate,
-        paymentDate: new Date(paymentDate),
+        paymentDate: paymentDateObj,
         method: method || 'bank_transfer',
         description: description || null,
       },
     });
     await recalcTripPayments(tripId, tx);
-    return created;
+    return { payment: created, isDuplicate: false };
   });
+
   return NextResponse.json({
     ...payment,
     amount: Number(payment.amount),
     amountAmd: Number(payment.amountAmd),
     exchangeRate: Number(payment.exchangeRate),
-  }, { status: 201 });
+    ...(isDuplicate ? { duplicateOfExisting: true } : {}),
+  }, { status: isDuplicate ? 200 : 201 });
 }
 
 export async function DELETE(req: NextRequest) {

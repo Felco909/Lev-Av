@@ -8,6 +8,12 @@ import {
   computeCarrierDueAmd,
   computeCashGapAmd,
   computeOverdueFlag,
+  computeExpeditionProfitAmd,
+  computeOwnTransportProfitAmd,
+  roundMoney,
+  computeCostPerKmAmd,
+  computeProfitabilityRatio,
+  computeProfitPerKmAmd,
   CARRIER_EXPENSE_MARKER,
   type ExpenseLike,
 } from './formulas';
@@ -144,5 +150,70 @@ describe('computeOverdueFlag', () => {
 
   it('is not overdue when there is no due date at all', () => {
     expect(computeOverdueFlag(null, 1000, 'completed')).toBe(false);
+  });
+});
+
+describe('computeExpeditionProfitAmd (finance-metrics-service module — NOT the same as computeTripProfitAmd, see CLAUDE.md)', () => {
+  it('is client rate minus carrier rate minus expenses', () => {
+    expect(computeExpeditionProfitAmd(1000, 700, 50)).toBe(250);
+  });
+
+  it('treats missing/null inputs as zero', () => {
+    expect(computeExpeditionProfitAmd(1000, 0, 0)).toBe(1000);
+  });
+});
+
+describe('computeOwnTransportProfitAmd (finance-metrics-service module)', () => {
+  it('is client rate minus own expenses (no carrier side at all)', () => {
+    expect(computeOwnTransportProfitAmd(1000, 300)).toBe(700);
+  });
+});
+
+describe('roundMoney', () => {
+  it('rounds to 2 decimal places', () => {
+    expect(roundMoney(100.005)).toBe(100.01);
+    expect(roundMoney(100.004)).toBe(100);
+  });
+
+  it('treats NaN/undefined-like input as 0', () => {
+    expect(roundMoney(Number('not-a-number'))).toBe(0);
+  });
+});
+
+describe('computeCostPerKmAmd (vehicle-analytics, Этап 8)', () => {
+  it('is total expenses divided by mileage', () => {
+    expect(computeCostPerKmAmd(100000, 1000)).toBe(100);
+  });
+
+  it('is 0 when mileage is 0 (avoids division by zero)', () => {
+    expect(computeCostPerKmAmd(100000, 0)).toBe(0);
+  });
+});
+
+describe('computeProfitabilityRatio (vehicle-analytics, Этап 8)', () => {
+  it('is profit / revenue as a percentage', () => {
+    expect(computeProfitabilityRatio(250, 1000)).toBe(25);
+  });
+
+  it('is 0 when revenue is 0 (avoids division by zero)', () => {
+    expect(computeProfitabilityRatio(250, 0)).toBe(0);
+  });
+
+  it('can exceed 100% (revenue smaller than profit is not physically expected, but the formula does not clamp)', () => {
+    expect(computeProfitabilityRatio(1500, 1000)).toBe(150);
+  });
+});
+
+describe('computeProfitPerKmAmd', () => {
+  it('is profit divided by mileage', () => {
+    expect(computeProfitPerKmAmd(50000, 1000)).toBe(50);
+  });
+
+  it('is 0 when mileage is 0', () => {
+    expect(computeProfitPerKmAmd(50000, 0)).toBe(0);
+  });
+
+  it('can be negative for a lossy vehicle', () => {
+    expect(computeProfitPerKmAmd(-20000, 1000)).toBe(-20);
   });
 });

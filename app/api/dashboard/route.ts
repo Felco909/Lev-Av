@@ -8,6 +8,7 @@ import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
 import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
 import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
+import { dedupeCashGapTotal } from '@/lib/finance/cash-gap-dedup';
 
 /**
  * Доход/расход/прибыль собственного транспорта за период VehicleTrip.departureDate — единая
@@ -161,7 +162,16 @@ export async function GET(req: Request) {
       .filter(r => r.diff > 0)
       .sort((a, b) => b.diff - a.diff);
 
-    const totalCashGap = problemRows.reduce((s, r) => s + r.diff, 0);
+    // KPI totalCashGap — дедуп по tripId через уже полученные clientRows/carrierRows
+    // (те же canonical getClientDebtRows/getCarrierDebtRows, что /api/debts и /api/day-tasks),
+    // а НЕ problemRows.reduce(...) — заявка может быть и в клиентских, и в перевозчицких
+    // долгах одновременно, а более широкий скан problemTrips (все expedition-заявки,
+    // а не только с непогашенным долгом) давал число, которое технически совпадало с
+    // Долгами на текущих данных, но не гарантированно (аудит 01.08.2026, п.4 — единая
+    // логика кассового разрыва теперь в трёх местах: /debts, /dashboard, /day-tasks,
+    // /api/trips/stats). problemRows ниже — отдельная detail-таблица «топ рискованных
+    // экспедиционных заявок», её охват сознательно шире и не меняется.
+    const totalCashGap = dedupeCashGapTotal([...clientRows, ...carrierRows]);
 
     // \u2500\u2500 5. PERIOD COMPARISON \u2500\u2500
     // Calculate previous period of same length for comparison
@@ -395,14 +405,17 @@ export async function GET(req: Request) {
     // ── 11. ENTERPRISE COMMAND CENTER v3: operational/idle/stuck/wialon ──
     // Единый первый запрос Dashboard (Phase 3 спецификации v3) — тот же getOperationalSummary,
     // что и /api/reports/overview (не второй запрос той же сводки), плюс два лёгких сравнения
-    // уже хранимых дат (простаивающие машины / аномально долгие рейсы), плюс свежесть Wialon
-    // по MAX(geofenceStatusAt) — все три без единой новой бизнес-формулы.
+    // уже хранимых дат (простаивающие машины / аномально долгие рейсы), плюс свежесть Wialon.
+    // Раньше свежесть бралась как MAX(geofenceStatusAt) — это поле пишется ТОЛЬКО в момент
+    // GPS-подтверждённого выезда конкретного рейса, а не как heartbeat синхронизации, поэтому
+    // индикатор был всегда null (аудит 01.08.2026, п.6). Теперь — из Setting('wialon_last_sync_at'),
+    // которую lib/company-base/baseCheck.ts обновляет при каждом успешном снимке Wialon.
     const todayStartCC = new Date(); todayStartCC.setHours(0, 0, 0, 0);
-    const [operational, idleVehicles, stuckVehicleTrips, lastWialonSync] = await Promise.all([
+    const [operational, idleVehicles, stuckVehicleTrips, lastWialonSyncSetting] = await Promise.all([
       getOperationalSummary(prisma, todayStartCC),
       getIdleVehicles(prisma, 5),
       getStuckVehicleTrips(prisma, 14),
-      prisma.vehicleTrip.aggregate({ _max: { geofenceStatusAt: true } }),
+      prisma.setting.findUnique({ where: { key: 'wialon_last_sync_at' } }),
     ]);
 
     const commandCenter = {
@@ -413,7 +426,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       operational,
-      lastWialonSyncAt: lastWialonSync._max.geofenceStatusAt,
+      lastWialonSyncAt: lastWialonSyncSetting?.value ?? null,
       kpi: { totalClientDebt, totalCarrierDebt, totalProfit, totalCashGap },
       prevKpi,
       totals: { totalIncome, totalExpense },

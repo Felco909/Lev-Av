@@ -12,7 +12,6 @@ import type { PaymentStatus } from '@/lib/finance/types';
 export const FINANCE_CONTRACT_VERSION = '1.0.0' as const;
 
 export const PAYMENT_SOURCE_OF_TRUTH = 'Payment' as const;
-export const TRIP_ROLE_IN_CONTRACT = 'commercial_context_and_aggregates' as const;
 
 export const CANONICAL_PAYMENT_STATUSES: readonly PaymentStatus[] = Object.freeze([
   'not_paid',
@@ -44,11 +43,4 @@ export const VALIDATION_SCOPE_FIELDS = Object.freeze([
   'carrierPaymentStatus',
   'profitAmd',
   'cashGapAmd',
-] as const);
-
-export const CONTRACT_NOTES = Object.freeze([
-  'Original currency values are preserved as entered.',
-  'AMD values are canonical for comparison and control.',
-  'Historical values are not retroactively changed without explicit revaluation.',
-  'Overdue is a flag layered over payment status, not a separate status enum.',
 ] as const);

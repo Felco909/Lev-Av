@@ -7,7 +7,8 @@ import { roundMoney } from '@/lib/finance/formulas';
 import { getTripSplitExpenseTotalsAmd } from '@/lib/finance/finance-metrics-service';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
-import { getClientDebtRows, getCarrierDebtRows, sumDebt, sumCashGap } from '@/lib/finance/debts-service';
+import { getClientDebtRows, getCarrierDebtRows, sumDebt } from '@/lib/finance/debts-service';
+import { dedupeCashGapTotal } from '@/lib/finance/cash-gap-dedup';
 import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
 import { getVehicleActivityStatus } from '@/lib/wialon/status';
 
@@ -306,7 +307,10 @@ export async function GET(req: Request) {
 
     const totalClientDebtAmd = sumDebt(clientDebtRows);
     const totalCarrierDebtAmd = sumDebt(carrierDebtRows);
-    const totalCashGapAmd = roundMoney(sumCashGap(clientDebtRows) + sumCashGap(carrierDebtRows));
+    // Единая дедуп-функция (lib/finance/cash-gap-dedup.ts, покрыта тестами) — та же,
+    // что теперь и в /api/dashboard, и в /api/trips/stats (колокольчик). Раньше здесь
+    // была локальная копия этого цикла (аудит 01.08.2026, п.4).
+    const totalCashGapAmd = dedupeCashGapTotal([...clientDebtRows, ...carrierDebtRows]);
 
     const lossyTrips = filtered.filter((t) => {
       const split = getTripSplitExpenseTotalsAmd(t as any);

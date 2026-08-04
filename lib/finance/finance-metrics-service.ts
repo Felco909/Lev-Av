@@ -155,30 +155,6 @@ export interface FinanceBreakdownTotals {
 }
 
 /**
- * Computes canonical per-trip finance rows from trip/payment inputs.
- * Keep this as a single entrypoint for API modules to avoid formula drift.
- */
-export function computeMetricRowsForTrips(
-  trips: FinanceTripInput[],
-  payments: FinancePaymentInput[]
-): FinanceMetricRow[] {
-  return trips.map((trip) => {
-    const metrics = computeTripFinanceMetrics(trip, payments);
-    // Отменённая заявка (Этап 4 аудита) — computeBreakdownTotals/computeAggregateMetrics
-    // суммируют clientRateAmd/carrierRateAmd/expensesAmd СТРОКИ напрямую (не только
-    // profitAmd), поэтому обнулять их нужно уже здесь, а не только в metrics.profitAmd —
-    // иначе доход отменённой заявки не попадёт в "прибыль", но всё ещё попадёт в "доход".
-    const isCancelled = trip.status === 'cancelled';
-    return {
-      ...metrics,
-      clientRateAmd: isCancelled ? 0 : roundMoney(trip.clientRateAmd),
-      carrierRateAmd: isCancelled ? 0 : roundMoney(trip.carrierRateAmd),
-      expensesAmd: isCancelled ? 0 : roundMoney(trip.expensesAmd),
-    };
-  });
-}
-
-/**
  * Canonical financial totals intended for dashboard/debts/reports reuse.
  * All totals are AMD and rounded with roundMoney.
  */

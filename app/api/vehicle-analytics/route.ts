@@ -15,12 +15,20 @@ import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
  * расхождение между разделами архитектурно исключено, т.к. это один и тот же запрос.
  * Не путать с computeExpeditionProfitAmd/computeOwnTransportProfitAmd (другой модуль, см. CLAUDE.md).
  */
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
-    const vehicles = await prisma.vehicle.findMany({ orderBy: { plateNumber: 'asc' } });
+    // Архивные машины скрыты по умолчанию — тот же паттерн showArchived, что и
+    // /api/vehicles/route.ts:13-18 (аудит 01.08.2026, п.7: раньше этот роут не фильтровал
+    // архив вообще, в отличие от /api/vehicles и /api/driver-analytics).
+    const { searchParams } = new URL(req.url);
+    const showArchived = searchParams.get('showArchived');
+    const vehicleWhere: any = {};
+    if (showArchived !== '1') vehicleWhere.status = { not: 'archived' };
+
+    const vehicles = await prisma.vehicle.findMany({ where: vehicleWhere, orderBy: { plateNumber: 'asc' } });
 
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       select: {

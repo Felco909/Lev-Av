@@ -77,14 +77,6 @@ export const FLEET_EXPENSE_TYPE_MAP: Record<string, string> = {
   other: 'Прочее',
 };
 
-// Expense report grouping for own_transport breakdown
-export const EXPENSE_REPORT_GROUPS: Record<string, { label: string; types: string[] }> = {
-  salary: { label: 'Зарплата', types: ['salary'] },
-  fuel: { label: 'Топливо', types: ['fuel'] },
-  per_diem: { label: 'Суточные / дорожные', types: ['per_diem'] },
-  other: { label: 'Прочие расходы', types: ['advance', 'toll', 'ferry', 'repair', 'fine', 'customs', 'parking', 'insurance', 'other'] },
-};
-
 // Maps legacy/null statuses to canonical workflow status strings.
 // 'paid' was removed from the workflow and is treated as 'completed'.
 export function canonicalWorkflowTripStatus(status: string | null | undefined): string {

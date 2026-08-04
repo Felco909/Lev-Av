@@ -5,6 +5,7 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
+import { computeClientDueAmd, computeCarrierDueAmd, computeDebtAmd } from '@/lib/finance/formulas';
 
 export async function POST(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -13,7 +14,13 @@ export async function POST(request: Request, { params: paramsPromise }: { params
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
     const tripId = params.id;
-    const trip = await prisma.trip.findUnique({ where: { id: tripId } });
+    // description обязателен — по нему getTripSplitExpenseTotalsAmd/splitExpensesAmd
+    // определяет сторону расхода (маркер __carrier__), без него все перевыставляемые
+    // расходы молча теряются при расчёте реального долга (аудит 01.08.2026, п.1).
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { expenses: { select: { amountAmd: true, amount: true, description: true } } },
+    });
     if (!trip) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
 
     if (trip.status === 'completed' || trip.status === 'paid') {
@@ -23,14 +30,20 @@ export async function POST(request: Request, { params: paramsPromise }: { params
       return NextResponse.json({ error: 'Завершить можно только из статуса «Сверка».' }, { status: 400 });
     }
 
-    // 3-condition gate: client debt, carrier debt, taxCode
+    // 3-condition gate: client debt, carrier debt, taxCode — реальный долг считается
+    // ТОЛЬКО через канонические computeClientDueAmd/computeCarrierDueAmd/computeDebtAmd
+    // (lib/finance/formulas.ts), а не через "rate - paid" напрямую (аудит 01.08.2026, п.1):
+    // локальная формула игнорировала перевыставляемые расходы (Expense) и позволяла
+    // закрыть сделку с фактически непогашенным остатком.
     const payments = await prisma.payment.findMany({ where: { tripId } });
     const clientRateAmd = Number((trip as any).clientRateAmd ?? trip.clientRate ?? 0);
-    const clientPaidAmd = payments.filter((p: any) => p.type === 'client').reduce((s: number, p: any) => s + Number(p.amountAmd || 0), 0);
-    const clientDebt = Math.round(clientRateAmd - clientPaidAmd);
     const carrierRateAmd = Number((trip as any).carrierRateAmd ?? trip.carrierRate ?? 0);
+    const clientDueAmd = computeClientDueAmd(clientRateAmd, trip.expenses);
+    const carrierDueAmd = computeCarrierDueAmd(carrierRateAmd, trip.expenses);
+    const clientPaidAmd = payments.filter((p: any) => p.type === 'client').reduce((s: number, p: any) => s + Number(p.amountAmd || 0), 0);
     const carrierPaidAmd = payments.filter((p: any) => p.type === 'carrier').reduce((s: number, p: any) => s + Number(p.amountAmd || 0), 0);
-    const carrierDebt = Math.round(carrierRateAmd - carrierPaidAmd);
+    const clientDebt = computeDebtAmd(clientDueAmd, clientPaidAmd);
+    const carrierDebt = computeDebtAmd(carrierDueAmd, carrierPaidAmd);
     const blockingErrors: string[] = [];
     if (clientDebt > 0) blockingErrors.push(`Клиент не полностью оплатил (остаток: ${clientDebt.toLocaleString('ru-RU')} AMD)`);
     if (trip.tripType === 'expedition' && carrierDebt > 0) blockingErrors.push(`Перевозчик не получил полную оплату (остаток: ${carrierDebt.toLocaleString('ru-RU')} AMD)`);
@@ -52,9 +65,11 @@ export async function POST(request: Request, { params: paramsPromise }: { params
     }
 
     if (closeDebts) {
-      // Auto-close all debts: create balancing payments for remaining amounts
-      const clientDue = Number(trip.clientRateAmd ?? trip.clientRate ?? 0);
-      const carrierDue = Number(trip.carrierRateAmd ?? trip.carrierRate ?? 0);
+      // Auto-close all debts: create balancing payments for remaining amounts.
+      // clientDue/carrierDue — те же canonical clientDueAmd/carrierDueAmd, что и в гейте
+      // выше (с учётом перевыставляемых расходов), а не голая ставка (аудит 01.08.2026, п.1).
+      const clientDue = clientDueAmd;
+      const carrierDue = carrierDueAmd;
 
       // Get existing paid amounts
       const existingPayments = await prisma.payment.findMany({ where: { tripId } });

@@ -10,6 +10,7 @@ import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertInitialTripWorkflowStatus } from '@/lib/trip-workflow-guards';
 import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
 import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
+import { validateTripPayload } from '@/lib/trip-payload-validation';
 
 export async function GET(req: Request) {
   try {
@@ -104,12 +105,18 @@ export async function GET(req: Request) {
     let totalCount = 0;
 
     if (groupByStatus) {
-      // Fetch all matching trips, sort by status group then by date, then paginate in-memory.
-      const all = await prisma.trip.findMany({
+      // Группировка по статусу требует сортировки по всей выборке (ранг статуса — не
+      // колонка в БД), но раньше ради этого целиком тянулся полный findMany с тяжёлыми
+      // include (client/contact/vehicle/driver/carrier/expenses) для ВСЕХ подходящих
+      // заявок, даже если реально нужна одна страница (аудит 01.08.2026, п.10 —
+      // "пагинация /trips бутафорская"). Теперь в память грузятся только 4 узких поля
+      // (id/status/tripDate/createdAt) для сортировки, а тяжёлые include запрашиваются
+      // ОДНИМ вторым findMany только для id нужной страницы.
+      const light = await prisma.trip.findMany({
         where,
-        include: { client: true, contact: true, vehicle: true, driver: true, carrier: true, expenses: true },
+        select: { id: true, status: true, tripDate: true, createdAt: true },
       });
-      all.sort((a: any, b: any) => {
+      light.sort((a, b) => {
         const ga = statusGroupRank(a?.status);
         const gb = statusGroupRank(b?.status);
         if (ga !== gb) return ga - gb;
@@ -118,8 +125,15 @@ export async function GET(req: Request) {
         const diff = bd - ad; // default desc
         return sortDir === 'asc' ? -diff : diff;
       });
-      totalCount = all.length;
-      trips = usePagination ? all.slice((page - 1) * pageSize, page * pageSize) : all;
+      totalCount = light.length;
+      const pageIds = (usePagination ? light.slice((page - 1) * pageSize, page * pageSize) : light).map((t) => t.id);
+
+      const full = await prisma.trip.findMany({
+        where: { id: { in: pageIds } },
+        include: { client: true, contact: true, vehicle: true, driver: true, carrier: true, expenses: true },
+      });
+      const fullById = new Map(full.map((t) => [t.id, t]));
+      trips = pageIds.map((id) => fullById.get(id)).filter(Boolean);
     } else {
       const orderBy: any = sortBy === 'createdAt'
         ? { createdAt: sortDir }
@@ -194,6 +208,15 @@ export async function POST(req: Request) {
     const initialStatusCheck = assertInitialTripWorkflowStatus(body?.status);
     if (!initialStatusCheck.ok) {
       return NextResponse.json({ error: initialStatusCheck.message }, { status: 400 });
+    }
+
+    // Написанная, но ранее не подключённая проверка (аудит 01.08.2026, п.5) — без неё
+    // через прямой вызов API можно было создать заявку без клиента/маршрута/с нулевой
+    // ставкой; форма (trip-form.tsx:874-875) уже требует то же самое на клиенте, так что
+    // для обычного UI-сценария это ничего не меняет — закрывает только обход мимо формы.
+    const payloadCheck = validateTripPayload(body, { isCreate: true });
+    if (!payloadCheck.ok) {
+      return NextResponse.json({ error: payloadCheck.message }, { status: 400 });
     }
 
     // Generate trip number — find max existing number to avoid duplicates

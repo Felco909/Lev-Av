@@ -10,16 +10,6 @@ export function hasInvoiceSeries(value: string | null | undefined): boolean {
   return String(value ?? '').trim().length > 0;
 }
 
-export function isTripInvoiceSeriesComplete(
-  tripType: string | null | undefined,
-  clientInvoiceSeries: string | null | undefined,
-  carrierInvoiceSeries: string | null | undefined,
-): boolean {
-  if (!hasInvoiceSeries(clientInvoiceSeries)) return false;
-  if (tripType === 'expedition' && !hasInvoiceSeries(carrierInvoiceSeries)) return false;
-  return true;
-}
-
 export function getTripInvoiceSeriesIndicator(
   tripType: string | null | undefined,
   clientInvoiceSeries: string | null | undefined,
@@ -41,18 +31,4 @@ export function getTripInvoiceSeriesIndicator(
     return { label: '⚠️ Нет серии перевозчика', badgeClass: warn, status: 'warning' };
   }
   return { label: '✅ Серии заполнены', badgeClass: ok, status: 'ok' };
-}
-
-/** Prisma-фильтр: завершённые заявки с неполными сериями (для списка и дашборда). */
-export function prismaWhereInvoiceSeriesIncomplete() {
-  return {
-    OR: [
-      { clientInvoiceSeries: null },
-      { clientInvoiceSeries: '' },
-      {
-        tripType: 'expedition',
-        OR: [{ carrierInvoiceSeries: null }, { carrierInvoiceSeries: '' }],
-      },
-    ],
-  };
 }

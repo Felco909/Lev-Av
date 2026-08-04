@@ -41,6 +41,22 @@ export async function runCompanyBaseCheck(): Promise<CompanyBaseCheckResult> {
     errors.push(`Не удалось получить снимок парка Wialon: ${(e as Error).message}`);
     return { checkedVehicles: 0, vehiclePresenceChanges, tripTransitions, errors };
   }
+
+  // Heartbeat "последняя успешная синхронизация Wialon" для Dashboard (аудит 01.08.2026,
+  // п.6) — отдельно от VehicleTrip.geofenceStatusAt, которое отмечает только момент
+  // GPS-подтверждённого ВЫЕЗДА конкретного рейса и не пишется, если presence не менялся;
+  // из-за этого MAX(geofenceStatusAt) был всегда NULL, хотя сама синхронизация Wialon
+  // работает штатно каждые 5 минут. Setting — без миграции схемы, key-value как и есть.
+  try {
+    await prisma.setting.upsert({
+      where: { key: 'wialon_last_sync_at' },
+      create: { key: 'wialon_last_sync_at', value: new Date().toISOString() },
+      update: { value: new Date().toISOString() },
+    });
+  } catch (e) {
+    errors.push(`Не удалось записать heartbeat синхронизации: ${(e as Error).message}`);
+  }
+
   const posByUnitId = new Map(snapshot.map((s) => [String(s.unitId), s]));
 
   const activeTrips = await prisma.vehicleTrip.findMany({

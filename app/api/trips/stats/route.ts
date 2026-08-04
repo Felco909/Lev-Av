@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { getClientDebtRows, getCarrierDebtRows } from '@/lib/finance/debts-service';
 
 export async function GET(req: Request) {
   try {
@@ -117,68 +118,37 @@ export async function GET(req: Request) {
       prisma.trip.aggregate({ where: { tripDate: { gte: prevMonthStart, lte: prevMonthEnd }, NOT: { status: 'cancelled' } }, _sum: { profitAmd: true, clientRateAmd: true }, _count: true }),
     ]);
 
+    // Просрочка/кассовый разрыв — единственный источник во всей системе:
+    // lib/finance/debts-service.ts (те же getClientDebtRows/getCarrierDebtRows, что
+    // /api/debts, /api/dashboard и /api/day-tasks). Раньше здесь была собственная формула
+    // с fallback-дедлайном через client.paymentTermsDays, которого нет больше нигде в
+    // системе — колокольчик показывал просрочку по заявкам без paymentDueDate, которые
+    // остальная система просрочкой не считает (аудит 01.08.2026, п.2: расхождение
+    // подтверждено на реальных данных, TMS-2026-0060/0061, 4 750 000 ֏).
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
-    const [overdueRaw, cashGapRaw] = await Promise.all([
-      prisma.trip.findMany({
-        where: {
-          status: { notIn: ['new', 'in_progress', 'archived', 'cancelled'] },
-          clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
-          OR: [
-            { paymentDueDate: { not: null } },
-            { unloadDate: { not: null } },
-          ],
-        },
-        select: {
-          id: true, tripNumber: true, paymentDueDate: true, unloadDate: true,
-          clientRateAmd: true, clientRate: true,
-          clientPaidAmountAmd: true, clientPaidAmount: true,
-          client: { select: { name: true, paymentTermsDays: true } },
-        },
-        take: 100,
-      }),
-      prisma.trip.findMany({
-        where: {
-          tripType: 'expedition',
-          status: { notIn: ['archived', 'new', 'in_progress', 'cancelled'] },
-          carrierPaidAmountAmd: { gt: 0 },
-        },
-        select: {
-          id: true, tripNumber: true,
-          clientPaidAmountAmd: true, clientPaidAmount: true,
-          carrierPaidAmountAmd: true, carrierPaidAmount: true,
-        },
-        take: 20,
-      }),
+    const [clientDebtRowsForBell, carrierDebtRowsForBell] = await Promise.all([
+      getClientDebtRows(prisma, todayMidnight),
+      getCarrierDebtRows(prisma, todayMidnight),
     ]);
 
-    const overdueClientPayments = overdueRaw
-      .map((t: any) => {
-        // Effective due date: stored paymentDueDate, else unloadDate + client.paymentTermsDays
-        let effectiveDue: Date | null = t.paymentDueDate ? new Date(t.paymentDueDate) : null;
-        if (!effectiveDue && t.unloadDate && Number(t.client?.paymentTermsDays) > 0) {
-          effectiveDue = new Date(t.unloadDate);
-          effectiveDue.setDate(effectiveDue.getDate() + Number(t.client.paymentTermsDays));
-        }
-        if (!effectiveDue) return null;
-        const dueMs = new Date(effectiveDue).setHours(0, 0, 0, 0);
-        if (dueMs >= todayMidnight.getTime()) return null;
-        const rate = Number(t.clientRateAmd ?? t.clientRate ?? 0);
-        const paid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
-        const remainingAmd = Math.round((rate - paid) * 100) / 100;
-        const daysOverdue = Math.floor((todayMidnight.getTime() - dueMs) / 86400000);
-        return { id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '', remainingAmd, daysOverdue };
-      })
-      .filter((t: any) => t !== null && t.remainingAmd > 0.005)
-      .sort((a: any, b: any) => b.daysOverdue - a.daysOverdue);
+    const overdueClientPayments = clientDebtRowsForBell
+      .filter((r) => r.isOverdue)
+      .map((r) => ({
+        id: r.id,
+        tripNumber: r.tripNumber,
+        clientName: r.entityName,
+        remainingAmd: r.remaining,
+        daysOverdue: r.daysLeft != null ? Math.abs(r.daysLeft) : 0,
+      }))
+      .sort((a, b) => b.daysOverdue - a.daysOverdue);
 
-    const cashGapTrips = cashGapRaw
-      .map((t: any) => {
-        const clientPaid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
-        const carrierPaid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
-        const gapAmd = Math.round((carrierPaid - clientPaid) * 100) / 100;
-        return { id: t.id, tripNumber: t.tripNumber, gapAmd };
-      })
-      .filter((t: any) => t.gapAmd > 0.005);
+    const cashGapDedup = new Map<string, { id: string; tripNumber: string; gapAmd: number }>();
+    for (const r of [...clientDebtRowsForBell, ...carrierDebtRowsForBell]) {
+      if (r.cashGap > 0 && !cashGapDedup.has(r.id)) {
+        cashGapDedup.set(r.id, { id: r.id, tripNumber: r.tripNumber, gapAmd: r.cashGap });
+      }
+    }
+    const cashGapTrips = Array.from(cashGapDedup.values());
 
     return NextResponse.json({
       totalTrips: allTrips?._count ?? 0,

@@ -10,6 +10,7 @@ import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 import { assertDirectWorkflowStatusChange } from '@/lib/trip-workflow-guards';
 import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
+import { validateTripPayload } from '@/lib/trip-payload-validation';
 
 function serializeTrip(trip: any) {
   return {
@@ -76,6 +77,17 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     if (touchedPaymentFields.length > 0) {
       const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'изменение оплаты по заявке');
       if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+    }
+
+    // Написанная, но ранее не подключённая проверка (аудит 01.08.2026, п.5). PUT здесь
+    // и раньше трактовал body как полный набор полей (clientRate ниже берётся ТОЛЬКО из
+    // body, без фолбэка на старое значение) — то есть неполный body уже и до этой правки
+    // тихо обнулял бы ставку/маршрут при сохранении; теперь такой вызов явно отклоняется
+    // вместо тихой порчи данных. Обычная форма (trip-form.tsx) всегда шлёт полный набор
+    // полей — для неё ничего не меняется.
+    const payloadCheck = validateTripPayload(body, { isCreate: false });
+    if (!payloadCheck.ok) {
+      return NextResponse.json({ error: payloadCheck.message }, { status: 400 });
     }
 
     const clientRate = Number(body?.clientRate ?? 0);

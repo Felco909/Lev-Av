@@ -93,13 +93,6 @@ export function assertReopenToAwaitingPaymentTransition(
   return assertDirectWorkflowStatusChange(fromRaw, 'awaiting_payment');
 }
 
-/** @deprecated use assertReopenToAwaitingPaymentTransition */
-export function assertReopenToUnloadedTransition(
-  fromRaw: string | null | undefined,
-): WorkflowGuardResult {
-  return assertReopenToAwaitingPaymentTransition(fromRaw);
-}
-
 /** Статус при создании новой заявки. */
 export function assertInitialTripWorkflowStatus(status: string | null | undefined): WorkflowGuardResult {
   const canonical = canonicalWorkflowTripStatus(status ?? 'new');

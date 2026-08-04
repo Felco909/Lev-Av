@@ -1,5 +1,3 @@
-import { logTripDocAuthTrace } from '@/lib/trip-doc-auth-log';
-
 export type RoleGuardResult =
   | { ok: true; role: string }
   | { ok: false; status: 401 | 403; error: string };
@@ -49,9 +47,6 @@ export const TRIP_DOC_NUMBER_ROLES = ['admin', 'owner', 'director', 'accountant'
  * (GET /api/wialon/config, /api/wialon/fleet-snapshot) доступен всем ролям без этой проверки.
  */
 export const WIALON_CONFIG_ROLES = ['admin', 'owner', 'director'] as const;
-
-/** @deprecated Используйте CLIENT_GLOBAL_DOC_NUMBERING_ROLES или TRIP_DOC_NUMBER_ROLES по контексту. */
-export const CRITICAL_DOC_NUMBERING_ROLES = CLIENT_GLOBAL_DOC_NUMBERING_ROLES;
 
 /** Поля «оплачено на строке заявки» — не путать со ставкой клиента и курсом валюты. */
 export const TRIP_DENORMALIZED_PAYMENT_FIELDS = [
@@ -132,24 +127,4 @@ export function assertRole(
   }
 
   return { ok: true, role };
-}
-
-/**
- * Доступ к номерам счёта/акта на заявке и генерации PDF/DOCX.
- * Достаточно быть залогиненным: роль в JWT на LAN иногда не попадает в session.user,
- * из‑за чего раньше был ложный 403. Права «кто может в систему» уже обеспечены входом + middleware.
- * Опционально: TRIP_DOC_AUTH_DEBUG=1 и передать req — пишет host/origin/наличие cookie в консоль сервера.
- */
-export function assertAuthenticatedForTripDocuments(
-  session: any,
-  actionLabel: string,
-  req?: Request
-): RoleGuardResult {
-  logTripDocAuthTrace(req, session, `assertTripDocs:${actionLabel}`);
-
-  if (!session?.user) {
-    return { ok: false, status: 401, error: 'Не авторизован' };
-  }
-  const role = getSessionRole(session);
-  return { ok: true, role: role || 'authenticated' };
 }
