@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { ArrowLeft, Save, Plus, Trash2, DollarSign, MapPin, Info, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, CheckCircle2, Lock, Unlock, FileUp, Paperclip, X, Wand2, Loader2, Archive, Download, FileText, Eye } from 'lucide-react';
 import { openTripAttachment } from '@/lib/trip-attachment-open';
@@ -18,6 +19,7 @@ import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER, canonicalWo
 import { computeTripProfitAmd, CARRIER_EXPENSE_MARKER } from '@/lib/finance/formulas';
 import { taxCodeIndicatorLabel } from '@/lib/trip-tax-code';
 import { appToast } from '@/lib/app-toast';
+import { hasAnyRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 import { addCalendarDaysFromDateOnly, WARNING_CLIENT_PAYMENT_TERMS } from '@/lib/trip-unload-flow';
 
 const CURRENCIES = ['AMD', 'USD', 'EUR', 'RUB', 'GEL'] as const;
@@ -121,6 +123,12 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [showPayForm, setShowPayForm] = useState<'client' | 'carrier' | null>(null);
   const [savingPay, setSavingPay] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', currency: 'AMD', exchangeRate: '1', paymentDate: '', description: '', method: 'bank_transfer' });
+  // Добавление/удаление оплаты — только admin/owner/director/accountant (см. CLAUDE.md,
+  // TRIP_DENORMALIZED_PAYMENT_ROLES). Раньше кнопка была видна всем ролям и при клике
+  // от диспетчера просто ничего не происходило (сервер отвечал 403, фронт его не показывал) —
+  // теперь скрываем действие заранее и явно объясняем, кто может его выполнить.
+  const { data: session } = useSession();
+  const canManagePayments = hasAnyRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES);
 
   // Documents (attachments)
   interface TripAttachment {
@@ -472,8 +480,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       if (res.ok) {
         setShowPayForm(null);
         await loadPayments();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        appToast.error(err.error || 'Не удалось сохранить оплату');
       }
-    } catch {} finally { setSavingPay(false); }
+    } catch { appToast.error('Ошибка соединения'); } finally { setSavingPay(false); }
   };
 
   const handleDeletePayment = async (id: string) => {
@@ -488,9 +499,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     const msg = `Удалить оплату на ${payment.amount.toLocaleString('ru-RU')} ${CURRENCY_SYMBOLS[payment.currency] || payment.currency}?\n\nДолг ${label} увеличится до ${newDebt.toLocaleString('ru-RU')} ֏`;
     if (!confirm(msg)) return;
     try {
-      await fetch(`/api/payments?id=${id}`, { method: 'DELETE' });
-      await loadPayments();
-    } catch {}
+      const res = await fetch(`/api/payments?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await loadPayments();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        appToast.error(err.error || 'Не удалось удалить оплату');
+      }
+    } catch { appToast.error('Ошибка соединения'); }
   };
 
   const payComputedAmd = payForm.currency === 'AMD'
@@ -1473,22 +1489,26 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               {/* \u041e\u043f\u043b\u0430\u0442\u044b \u043a\u043b\u0438\u0435\u043d\u0442\u0430 */}
               {isEdit && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-end gap-3">
-                    {totalClientAmd - clientPaidAmd > 0 && (
-                      <button type="button" onClick={() => {
-                        const rem = totalClientAmd - clientPaidAmd;
-                        const now = new Date();
-                        const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                        setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
-                        setShowPayForm('client');
-                      }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
+                  {canManagePayments ? (
+                    <div className="flex items-center justify-end gap-3">
+                      {totalClientAmd - clientPaidAmd > 0 && (
+                        <button type="button" onClick={() => {
+                          const rem = totalClientAmd - clientPaidAmd;
+                          const now = new Date();
+                          const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                          setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
+                          setShowPayForm('client');
+                        }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => openPayForm('client')} className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-1">
+                        <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
                       </button>
-                    )}
-                    <button type="button" onClick={() => openPayForm('client')} className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 flex items-center gap-1">
-                      <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
-                    </button>
-                  </div>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground text-right">{"\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043e\u043f\u043b\u0430\u0442\u044b \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0431\u0443\u0445\u0433\u0430\u043b\u0442\u0435\u0440\u0443/\u0434\u0438\u0440\u0435\u043a\u0442\u043e\u0440\u0443/\u0430\u0434\u043c\u0438\u043d\u0443"}</p>
+                  )}
                   {clientPayments.length > 0 && (
                     <div className="space-y-1.5">
                       {clientPayments.map(p => (
@@ -1501,9 +1521,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                             )}
                             {p.description && <span className="text-muted-foreground truncate">{"\u2014 "}{p.description}</span>}
                           </div>
-                          <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canManagePayments && (
+                            <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1664,22 +1686,26 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
                 {isEdit && (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-end gap-3">
-                      {totalCarrierAmd - carrierPaidAmd > 0 && (
-                        <button type="button" onClick={() => {
-                          const rem = totalCarrierAmd - carrierPaidAmd;
-                          const now = new Date();
-                          const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                          setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
-                          setShowPayForm('carrier');
-                        }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
+                    {canManagePayments ? (
+                      <div className="flex items-center justify-end gap-3">
+                        {totalCarrierAmd - carrierPaidAmd > 0 && (
+                          <button type="button" onClick={() => {
+                            const rem = totalCarrierAmd - carrierPaidAmd;
+                            const now = new Date();
+                            const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                            setPayForm({ amount: String(rem), currency: 'AMD', exchangeRate: '1', paymentDate: dateStr, description: '\u041f\u043e\u043b\u043d\u0430\u044f \u043e\u043f\u043b\u0430\u0442\u0430', method: 'bank_transfer' });
+                            setShowPayForm('carrier');
+                          }} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> {"\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e"}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => openPayForm('carrier')} className="text-xs text-orange-600 hover:text-orange-800 dark:text-orange-400 flex items-center gap-1">
+                          <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
                         </button>
-                      )}
-                      <button type="button" onClick={() => openPayForm('carrier')} className="text-xs text-orange-600 hover:text-orange-800 dark:text-orange-400 flex items-center gap-1">
-                        <Plus className="w-3 h-3" /> {"\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043e\u043f\u043b\u0430\u0442\u0443"}
-                      </button>
-                    </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground text-right">{"\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u043e\u043f\u043b\u0430\u0442\u044b \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0431\u0443\u0445\u0433\u0430\u043b\u0442\u0435\u0440\u0443/\u0434\u0438\u0440\u0435\u043a\u0442\u043e\u0440\u0443/\u0430\u0434\u043c\u0438\u043d\u0443"}</p>
+                    )}
                     {carrierPayments.length > 0 && (
                       <div className="space-y-1.5">
                         {carrierPayments.map(p => (
@@ -1692,9 +1718,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                               )}
                               {p.description && <span className="text-muted-foreground truncate">{"\u2014 "}{p.description}</span>}
                             </div>
-                            <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {canManagePayments && (
+                              <button type="button" onClick={() => handleDeletePayment(p.id)} className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 transition p-1 shrink-0" title={"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
