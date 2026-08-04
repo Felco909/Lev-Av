@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
-import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
+import { assertRole, TRIP_PAYMENT_JOURNAL_ROLES } from '@/lib/auth/role-guard';
 
 /**
  * Recalculate paid totals & payment status for a trip (both client and carrier).
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'создание платежа');
+  const guard = assertRole(session, TRIP_PAYMENT_JOURNAL_ROLES, 'создание платежа');
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
   const body = await req.json();
   const { tripId, amount, currency, exchangeRate, paymentDate, method, description, type } = body;
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'удаление платежа');
+  const guard = assertRole(session, TRIP_PAYMENT_JOURNAL_ROLES, 'удаление платежа');
   if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });

@@ -19,7 +19,7 @@ import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER, canonicalWo
 import { computeTripProfitAmd, CARRIER_EXPENSE_MARKER } from '@/lib/finance/formulas';
 import { taxCodeIndicatorLabel } from '@/lib/trip-tax-code';
 import { appToast } from '@/lib/app-toast';
-import { hasAnyRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
+import { hasAnyRole, TRIP_PAYMENT_JOURNAL_ROLES } from '@/lib/auth/role-guard';
 import { addCalendarDaysFromDateOnly, WARNING_CLIENT_PAYMENT_TERMS } from '@/lib/trip-unload-flow';
 
 const CURRENCIES = ['AMD', 'USD', 'EUR', 'RUB', 'GEL'] as const;
@@ -123,12 +123,13 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [showPayForm, setShowPayForm] = useState<'client' | 'carrier' | null>(null);
   const [savingPay, setSavingPay] = useState(false);
   const [payForm, setPayForm] = useState({ amount: '', currency: 'AMD', exchangeRate: '1', paymentDate: '', description: '', method: 'bank_transfer' });
-  // Добавление/удаление оплаты — только admin/owner/director/accountant (см. CLAUDE.md,
-  // TRIP_DENORMALIZED_PAYMENT_ROLES). Раньше кнопка была видна всем ролям и при клике
-  // от диспетчера просто ничего не происходило (сервер отвечал 403, фронт его не показывал) —
-  // теперь скрываем действие заранее и явно объясняем, кто может его выполнить.
+  // Добавление/удаление оплаты через журнал — admin/owner/director/accountant/dispatcher
+  // (TRIP_PAYMENT_JOURNAL_ROLES, решение владельца бизнеса 2026-08-04). Раньше кнопка была
+  // видна всем ролям и при клике от диспетчера ничего не происходило (сервер отвечал 403,
+  // фронт его не показывал) — теперь список ролей на фронте и бэке синхронизирован,
+  // а для ролей вне списка кнопка скрывается с пояснением, а не молча падает.
   const { data: session } = useSession();
-  const canManagePayments = hasAnyRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES);
+  const canManagePayments = hasAnyRole(session, TRIP_PAYMENT_JOURNAL_ROLES);
 
   // Documents (attachments)
   interface TripAttachment {

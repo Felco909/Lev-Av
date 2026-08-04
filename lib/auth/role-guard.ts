@@ -14,6 +14,15 @@ export const KNOWN_USER_ROLES = ['admin', 'owner', 'director', 'accountant', 'di
 export const CRITICAL_FINANCE_FIELDS_ROLES = ['admin', 'owner', 'director', 'accountant'] as const;
 export const TRIP_DENORMALIZED_PAYMENT_ROLES = CRITICAL_FINANCE_FIELDS_ROLES;
 /**
+ * Создание/удаление оплаты через журнал (POST/DELETE /api/payments) — отдельно от
+ * TRIP_DENORMALIZED_PAYMENT_ROLES выше. Диспетчер работает с заявками и клиентами
+ * весь день и по решению владельца бизнеса (2026-08-04) допущен вносить оплаты через
+ * журнал; прямая правка денормализованных сумм оплаты (clientPaidAmount и т.п.) в обход
+ * журнала (PUT /api/trips/[id]) — по-прежнему только TRIP_DENORMALIZED_PAYMENT_ROLES,
+ * это разные операции с разным риском (журнал пересчитывает сумму сам, прямая правка — нет).
+ */
+export const TRIP_PAYMENT_JOURNAL_ROLES = ['admin', 'owner', 'director', 'accountant', 'dispatcher'] as const;
+/**
  * Финансовые поля рейса машины (зарплата, суточные ×1-4, прочие расходы, топливо,
  * доп. расходы автопарка FleetExpense) — те же роли, что и для оплат заявки. Машина,
  * водитель, даты, статус рейса — обычная операционная работа диспетчера, эта проверка
