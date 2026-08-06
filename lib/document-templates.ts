@@ -68,6 +68,18 @@ function formatDatePdf(d: string | Date): string {
 
 function today(): string { return formatDateShort(new Date()); }
 
+/**
+ * Единственный источник строки НДС для счёта и акта (аудит 2026-08-06: акт вообще
+ * не выводил НДС, из-за чего счёт и акт по одной и той же перевозке расходились).
+ * Ставка НДС не хранится как отдельное поле в БД — источник истины это значение,
+ * введённое один раз в редакторе документов (docEditorData.ndsTax) и переданное
+ * ОДНИМ overrides-объектом сразу для обоих документов в generate-docs/route.ts,
+ * поэтому этой функции достаточно, чтобы оба шаблона показывали одно и то же.
+ */
+function resolveNdsTaxLabel(ov?: DocOverrides): string {
+  return ov?.ndsTax || 'НДС 0%';
+}
+
 export interface DocOverrides {
   docNumber?: string;
   docDate?: string;
@@ -143,7 +155,7 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
   const amount = ov?.amount ?? trip.clientRate;
   const cur = ov?.currency || trip.currency || 'AMD';
   const curName = CURRENCY_NAMES[cur] || cur;
-  const ndsTax = ov?.ndsTax || '\u041D\u0414\u0421 0%';
+  const ndsTax = resolveNdsTaxLabel(ov);
   const notes = ov?.notes || '';
 
   const co = ov?.company || {};
@@ -260,6 +272,7 @@ export function generateActHtml(trip: TripData, ov?: DocOverrides): string {
   const amount = ov?.amount ?? trip.clientRate;
   const cur = ov?.currency || trip.currency || 'AMD';
   const curName = CURRENCY_NAMES[cur] || cur;
+  const ndsTax = resolveNdsTaxLabel(ov);
   const co = ov?.company || {};
   const coName = co.company_name || '';
   const coInn = co.company_inn || '';
@@ -321,7 +334,7 @@ export function generateActHtml(trip: TripData, ov?: DocOverrides): string {
         <td>${serviceDesc}</td>
         <td class="num">\u0410\u0432/\u043F\u0440</td>
         <td class="num">1</td>
-        <td class="money">${formatAmountPlain(amount)}</td>
+        <td class="money">${formatAmountPlain(amount)}<br/><small>${ndsTax}</small></td>
       </tr>
       ${veh || trailer || driverName ? `<tr>
         <td></td>
