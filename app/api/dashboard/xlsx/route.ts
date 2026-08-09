@@ -32,7 +32,7 @@ export async function GET(req: Request) {
     if (dateFrom || dateTo) {
       fuelWhere.departureDate = {};
       if (dateFrom) fuelWhere.departureDate.gte = new Date(dateFrom);
-      if (dateTo) fuelWhere.departureDate.lte = new Date(dateTo);
+      if (dateTo) fuelWhere.departureDate.lte = new Date(dateTo + 'T23:59:59');
     }
     const fuelVehicleTrips = await prisma.vehicleTrip.findMany({
       where: fuelWhere,

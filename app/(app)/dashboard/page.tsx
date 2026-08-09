@@ -318,14 +318,16 @@ export default function DashboardPage() {
   const applyFilters = () => { setAppliedFrom(dateFrom); setAppliedTo(dateTo); };
 
   const handleDownloadXLSX = async () => {
-    const res = await fetch('/api/dashboard/xlsx');
+    const params = new URLSearchParams({ dateFrom: appliedFrom, dateTo: appliedTo });
+    const res = await fetch(`/api/dashboard/xlsx?${params}`);
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = `dashboard_${ymd(new Date())}.xlsx`; a.click(); URL.revokeObjectURL(url);
   };
   const handleDownloadPDF = async () => {
-    const res = await fetch('/api/dashboard/pdf');
+    const params = new URLSearchParams({ dateFrom: appliedFrom, dateTo: appliedTo });
+    const res = await fetch(`/api/dashboard/pdf?${params}`);
     if (!res.ok) return;
     const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = `dashboard_${ymd(new Date())}.pdf`; a.click(); URL.revokeObjectURL(url);
