@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { buildContentDisposition } from '@/lib/content-disposition';
 
 export async function GET(req: Request) {
   try {
@@ -16,7 +15,6 @@ export async function GET(req: Request) {
     const tripType = searchParams.get('tripType');
     const clientId = searchParams.get('clientId');
     const routeFilter = searchParams.get('route');
-    const format = searchParams.get('format') || 'json';
 
     // Отменённая заявка (Этап 4 аудита) — не в отчёт по прибыли, сделка не состоялась
     // (остаётся видна в истории — на /trips, в календаре, на своей странице).
@@ -217,23 +215,6 @@ export async function GET(req: Request) {
 
     // --- All clients for filter ---
     const allClients = await prisma.client.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
-
-    if (format === 'csv') {
-      const BOM = '\uFEFF';
-      const header = '№ заявки;Дата;Клиент;Откуда;Куда;Тип;Статус;Валюта;Курс;Ставка клиента;Ставка AMD;Ставка перевозчика;Расходы;Прибыль;Прибыль AMD;Курс. разница;Машина;Водитель;Перевозчик';
-      const csvRows = rows.map(r =>
-        `${r.tripNumber};${r.date};${r.client};${r.routeFrom};${r.routeTo};${r.tripType};${r.status};${r.currency || 'AMD'};${r.exchangeRate || 1};${r.clientRate};${r.clientRateAmd || r.clientRate};${r.carrierRate};${r.expenses};${r.profit};${r.profitAmd || r.profit};${r.exchangeDiff || 0};${r.vehicle};${r.driver};${r.carrier}`
-      );
-      csvRows.push('');
-      csvRows.push(`Итого;;;;;;;;;${totals.totalRevenue};${totals.totalRevenueAmd};;${totals.totalExpenses};${totals.totalProfit};${totals.totalProfitAmd};${totals.totalExchangeDiff};;;`);
-      const csv = BOM + header + '\n' + csvRows.join('\n');
-      return new NextResponse(csv, {
-        headers: {
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': buildContentDisposition('attachment', 'report_trips.csv'),
-        },
-      });
-    }
 
     return NextResponse.json({
       rows,

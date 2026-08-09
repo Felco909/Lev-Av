@@ -635,7 +635,12 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {!isHidden('finance-center') && (
         <div className="bg-card rounded-xl border shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2"><DQDot state={financeState} /><h3 className="text-sm font-bold">Финансовый центр <span className="text-[10px] font-normal text-muted-foreground">последние 6 мес.</span></h3><HideWidgetBtn onHide={() => toggleWidget('finance-center')} /></div>
+          <div className="flex items-center gap-2 mb-2"><DQDot state={financeState} /><h3 className="text-sm font-bold">Финансовый центр</h3><HideWidgetBtn onHide={() => toggleWidget('finance-center')} /></div>
+          {/* TMS-AUDIT-0036: график всегда за последние 6 календарных месяцев, не подчиняется
+              общему фильтру периода Dashboard выше — подпись сделана заметнее (та же форма,
+              что и у "Рейтинги", TMS-AUDIT-0034/0026), чтобы не терялась среди виджетов,
+              послушных общему фильтру. */}
+          <p className="text-[10px] text-amber-700 bg-amber-50 inline-block px-1.5 py-0.5 rounded -mt-1 mb-2">Последние 6 мес., без учёта периода выше</p>
           <div className="h-44">
             {financeState === 'loading' ? <div className="h-full flex items-center justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
               : financeState === 'error' ? <div className="h-full flex items-center justify-center text-xs text-red-500">Не удалось загрузить. <button onClick={loadFinance} className="underline ml-1">Повторить</button></div>

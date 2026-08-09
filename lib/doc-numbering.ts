@@ -13,6 +13,10 @@ export async function getNextDocNumber(
   const currentYear = new Date().getFullYear();
 
   const result = await prisma.$transaction(async (tx) => {
+    // TMS-AUDIT-0019: без блокировки строки два параллельных вызова для одного клиента могут
+    // прочитать один и тот же lastInvoiceNum/lastActNum до того, как любой из них запишет —
+    // получаются задвоенные номера документов. FOR UPDATE держит вторую транзакцию до коммита первой.
+    await tx.$queryRaw`SELECT id FROM clients WHERE id = ${clientId} FOR UPDATE`;
     const client = await tx.client.findUnique({
       where: { id: clientId },
       select: {
@@ -65,6 +69,8 @@ export async function getNextDocNumberPair(
   const currentYear = new Date().getFullYear();
 
   const result = await prisma.$transaction(async (tx) => {
+    // TMS-AUDIT-0019: см. пояснение в getNextDocNumber выше — блокируем строку клиента.
+    await tx.$queryRaw`SELECT id FROM clients WHERE id = ${clientId} FOR UPDATE`;
     const client = await tx.client.findUnique({
       where: { id: clientId },
       select: {

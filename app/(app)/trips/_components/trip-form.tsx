@@ -16,6 +16,7 @@ import {
   tripSectionToStorageCategory,
 } from '@/lib/trip-attachment-service';
 import { formatCurrency, EXPENSE_TYPE_MAP, STATUS_MAP, STATUS_ORDER, canonicalWorkflowTripStatus, RATE_INPUT_CLASS, parseRateInput } from '@/lib/utils';
+import { TRIP_STATUS_LABELS_RU } from '@/lib/trip-workflow-filters';
 import { computeTripProfitAmd, CARRIER_EXPENSE_MARKER } from '@/lib/finance/formulas';
 import { taxCodeIndicatorLabel } from '@/lib/trip-tax-code';
 import { appToast } from '@/lib/app-toast';
@@ -1016,14 +1017,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-1 flex-wrap">
               {(['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed'] as const).map((key, idx) => {
-                const FLOW_LABELS: Record<string, string> = {
-                  new: 'Новая',
-                  in_progress: 'В пути',
-                  unloaded: 'Разгружен',
-                  awaiting_payment: 'На оплату',
-                  sverka: 'Сверка',
-                  completed: 'Завершён',
-                };
+                // TMS-AUDIT-0044: единый источник подписей статуса (lib/trip-workflow-filters.ts)
+                // вместо локальной копии, разошедшейся текстом ("Завершён" vs "Оплачен / Завершён").
+                const FLOW_LABELS = TRIP_STATUS_LABELS_RU;
                 const FLOW_COLORS: Record<string, string> = {
                   new: 'bg-blue-500',
                   in_progress: 'bg-amber-500',

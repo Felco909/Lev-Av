@@ -13,6 +13,7 @@ import { validateTripArchiveTransition } from '@/lib/trip-archive-rules';
 import { canonicalWorkflowTripStatus } from '@/lib/utils';
 import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
 import { validateTripPayload } from '@/lib/trip-payload-validation';
+import { deleteStoredFile } from '@/lib/attachment-service';
 
 function serializeTrip(trip: any) {
   return {
@@ -530,6 +531,16 @@ export async function DELETE(req: Request, { params: paramsPromise }: { params: 
         { error: 'Нельзя удалить заявку, в ней есть данные' },
         { status: 400 }
       );
+    }
+
+    // TMS-AUDIT-0018: каскад БД чистит строки TripAttachment, но не физические файлы на диске —
+    // удаляем их явно перед удалением заявки (best-effort, не блокирует удаление при сбое).
+    const attachments = await prisma.tripAttachment.findMany({
+      where: { tripId },
+      select: { cloudStoragePath: true },
+    });
+    for (const a of attachments) {
+      await deleteStoredFile(a.cloudStoragePath).catch(() => {});
     }
 
     await prisma.trip.delete({ where: { id: tripId } });

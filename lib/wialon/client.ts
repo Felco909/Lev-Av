@@ -483,7 +483,10 @@ export interface WialonOfficialTripReport {
 
 function rawValueByHeaderType(table: { header_type: string[]; totalRaw: Array<{ v: number; vt: number }> }, type: string): number {
   const idx = table.header_type.indexOf(type);
-  return idx === -1 ? 0 : (table.totalRaw[idx]?.v ?? 0);
+  const v = idx === -1 ? 0 : (table.totalRaw[idx]?.v ?? 0);
+  // TMS-AUDIT-0027: шум датчика/сбой отчёта Wialon может отдать отрицательное значение —
+  // клэмпим на 0, чтобы оно не утекло как настоящий отрицательный расход/пробег в БД и агрегаты.
+  return Math.max(0, v);
 }
 
 /**
@@ -585,7 +588,7 @@ export async function getOfficialTripReport(unitId: number, dateFrom: Date, date
   const mileageAllFromStats = parseStatNumber(applyResult.reportResult?.stats, 'Пробег по всем сообщениям');
 
   return {
-    mileageAllKm: mileageAllFromStats ?? Math.round((rawValueByHeaderType(table, 'mileage_all') / 1000) * 10) / 10,
+    mileageAllKm: Math.max(0, mileageAllFromStats ?? Math.round((rawValueByHeaderType(table, 'mileage_all') / 1000) * 10) / 10),
     mileageTripsKm: Math.round((rawValueByHeaderType(table, 'mileage') / 1000) * 10) / 10,
     fuelConsumedL: Math.round(rawValueByHeaderType(table, 'fuel_consumption_fls') * 10) / 10,
     avgFuelConsumptionPer100Km: Math.round(rawValueByHeaderType(table, 'avg_fuel_consumption_fls') * 10) / 10,

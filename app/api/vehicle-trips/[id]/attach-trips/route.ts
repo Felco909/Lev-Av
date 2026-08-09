@@ -22,7 +22,7 @@ export async function POST(req: Request, { params: paramsPromise }: { params: Pr
       return NextResponse.json({ error: 'Не указаны заявки для привязки' }, { status: 400 });
     }
 
-    const result = await attachTripsToVehicleTrip(params.id, tripIds);
+    const result = await attachTripsToVehicleTrip(params.id, tripIds, (session as any)?.user?.id ?? null);
     return NextResponse.json(result);
   } catch (e: any) {
     console.error('[vehicle-trips/attach-trips] error:', e);

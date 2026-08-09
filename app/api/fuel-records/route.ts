@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { assertRole, VEHICLE_TRIP_FINANCIAL_ROLES } from '@/lib/auth/role-guard';
 
 export async function GET(req: Request) {
   try {
@@ -28,6 +29,8 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, 'создание записи о заправке');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const body = await req.json();
     const { vehicleId, vehicleTripId, date, liters, cost, mileage, comment } = body;
     if (!vehicleId || !date || !liters || mileage === undefined) {

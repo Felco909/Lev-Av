@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getOperationalSummary } from '@/lib/dashboard/operational-summary';
+import { TRIP_STATUS_LABELS_RU } from '@/lib/trip-workflow-filters';
 
 function round1(value: number): number {
   return Math.round((Number(value) || 0) * 10) / 10;
@@ -119,11 +120,6 @@ export async function GET(req: Request) {
       }),
     ]);
 
-    const STATUS_LABELS_RU: Record<string, string> = {
-      new: 'Новая', in_progress: 'В пути', unloaded: 'Разгружен', awaiting_payment: 'На оплату',
-      sverka: 'Сверка', completed: 'Завершён', archived: 'Архив', cancelled: 'Отменена',
-    };
-
     type FeedEvent = { id: string; type: string; at: string; label: string; tripId?: string | null };
 
     const events: FeedEvent[] = [];
@@ -131,8 +127,8 @@ export async function GET(req: Request) {
       if (h.action === 'created') {
         events.push({ id: `th-${h.id}`, type: 'trip_created', at: h.createdAt.toISOString(), tripId: h.tripId, label: `Заявка создана — ${h.trip?.tripNumber ?? ''}` });
       } else if (h.action === 'status_changed' && h.field === 'status') {
-        const from = STATUS_LABELS_RU[h.oldValue ?? ''] ?? h.oldValue ?? '—';
-        const to = STATUS_LABELS_RU[h.newValue ?? ''] ?? h.newValue ?? '—';
+        const from = TRIP_STATUS_LABELS_RU[h.oldValue ?? ''] ?? h.oldValue ?? '—';
+        const to = TRIP_STATUS_LABELS_RU[h.newValue ?? ''] ?? h.newValue ?? '—';
         events.push({ id: `th-${h.id}`, type: 'status_changed', at: h.createdAt.toISOString(), tripId: h.tripId, label: `Статус изменён: «${from}» → «${to}» — ${h.trip?.tripNumber ?? ''}` });
       }
     }

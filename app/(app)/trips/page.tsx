@@ -8,6 +8,14 @@ import { formatCurrency, formatDate, STATUS_MAP, TRIP_TYPE_MAP } from '@/lib/uti
 
 const PAGE_SIZE = 50;
 
+// TMS-AUDIT-0044: было задублировано дважды в этом файле (клиентская и перевозчицкая колонки
+// оплаты) — один источник.
+const PAYMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  not_paid: { label: 'Не опл.', color: 'bg-red-100 text-red-700' },
+  partially_paid: { label: 'Частично', color: 'bg-amber-100 text-amber-700' },
+  paid: { label: 'Оплачено', color: 'bg-green-100 text-green-700' },
+};
+
 type SortBy = 'tripDate' | 'createdAt';
 type SortDir = 'asc' | 'desc';
 
@@ -178,12 +186,7 @@ export default function TripsPage() {
         <td className="px-4 py-3 hidden lg:table-cell">
           {(() => {
             const cps = t?.clientPaymentStatus || 'not_paid';
-            const cpMap: Record<string, { label: string; color: string }> = {
-              not_paid: { label: 'Не опл.', color: 'bg-red-100 text-red-700' },
-              partially_paid: { label: 'Частично', color: 'bg-amber-100 text-amber-700' },
-              paid: { label: 'Оплачено', color: 'bg-green-100 text-green-700' },
-            };
-            const cpInfo = cpMap[cps] || cpMap.not_paid;
+            const cpInfo = PAYMENT_STATUS_MAP[cps] || PAYMENT_STATUS_MAP.not_paid;
             const paidAmd = Number(t?.clientPaidAmountAmd ?? 0);
             const totalAmd = Number(t?.clientRateAmd ?? t?.clientRate ?? 0);
             return (
@@ -199,12 +202,7 @@ export default function TripsPage() {
         <td className="px-4 py-3 hidden lg:table-cell">
           {t?.tripType === 'expedition' ? (() => {
             const cps = t?.carrierPaymentStatus || 'not_paid';
-            const cpMap: Record<string, { label: string; color: string }> = {
-              not_paid: { label: 'Не опл.', color: 'bg-red-100 text-red-700' },
-              partially_paid: { label: 'Частично', color: 'bg-amber-100 text-amber-700' },
-              paid: { label: 'Оплачено', color: 'bg-green-100 text-green-700' },
-            };
-            const cpInfo = cpMap[cps] || cpMap.not_paid;
+            const cpInfo = PAYMENT_STATUS_MAP[cps] || PAYMENT_STATUS_MAP.not_paid;
             const cashGap = t?.status !== 'paid' && (cps === 'paid' || Number(t?.carrierPaidAmount ?? 0) > 0);
             return (
               <div className="flex items-center gap-1">

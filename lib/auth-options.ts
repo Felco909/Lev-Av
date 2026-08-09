@@ -33,6 +33,22 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.role = user.role;
         token.id = user.id;
+        token.roleCheckedAt = Date.now();
+        return token;
+      }
+      // TMS-AUDIT-0010: токен живёт до 30 дней (default maxAge), а роль пишется в него только
+      // при входе — понижение/деактивация пользователя не действовало до истечения токена.
+      // Перечитываем роль из БД не чаще раза в минуту (не при каждом запросе — иначе лишний
+      // SELECT на каждый page load/getServerSession).
+      const lastChecked = typeof token.roleCheckedAt === 'number' ? token.roleCheckedAt : 0;
+      if (Date.now() - lastChecked > 60_000 && token.id) {
+        try {
+          const dbUser = await prisma.user.findUnique({ where: { id: token.id }, select: { role: true } });
+          token.role = dbUser?.role ?? null; // null — пользователь удалён, assertRole везде отклонит
+          token.roleCheckedAt = Date.now();
+        } catch {
+          // сбой БД — не рвём сессию, используем роль из уже выданного токена
+        }
       }
       return token;
     },

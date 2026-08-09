@@ -186,8 +186,8 @@ export interface BulkAttachResult {
  * Массовая привязка нескольких заявок к рейсу (карточка рейса, предложение при создании).
  * Заявка, уже привязанная к другому рейсу той же машины (любого статуса), переносится.
  */
-export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: string[]): Promise<BulkAttachResult> {
-  const vt = await prisma.vehicleTrip.findUnique({ where: { id: vehicleTripId }, select: { vehicleId: true, driverId: true } });
+export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: string[], userId: string | null = null): Promise<BulkAttachResult> {
+  const vt = await prisma.vehicleTrip.findUnique({ where: { id: vehicleTripId }, select: { vehicleId: true, driverId: true, status: true } });
   if (!vt) return { attached: [], skipped: tripIds.map((id) => ({ tripId: id, reason: 'Рейс не найден' })), warnings: [] };
 
   const trips = await prisma.trip.findMany({
@@ -208,6 +208,19 @@ export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: s
   }
   if (attached.length > 0) {
     await prisma.trip.updateMany({ where: { id: { in: attached } }, data: { vehicleTripId } });
+    // TMS-AUDIT-0028: рейс осознанно редактируем в любом статусе (переработка 2026-07-23),
+    // поэтому не блокируем/не требуем подтверждения — но если рейс УЖЕ завершён, его
+    // финансовый итог меняется задним числом без следа. Пишем аудит-событие (тот же принцип,
+    // что и для 0025 — только след, без роли/статуса/подтверждения).
+    if (vt.status === 'completed') {
+      const attachedTrips = trips.filter((t) => attached.includes(t.id));
+      await prisma.vehicleTripEvent.createMany({
+        data: attachedTrips.map((t) => ({
+          vehicleTripId, action: 'manual_edit', field: 'attachedTripOnClosedTrip',
+          oldValue: null, newValue: t.tripNumber, userId,
+        })),
+      });
+    }
   }
   return { attached, skipped, warnings };
 }
@@ -224,9 +237,22 @@ export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: s
  * в VehicleTripEvent).
  */
 export async function detachTripFromVehicleTrip(tripId: string, userId: string | null = null, userName: string | null = null): Promise<void> {
-  const before = await prisma.trip.findUnique({ where: { id: tripId }, select: { vehicleTripId: true } });
+  const before = await prisma.trip.findUnique({
+    where: { id: tripId },
+    select: { tripNumber: true, vehicleTripId: true, vehicleTrip: { select: { status: true } } },
+  });
   await prisma.trip.update({ where: { id: tripId }, data: { vehicleTripId: null } });
   await recordTripHistory(tripId, 'vehicle_trip_detached', userId, userName, [
     { field: 'vehicleTripId', oldValue: before?.vehicleTripId ?? null, newValue: null },
   ]);
+  // TMS-AUDIT-0028: см. пояснение в attachTripsToVehicleTrip — отвязка от уже завершённого
+  // рейса тоже задним числом меняет его итог, логируем тем же способом.
+  if (before?.vehicleTripId && before.vehicleTrip?.status === 'completed') {
+    await prisma.vehicleTripEvent.create({
+      data: {
+        vehicleTripId: before.vehicleTripId, action: 'manual_edit', field: 'attachedTripOnClosedTrip',
+        oldValue: before.tripNumber, newValue: null, userId,
+      },
+    });
+  }
 }

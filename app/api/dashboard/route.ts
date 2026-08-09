@@ -277,21 +277,28 @@ export async function GET(req: Request) {
     // \u2500\u2500 7. EXPIRING DOCUMENTS \u2500\u2500
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-    const expiringDocs = await prisma.documentExpiry.findMany({
+    // TMS-AUDIT-0029: DocumentExpiry — полиморфная связь (entityType/entityId), не настоящий FK,
+    // поэтому нельзя отфильтровать архивные машины прямо в WHERE — берём с запасом (50 вместо 10)
+    // и после докладки статуса машины отсекаем архивные, только потом режем до 10.
+    const expiringDocsRaw = await prisma.documentExpiry.findMany({
       where: { expiryDate: { lte: thirtyDaysFromNow } },
       orderBy: { expiryDate: 'asc' },
-      take: 10,
+      take: 50,
     });
 
     // Enrich with entity names
-    const vehicleIds = [...new Set(expiringDocs.filter(i => i.entityType === 'vehicle').map(i => i.entityId))];
-    const driverIds = [...new Set(expiringDocs.filter(i => i.entityType === 'driver').map(i => i.entityId))];
-    const carrierIds = [...new Set(expiringDocs.filter(i => i.entityType === 'carrier').map(i => i.entityId))];
+    const vehicleIds = [...new Set(expiringDocsRaw.filter(i => i.entityType === 'vehicle').map(i => i.entityId))];
+    const driverIds = [...new Set(expiringDocsRaw.filter(i => i.entityType === 'driver').map(i => i.entityId))];
+    const carrierIds = [...new Set(expiringDocsRaw.filter(i => i.entityType === 'carrier').map(i => i.entityId))];
     const [vehicles, drivers, carriers] = await Promise.all([
-      vehicleIds.length ? prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, plateNumber: true, brand: true, model: true } }) : [],
+      vehicleIds.length ? prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, plateNumber: true, brand: true, model: true, status: true } }) : [],
       driverIds.length ? prisma.driver.findMany({ where: { id: { in: driverIds } }, select: { id: true, fullName: true } }) : [],
       carrierIds.length ? prisma.carrier.findMany({ where: { id: { in: carrierIds } }, select: { id: true, name: true } }) : [],
     ]);
+    const archivedVehicleIds = new Set(vehicles.filter(v => v.status === 'archived').map(v => v.id));
+    const expiringDocs = expiringDocsRaw
+      .filter(i => !(i.entityType === 'vehicle' && archivedVehicleIds.has(i.entityId)))
+      .slice(0, 10);
     const nameMap: Record<string, string> = {};
     vehicles.forEach(v => { nameMap[v.id] = `${v.brand} ${v.model} (${v.plateNumber})`; });
     drivers.forEach(d => { nameMap[d.id] = d.fullName; });

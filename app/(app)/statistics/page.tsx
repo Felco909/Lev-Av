@@ -58,7 +58,10 @@ export default function StatisticsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl lg:text-2xl font-display font-bold tracking-tight">Статистика</h1>
-          <p className="text-sm text-muted-foreground">Аналитика по водителям, машинам и перевозчикам</p>
+          {/* TMS-AUDIT-0037: страница не принимает dateFrom/dateTo и всегда считает за всю
+              историю — явно обозначаем это, а не оставляем подпись без охвата, которую легко
+              спутать с фильтруемыми отчётами. */}
+          <p className="text-sm text-muted-foreground">Аналитика по водителям, машинам и перевозчикам — за всё время</p>
         </div>
         <Link href="/reports" className="flex items-center gap-1.5 text-sm text-primary hover:underline">
           Отчёты <ArrowRight className="w-4 h-4" />

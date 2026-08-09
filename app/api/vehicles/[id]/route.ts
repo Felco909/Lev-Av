@@ -106,26 +106,33 @@ export async function DELETE(req: Request, { params: paramsPromise }: { params: 
     if (!existing) return NextResponse.json({ error: 'Не найдена' }, { status: 404 });
     if (existing.status === 'archived') return NextResponse.json({ success: true, archived: true, message: 'Машина уже в архиве.' });
 
-    const [vehicleTrips, fleetExpenses, fuelRecords, maintenances, serviceRecords, tireSets, partPurchases, driverHistory, trips] = await Promise.all([
+    const [vehicleTrips, fleetExpenses, fuelRecords, serviceRecords, tireSets, partPurchases, driverHistory, trips] = await Promise.all([
       prisma.vehicleTrip.count({ where: { vehicleId } }),
       prisma.fleetExpense.count({ where: { vehicleId } }),
       prisma.fuelRecord.count({ where: { vehicleId } }),
-      prisma.maintenance.count({ where: { vehicleId } }),
       prisma.serviceRecord.count({ where: { vehicleId } }),
       prisma.tireSet.count({ where: { vehicleId } }),
       prisma.partPurchase.count({ where: { vehicleId } }),
       prisma.driverVehicleHistory.count({ where: { vehicleId } }),
       prisma.trip.count({ where: { vehicleId } }),
     ]);
-    const totalDependents = vehicleTrips + fleetExpenses + fuelRecords + maintenances + serviceRecords + tireSets + partPurchases + driverHistory + trips;
+    // TMS-AUDIT-0046: модель Maintenance удалена из подсчёта зависимостей — никогда не имела
+    // пути записи, таблица была всегда пуста.
+    const totalDependents = vehicleTrips + fleetExpenses + fuelRecords + serviceRecords + tireSets + partPurchases + driverHistory + trips;
 
     await prisma.vehicle.update({ where: { id: vehicleId }, data: { status: 'archived' } });
+    // TMS-AUDIT-0030: шины архивной машины должны попадать на "склад", а не висеть
+    // "установленными" на машине, которая больше не эксплуатируется.
+    await prisma.tireSet.updateMany({
+      where: { vehicleId, status: 'installed' },
+      data: { status: 'warehouse' },
+    });
 
     if (totalDependents > 0) {
       return NextResponse.json({
         success: true,
         archived: true,
-        message: `Машина архивирована (не удалена) — сохранена история: рейсов ${vehicleTrips}, заявок ${trips}, расходов парка ${fleetExpenses}, заправок ${fuelRecords}, ТО ${maintenances + serviceRecords}, шин ${tireSets}, закупок запчастей ${partPurchases}, смен водителя ${driverHistory}.`,
+        message: `Машина архивирована (не удалена) — сохранена история: рейсов ${vehicleTrips}, заявок ${trips}, расходов парка ${fleetExpenses}, заправок ${fuelRecords}, ТО ${serviceRecords}, шин ${tireSets}, закупок запчастей ${partPurchases}, смен водителя ${driverHistory}.`,
       });
     }
     return NextResponse.json({ success: true, archived: true, message: 'Машина архивирована.' });

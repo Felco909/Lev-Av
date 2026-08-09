@@ -41,7 +41,7 @@ export function DirectorPanel({
     <PanelShell
       icon={<UserCog className="h-4 w-4 text-purple-600" />}
       title="Директор"
-      subtitle="Финансовый срез дня и риски"
+      subtitle="Финансовый срез за месяц и риски"
       isExpanded={isExpanded}
       isCollapsed={isCollapsed}
       isDimmed={isDimmed}

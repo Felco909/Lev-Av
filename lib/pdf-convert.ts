@@ -118,7 +118,14 @@ async function convertFileToPdf(sourcePath: string, tmpDir: string): Promise<Buf
     '--headless', '--convert-to', 'pdf', '--outdir', tmpDir, sourcePath,
   ]);
 
-  return await fs.readFile(pdfPath);
+  const result = await fs.readFile(pdfPath);
+  // TMS-AUDIT-0039: soffice может завершиться с кодом 0, но оставить битый/0-байтовый файл
+  // (наблюдалось при сбое рендеринга) — без этой проверки роут отдал бы пользователю HTTP 200
+  // с нерабочим PDF без единого предупреждения.
+  if (result.length < 100 || result.toString('latin1', 0, 4) !== '%PDF') {
+    throw new Error(`LibreOffice вернул повреждённый PDF (${result.length} байт): ${pdfPath}`);
+  }
+  return result;
 }
 
 export async function convertDocxBufferToPdf(docxBuffer: Buffer): Promise<Buffer> {

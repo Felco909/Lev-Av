@@ -9,6 +9,20 @@ export const dynamic = 'force-dynamic';
 
 const FINANCIAL_ACTION_LABEL = 'изменение финансовых полей рейса (зарплата/суточные/расходы/топливо)';
 
+/**
+ * TMS-AUDIT-0030: денежные поля рейса раньше проверялись на >=0 только через min="0" на
+ * фронте — сервер принимал отрицательные значения без вопросов. Общая точка проверки для
+ * POST/PUT.
+ */
+function findNegativeFinancialField(body: any): string | null {
+  const fields = ['salary', 'perDiem', 'perDiem2', 'perDiem3', 'perDiem4', 'otherExpenses', 'fuelLiters', 'fuelCost'];
+  for (const f of fields) {
+    const v = body[f];
+    if (v !== undefined && v !== null && v !== '' && parseFloat(v) < 0) return f;
+  }
+  return null;
+}
+
 /*
  * Следующий номер рейса ДЛЯ ЭТОЙ МАШИНЫ — не глобальный счётчик. На практике номер рейса
  * всегда означает "рейс №N этой машины" (так вводили вручную во всех реальных записях —
@@ -82,6 +96,11 @@ export async function POST(req: NextRequest) {
 
   if (!vehicleId || !departureDate) {
     return NextResponse.json({ error: '\u041e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u043e\u043b\u044f: \u043c\u0430\u0448\u0438\u043d\u0430, \u0434\u0430\u0442\u0430 \u0432\u044b\u0435\u0437\u0434\u0430' }, { status: 400 });
+  }
+
+  const negField = findNegativeFinancialField(body);
+  if (negField) {
+    return NextResponse.json({ error: `\u041f\u043e\u043b\u0435 "${negField}" \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043e\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u043c` }, { status: 400 });
   }
 
   const odometerError = await validateOdometerValues(
@@ -189,6 +208,11 @@ export async function PUT(req: NextRequest) {
     fuelLiters, fuelCost, fuelCurrency, fuelRate } = body;
 
   if (!id) return NextResponse.json({ error: 'ID \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u0435\u043d' }, { status: 400 });
+
+  const negField = findNegativeFinancialField(body);
+  if (negField) {
+    return NextResponse.json({ error: `\u041f\u043e\u043b\u0435 "${negField}" \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043e\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043b\u044c\u043d\u044b\u043c` }, { status: 400 });
+  }
 
   const before = await prisma.vehicleTrip.findUnique({ where: { id } });
   if (!before) return NextResponse.json({ error: '\u0420\u0435\u0439\u0441 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d' }, { status: 404 });
