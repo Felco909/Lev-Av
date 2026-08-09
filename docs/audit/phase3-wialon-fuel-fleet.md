@@ -1,5 +1,15 @@
 # TMS Audit — Фаза 3: Wialon / Топливо / Собственный транспорт
 
+> **Обновление 2026-08-09:** TMS-AUDIT-0021, 0022, 0023 исправлены и live-протестированы
+> (0023 — на QA-машине/рейсе/записи ТО с известной суммой, проверено на всех 4 отчётах;
+> 0021/0022 — код-ревью и тайпчек, без реального Wialon API, см. обоснование в
+> `docs/audit/FINAL-REPORT.md`/коммите). См. `lib/wialon/client.ts`, `lib/wialon/calculateTripFuel.ts`,
+> `lib/wialon/syncMileage.ts`, `lib/finance/vehicle-maintenance-expenses.ts` (новый), плюс
+> `app/api/dashboard/route.ts`, `app/api/reports/own-fleet/route.ts`,
+> `app/api/vehicles/[id]/economics/route.ts`, `app/api/vehicle-analytics/route.ts`. По решению
+> владельца — ТО/запчасти включены прямо в расчёт прибыли, а не просто подписаны в UI.
+> Ниже — текст находок как они были на момент обнаружения, для истории.
+
 Дата: 2026-08-09
 Метод: статический аудит кода (2 параллельных исследования — интеграция Wialon и цепочка Vehicle→VehicleTrip→Trip→Finance). Продолжение фаз 1-2, нумерация сквозная.
 

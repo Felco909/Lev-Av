@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
+import { getVehicleMaintenancePartsExpensesAmd } from '@/lib/finance/vehicle-maintenance-expenses';
 
 /**
  * GET /api/vehicles/[id]/economics — общий доход/расходы/прибыль машины по всем её рейсам
@@ -50,12 +51,18 @@ export async function GET(_req: Request, { params: paramsPromise }: { params: Pr
     totalFuelCost += Number(vt.fuelCostAmd) || 0;
   }
 
+  // ТО/внеплановый сервис/запчасти — расход уровня "машина", не отдельного рейса (см.
+  // TMS-AUDIT-0023), lifetime — тот же охват (без периода), что и остальной расчёт этой карточки.
+  const maintenanceExpenses = await getVehicleMaintenancePartsExpensesAmd([params.id]);
+  totalExpenses += maintenanceExpenses;
+
   const profit = totalRevenue - totalExpenses;
 
   return NextResponse.json({
     tripsCount: vehicleTrips.length,
     totalRevenue,
     totalExpenses,
+    maintenanceExpenses,
     profit,
     totalFuelLiters: Math.round(totalFuelLiters * 10) / 10,
     totalFuelCost,

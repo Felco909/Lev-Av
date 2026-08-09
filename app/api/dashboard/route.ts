@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { computeClientDueAmd, computeCarrierDueAmd, computeCashGapAmd, splitExpensesAmd } from '@/lib/finance/formulas';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
+import { getVehicleMaintenancePartsExpensesAmd } from '@/lib/finance/vehicle-maintenance-expenses';
 import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
 import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
 import { dedupeCashGapTotal } from '@/lib/finance/cash-gap-dedup';
@@ -22,7 +23,7 @@ async function computeOwnFleetTotals(vtWhere: any) {
   const vehicleTrips = await prisma.vehicleTrip.findMany({
     where: vtWhere,
     select: {
-      id: true,
+      id: true, vehicleId: true,
       salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
       otherExpensesAmd: true, fuelCostAmd: true,
       fleetExpenses: { select: { amountAmd: true } },
@@ -30,8 +31,16 @@ async function computeOwnFleetTotals(vtWhere: any) {
   });
   const incomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
   const revenue = vehicleTrips.reduce((sum, vt) => sum + (incomeByVt.get(vt.id) ?? 0), 0);
-  const expenses = vehicleTrips.reduce((sum, vt) => sum + computeVehicleTripExpensesAmd(vt), 0);
-  return { vehicleTrips, revenue, expenses, profit: revenue - expenses };
+  const tripExpenses = vehicleTrips.reduce((sum, vt) => sum + computeVehicleTripExpensesAmd(vt), 0);
+  // ТО/внеплановый сервис/запчасти — расход уровня "машина за период", не отдельного рейса
+  // (см. TMS-AUDIT-0023) — добавляется поверх суммы по рейсам, тем же периодом, что и vtWhere.
+  const vehicleIds = [...new Set(vehicleTrips.map((vt) => vt.vehicleId))];
+  const maintenancePartsExpenses = await getVehicleMaintenancePartsExpensesAmd(vehicleIds, {
+    dateFrom: vtWhere?.departureDate?.gte,
+    dateTo: vtWhere?.departureDate?.lte,
+  });
+  const expenses = tripExpenses + maintenancePartsExpenses;
+  return { vehicleTrips, revenue, expenses, profit: revenue - expenses, maintenancePartsExpenses };
 }
 
 export async function GET(req: Request) {
@@ -314,7 +323,7 @@ export async function GET(req: Request) {
       if (dateFrom) vtWhere.departureDate.gte = new Date(dateFrom);
       if (dateTo) vtWhere.departureDate.lte = new Date(dateTo + 'T23:59:59');
     }
-    const { vehicleTrips: ownFleetVehicleTrips, revenue: ownFleetRevenue, expenses: ownFleetExpenses, profit: ownFleetProfit } = await computeOwnFleetTotals(vtWhere);
+    const { vehicleTrips: ownFleetVehicleTrips, revenue: ownFleetRevenue, expenses: ownFleetExpenses, profit: ownFleetProfit, maintenancePartsExpenses: ownFleetMaintenanceParts } = await computeOwnFleetTotals(vtWhere);
     const ownFleetSalary = ownFleetVehicleTrips.reduce((s, v) => s + (Number(v.salaryAmd) || 0), 0);
     // Суточные — сумма всех трёх слотов (разные страны маршрута считаются отдельно).
     const ownFleetPerDiem = ownFleetVehicleTrips.reduce(
@@ -328,7 +337,7 @@ export async function GET(req: Request) {
       revenue: ownFleetRevenue,
       expenses: ownFleetExpenses,
       profit: ownFleetProfit,
-      breakdown: { salary: ownFleetSalary, perDiem: ownFleetPerDiem, fuel: ownFleetFuel, other: ownFleetOther },
+      breakdown: { salary: ownFleetSalary, perDiem: ownFleetPerDiem, fuel: ownFleetFuel, other: ownFleetOther, maintenanceParts: ownFleetMaintenanceParts },
       tripCount: ownFleetTripCount,
       vtCount: ownFleetVehicleTrips.length,
     };

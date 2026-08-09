@@ -68,20 +68,30 @@ export async function calculateVehicleTripTotals(vehicleTripId: string): Promise
   if (trip.vehicle.wialonUnitId && trip.departureDate && trip.returnDate) {
     try {
       const report = await getOfficialTripReport(Number(trip.vehicle.wialonUnitId), trip.departureDate, trip.returnDate);
-      result.calculatedKm = report.mileageAllKm;
-      result.calculatedFuelConsumedL = report.fuelConsumedL;
-      result.calculatedIdleMinutes = Math.round(report.idleSec / 60);
-      result.fuelCalcSource = 'wialon_official_report';
-      result.fuelCalcAt = report.calculatedAt;
-      result.wialonFuelLevelBeginL = report.fuelLevelBeginL;
-      result.wialonFuelLevelEndL = report.fuelLevelEndL;
-      result.wialonEngineHoursSec = report.engineHoursSec;
-      result.wialonAvgFuelConsumptionPer100Km = report.avgFuelConsumptionPer100Km;
-      result.wialonFillingsCount = report.fillingsCount;
-      result.wialonFilledL = report.filledL;
-      result.wialonTheftsCount = report.theftsCount;
-      result.wialonTheftedL = report.theftedL;
-      result.success = true;
+      if (report.noData) {
+        // Wialon ответил успешно, но без единого сообщения за интервал (юнит был не на связи) —
+        // это НЕ "нулевой расход", а "нет данных" (TMS-AUDIT-0021). Раньше это трактовалось как
+        // успех и нули затирали ранее корректно рассчитанные calculatedKm/calculatedFuelConsumedL.
+        // Обрабатываем как мягкий отказ — result остаётся при значениях, загруженных из БД выше
+        // (success уже инициализирован false), update в конце функции не вызовется.
+        result.error = 'Wialon не передал данных за этот период (юнит был не на связи) — сохранены ранее рассчитанные значения.';
+        console.warn(`[calculateTripFuel] Wialon report has no data for trip ${vehicleTripId} interval — previous values kept.`);
+      } else {
+        result.calculatedKm = report.mileageAllKm;
+        result.calculatedFuelConsumedL = report.fuelConsumedL;
+        result.calculatedIdleMinutes = Math.round(report.idleSec / 60);
+        result.fuelCalcSource = 'wialon_official_report';
+        result.fuelCalcAt = report.calculatedAt;
+        result.wialonFuelLevelBeginL = report.fuelLevelBeginL;
+        result.wialonFuelLevelEndL = report.fuelLevelEndL;
+        result.wialonEngineHoursSec = report.engineHoursSec;
+        result.wialonAvgFuelConsumptionPer100Km = report.avgFuelConsumptionPer100Km;
+        result.wialonFillingsCount = report.fillingsCount;
+        result.wialonFilledL = report.filledL;
+        result.wialonTheftsCount = report.theftsCount;
+        result.wialonTheftedL = report.theftedL;
+        result.success = true;
+      }
     } catch (e: any) {
       result.error = e?.message ?? String(e);
       console.error(`[calculateTripFuel] Официальный отчёт Wialon не удался для рейса ${vehicleTripId} — ранее рассчитанные значения сохранены без изменений:`, e);

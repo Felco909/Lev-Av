@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
+import { getVehicleMaintenancePartsExpensesAmd } from '@/lib/finance/vehicle-maintenance-expenses';
 
 function roundMoney(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
     const vehicleTrips = await prisma.vehicleTrip.findMany({
       where: vehicleTripWhere,
       select: {
-        id: true, tripNumber: true, departureDate: true,
+        id: true, tripNumber: true, departureDate: true, vehicleId: true,
         vehicle: { select: { plateNumber: true } },
         salaryAmd: true, perDiemAmd: true, perDiem2Amd: true, perDiem3Amd: true, perDiem4Amd: true,
         otherExpensesAmd: true, fuelCostAmd: true,
@@ -127,7 +128,20 @@ export async function GET(req: Request) {
       }))
     );
 
-    const totalExpensesAmd = roundMoney(totalSalaryAmd + totalPerDiemAmd + totalFuelAmd + totalOtherAmd + totalFleetExpAmd);
+    // ТО/внеплановый сервис/запчасти — расход уровня "машина за период", не отдельного рейса
+    // (см. TMS-AUDIT-0023) — добавляется поверх суммы по рейсам, тем же периодом
+    // (vehicleTripWhere.departureDate), что и остальные слагаемые этого отчёта. Построчные
+    // vehicleTripRows[].expensesAmd/profitAmd намеренно не трогаем — по отдельному рейсу этот
+    // расход честно не разделить (одно ТО может покрывать несколько рейсов машины в периоде).
+    const vehicleIds = [...new Set(vehicleTrips.map((vt) => vt.vehicleId))];
+    const totalMaintenancePartsAmd = roundMoney(
+      await getVehicleMaintenancePartsExpensesAmd(vehicleIds, {
+        dateFrom: vehicleTripWhere?.departureDate?.gte,
+        dateTo: vehicleTripWhere?.departureDate?.lte,
+      })
+    );
+
+    const totalExpensesAmd = roundMoney(totalSalaryAmd + totalPerDiemAmd + totalFuelAmd + totalOtherAmd + totalFleetExpAmd + totalMaintenancePartsAmd);
 
     return NextResponse.json({
       vehicleTrips: vehicleTripRows,
@@ -154,6 +168,7 @@ export async function GET(req: Request) {
           fuel: roundMoney(totalFuelAmd),
           other: roundMoney(totalOtherAmd),
           fleetExpenses: roundMoney(totalFleetExpAmd),
+          maintenanceParts: totalMaintenancePartsAmd,
         },
         // л/100км считается по агрегированным литрам/км за период (не средним по отдельным
         // рейсам) — точнее, тот же принцип, что computeCostPerKmAmd в lib/finance/formulas.ts,

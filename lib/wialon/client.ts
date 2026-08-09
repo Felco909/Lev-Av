@@ -473,6 +473,11 @@ export interface WialonOfficialTripReport {
   theftsCount: number;
   theftedL: number;
   calculatedAt: Date;
+  /** true — Wialon ответил успешно, но без единого сообщения за интервал (юнит был не на
+   *  связи/датчик молчал) — все числовые поля выше в этом случае 0, но это НЕ "реальный
+   *  нулевой расход", а "нет данных". Вызывающая сторона обязана проверить этот флаг перед
+   *  тем, как считать числа достоверными (см. TMS-AUDIT-0021). */
+  noData: boolean;
   raw: any;
 }
 
@@ -573,7 +578,7 @@ export async function getOfficialTripReport(unitId: number, dateFrom: Date, date
       mileageAllKm: 0, mileageTripsKm: 0, fuelConsumedL: 0, avgFuelConsumptionPer100Km: 0,
       fuelLevelBeginL: 0, fuelLevelEndL: 0, engineHoursSec: 0, idleSec: 0,
       fillingsCount: 0, filledL: 0, theftsCount: 0, theftedL: 0,
-      calculatedAt: now, raw: { noData: true, applyResult },
+      calculatedAt: now, noData: true, raw: { noData: true, applyResult },
     };
   }
 
@@ -593,6 +598,7 @@ export async function getOfficialTripReport(unitId: number, dateFrom: Date, date
     theftsCount: Math.round(rawValueByHeaderType(table, 'thefts_count')),
     theftedL: Math.round(rawValueByHeaderType(table, 'thefted') * 10) / 10,
     calculatedAt: now,
+    noData: false,
     raw: { table },
   };
 }

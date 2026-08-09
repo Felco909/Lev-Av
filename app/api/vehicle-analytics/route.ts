@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth-options';
 import { computeCostPerKmAmd, computeProfitabilityRatio, computeProfitPerKmAmd } from '@/lib/finance/formulas';
 import { computeVehicleTripExpensesAmd } from '@/lib/vehicle-trips/close-trip';
 import { getVehicleTripsIncomeAmdBulk } from '@/lib/finance/own-fleet-income';
+import { getVehicleMaintenancePartsExpensesAmdBulk } from '@/lib/finance/vehicle-maintenance-expenses';
 
 /**
  * GET /api/vehicle-analytics — аналитика по каждой машине. Этап 3 миграции на архитектуру
@@ -42,6 +43,10 @@ export async function GET(req: Request) {
 
     // Доход всех рейсов одним запросом (не N+1) — по явной связи Trip.vehicleTripId.
     const incomeByVt = await getVehicleTripsIncomeAmdBulk(vehicleTrips.map((vt) => vt.id));
+    // ТО/внеплановый сервис/запчасти — расход уровня "машина", не отдельного рейса (см.
+    // TMS-AUDIT-0023), lifetime — тот же охват (без периода), что и остальной расчёт этого
+    // эндпоинта. Один batch-запрос на все машины сразу (не N+1 внутри .map ниже).
+    const maintenancePartsByVehicle = await getVehicleMaintenancePartsExpensesAmdBulk(vehicles.map((v) => v.id));
 
     const analytics = vehicles.map((vehicle) => {
       const vTrips = vehicleTrips.filter((vt) => vt.vehicleId === vehicle.id);
@@ -78,6 +83,8 @@ export async function GET(req: Request) {
         totalFuelCost += fuelCostAmd;
         if (vt.calculatedKm != null) totalFuelKm += Number(vt.calculatedKm);
       }
+      const maintenancePartsExpenses = maintenancePartsByVehicle.get(vehicle.id) ?? 0;
+      totalExpenses += maintenancePartsExpenses;
       const profit = totalRevenue - totalExpenses;
 
       // Помесячно, последние 6 месяцев (та же схема, что в driver-analytics/route.ts) —
@@ -103,6 +110,7 @@ export async function GET(req: Request) {
         totalMileage,
         totalRevenue,
         totalExpenses,
+        maintenancePartsExpenses,
         profit,
         totalFuelLiters: Math.round(totalFuelLiters * 10) / 10,
         totalFuelCost,

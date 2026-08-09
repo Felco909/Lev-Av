@@ -28,6 +28,12 @@ async function main() {
         console.warn(`  - ${v.plateNumber} (vehicleId=${v.vehicleId}, wialonUnitId=${v.wialonUnitId})`);
       }
     }
+    if (result.skippedLowerThanCurrent.length > 0) {
+      console.warn('[wialon-sync] Wialon отдал пробег МЕНЬШЕ сохранённого — не откачено автоматически, нужна ручная проверка:');
+      for (const v of result.skippedLowerThanCurrent) {
+        console.warn(`  - ${v.plateNumber} (vehicleId=${v.vehicleId}): в БД ${v.currentMileage} км, Wialon отдал ${v.wialonMileage} км`);
+      }
+    }
     if (result.errors.length > 0) {
       console.error('[wialon-sync] Ошибки по отдельным машинам:');
       for (const e of result.errors) {
