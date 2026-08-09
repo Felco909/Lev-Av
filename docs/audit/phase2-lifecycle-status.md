@@ -1,5 +1,11 @@
 # TMS Audit — Фаза 2: Жизненный цикл заявки/рейса и статусы
 
+> **Обновление 2026-08-09:** TMS-AUDIT-0013, 0014, 0015, 0016 исправлены и live-протестированы
+> (QA-пользователи создали/протестировали/удалены). См. `lib/trip-workflow-guards.ts`
+> (`assertTripCompletionAllowed`, `assertTripFinancialsEditable`), `app/api/trips/[id]/route.ts`,
+> `app/api/trips/[id]/close/route.ts`, `app/api/payments/route.ts`. Ниже — текст находок как они
+> были на момент обнаружения, для истории.
+
 Дата: 2026-08-09
 Метод: статический аудит кода (2 параллельных исследования — state machine статусов и CRUD/каскады). Продолжение docs/audit/phase1-finance-vat-permissions.md, нумерация находок сквозная.
 

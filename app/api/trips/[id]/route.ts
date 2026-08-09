@@ -8,7 +8,9 @@ import { recordTripHistory, diffFields } from '@/lib/trip-history';
 import { computeTripProfitAmd, computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 import { logTripWriteDrift } from '@/lib/finance/finance-metrics-service';
 import { assertRole, getTouchedDenormalizedPaymentFields, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
-import { assertDirectWorkflowStatusChange } from '@/lib/trip-workflow-guards';
+import { assertDirectWorkflowStatusChange, assertTripCompletionAllowed, assertTripFinancialsEditable } from '@/lib/trip-workflow-guards';
+import { validateTripArchiveTransition } from '@/lib/trip-archive-rules';
+import { canonicalWorkflowTripStatus } from '@/lib/utils';
 import { resolveVehicleTripLink } from '@/lib/vehicle-trips/attach-service';
 import { validateTripPayload } from '@/lib/trip-payload-validation';
 
@@ -93,7 +95,7 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     const clientRate = Number(body?.clientRate ?? 0);
 
     // Get old trip for diff
-    const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id } });
+    const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
 
     // ПРИМЕЧАНИЕ: строгую проверку соседнего шага воркфлоу (assertDirectWorkflowStatusChange)
     // сюда намеренно НЕ добавляем — форма (trip-form.tsx) позволяет локально прокликать
@@ -101,6 +103,15 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     // от oldTrip.status больше чем на 1 шаг. Строгая проверка стоит в PATCH, где смена
     // статуса — всегда одно явное действие (например «Завершить»), а не результат
     // накопленных локальных кликов.
+
+    // Заморозка финансов завершённой/архивной заявки на уровне API (TMS-AUDIT-0016) —
+    // до этой проверки ставки/расходы/валюту можно было менять даже после «Завершён»/«Архив».
+    if (oldTrip) {
+      const freezeCheck = assertTripFinancialsEditable(oldTrip, body);
+      if (!freezeCheck.ok) {
+        return NextResponse.json({ error: freezeCheck.message }, { status: 409 });
+      }
+    }
 
     // Delete old expenses and recalculate
     await prisma.expense.deleteMany({ where: { tripId: params?.id } });
@@ -143,6 +154,39 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
       ? computeTripProfitAmd({ clientRateAmd: origClientRateAmd, carrierRateAmd, expenses: expensesWithAmd })
       : profitAmd;
     const exchangeDiff = Math.round((profitAmd - origProfitAmd) * 100) / 100;
+
+    // Чек-лист перед переходом в «Завершён» (TMS-AUDIT-0013/0014) — единственная реальная
+    // точка входа в этот статус сейчас PUT (канбан-пилюли в trip-form.tsx меняют только
+    // локальный стейт, save всегда идёт сюда), поэтому проверка нужна именно здесь.
+    const targetStatusCanon = canonicalWorkflowTripStatus(body?.status);
+    const oldStatusCanon = canonicalWorkflowTripStatus(oldTrip?.status);
+    if (targetStatusCanon === 'completed' && oldStatusCanon !== 'completed') {
+      const completionCheck = assertTripCompletionAllowed({
+        tripType: body?.tripType,
+        clientRateAmd,
+        carrierRateAmd: body?.tripType === 'expedition' ? carrierRateAmd : null,
+        expenses: expensesWithAmd,
+        clientPaidAmountAmd: Number(oldTrip?.clientPaidAmountAmd ?? 0),
+        carrierPaidAmountAmd: Number(oldTrip?.carrierPaidAmountAmd ?? 0),
+        taxCode: body?.taxCode ?? oldTrip?.taxCode,
+      });
+      if (!completionCheck.ok) {
+        return NextResponse.json({ error: completionCheck.message }, { status: 422 });
+      }
+    }
+
+    // То же самое для «Архив» — без этой проверки PUT мог напрямую проставить
+    // status: 'archived', минуя чек-лист (статус completed + налоговый код) выделенного
+    // POST /api/trips/[id]/archive (найдено при живой проверке фикса 0013/0014).
+    if (targetStatusCanon === 'archived' && oldStatusCanon !== 'archived') {
+      const archiveCheck = validateTripArchiveTransition({
+        status: oldTrip?.status,
+        taxCode: body?.taxCode ?? oldTrip?.taxCode,
+      });
+      if (!archiveCheck.ok) {
+        return NextResponse.json({ error: archiveCheck.message, missing: archiveCheck.missing }, { status: 422 });
+      }
+    }
 
     // Привязка к рейсу машины (Этап 2 архитектуры "заявка → рейс") — если машина не
     // менялась, существующая связь не трогается; если изменилась/назначена впервые —
@@ -276,6 +320,15 @@ export async function PATCH(req: Request, { params: paramsPromise }: { params: P
     // Get old trip for history (include expenses — profit recalculation below needs them)
     const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
 
+    // Заморозка финансов завершённой/архивной заявки (TMS-AUDIT-0016) — та же проверка,
+    // что и в PUT, чтобы PATCH не оставался обходным путём мимо неё.
+    if (oldTrip) {
+      const freezeCheck = assertTripFinancialsEditable(oldTrip, body);
+      if (!freezeCheck.ok) {
+        return NextResponse.json({ error: freezeCheck.message }, { status: 409 });
+      }
+    }
+
     // Запрет «перепрыгивания» через шаги воркфлоу — та же проверка, что в PUT.
     if (body.status) {
       const workflowCheck = assertDirectWorkflowStatusChange(oldTrip?.status, body.status);
@@ -378,6 +431,39 @@ export async function PATCH(req: Request, { params: paramsPromise }: { params: P
       });
       data.profitAmd = new Decimal(profitAmd);
       data.profit = new Decimal(Math.round((profitAmd / incomeRateForProfit) * 100) / 100);
+    }
+
+    // Чек-лист перед переходом в «Завершён» (TMS-AUDIT-0013/0014) — та же проверка, что в PUT.
+    if (body.status) {
+      const targetStatusCanon = canonicalWorkflowTripStatus(body.status);
+      const oldStatusCanon = canonicalWorkflowTripStatus(oldTrip?.status);
+      if (targetStatusCanon === 'completed' && oldStatusCanon !== 'completed') {
+        const crAmdForCheck = data.clientRateAmd != null ? Number(data.clientRateAmd) : Number(oldTrip?.clientRateAmd ?? 0);
+        const caAmdForCheck = data.carrierRateAmd != null ? Number(data.carrierRateAmd) : Number(oldTrip?.carrierRateAmd ?? 0);
+        const clientPaidForCheck = data.clientPaidAmountAmd != null ? Number(data.clientPaidAmountAmd) : Number(oldTrip?.clientPaidAmountAmd ?? 0);
+        const carrierPaidForCheck = data.carrierPaidAmountAmd != null ? Number(data.carrierPaidAmountAmd) : Number(oldTrip?.carrierPaidAmountAmd ?? 0);
+        const completionCheck = assertTripCompletionAllowed({
+          tripType: oldTrip?.tripType,
+          clientRateAmd: crAmdForCheck,
+          carrierRateAmd: oldTrip?.tripType === 'expedition' ? caAmdForCheck : null,
+          expenses: oldTrip?.expenses ?? [],
+          clientPaidAmountAmd: clientPaidForCheck,
+          carrierPaidAmountAmd: carrierPaidForCheck,
+          taxCode: data.taxCode !== undefined ? data.taxCode : oldTrip?.taxCode,
+        });
+        if (!completionCheck.ok) {
+          return NextResponse.json({ error: completionCheck.message }, { status: 422 });
+        }
+      }
+      if (targetStatusCanon === 'archived' && oldStatusCanon !== 'archived') {
+        const archiveCheck = validateTripArchiveTransition({
+          status: oldTrip?.status,
+          taxCode: data.taxCode !== undefined ? data.taxCode : oldTrip?.taxCode,
+        });
+        if (!archiveCheck.ok) {
+          return NextResponse.json({ error: archiveCheck.message, missing: archiveCheck.missing }, { status: 422 });
+        }
+      }
     }
 
     const trip = await prisma.trip.update({

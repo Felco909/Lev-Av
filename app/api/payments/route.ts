@@ -6,6 +6,10 @@ import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { computeClientDueAmd, computeCarrierDueAmd, computePaymentStatus } from '@/lib/finance/formulas';
 import { assertRole, TRIP_PAYMENT_JOURNAL_ROLES } from '@/lib/auth/role-guard';
+import { canonicalWorkflowTripStatus } from '@/lib/utils';
+
+const FROZEN_PAYMENT_TRIP_STATUS_MESSAGE =
+  'Заявка завершена/в архиве — платежи защищены от изменений. Сначала откройте заявку снова.';
 
 /**
  * Recalculate paid totals & payment status for a trip (both client and carrier).
@@ -79,6 +83,16 @@ export async function POST(req: NextRequest) {
   if (!tripId || !amount || !paymentDate) {
     return NextResponse.json({ error: 'Заполните обязательные поля' }, { status: 400 });
   }
+
+  // Заморозка платежей завершённой/архивной заявки (TMS-AUDIT-0016) — журнал платежей
+  // не должен молча менять уже "закрытую" сделку в обход reopen.
+  const tripForStatus = await prisma.trip.findUnique({ where: { id: tripId }, select: { status: true } });
+  if (!tripForStatus) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
+  const tripStatusCanon = canonicalWorkflowTripStatus(tripForStatus.status);
+  if (tripStatusCanon === 'completed' || tripStatusCanon === 'archived') {
+    return NextResponse.json({ error: FROZEN_PAYMENT_TRIP_STATUS_MESSAGE }, { status: 409 });
+  }
+
   const cur = currency || 'AMD';
   const rate = Number(exchangeRate) || 1;
   const computedAmountAmd = cur === 'AMD' ? Number(amount) : Math.round(Number(amount) * rate * 100) / 100;
@@ -149,6 +163,16 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
   const payment = await prisma.payment.findUnique({ where: { id }, select: { tripId: true } });
+  if (!payment) return NextResponse.json({ error: 'Платёж не найден' }, { status: 404 });
+
+  // Заморозка платежей завершённой/архивной заявки (TMS-AUDIT-0016) — та же проверка,
+  // что и при создании платежа выше.
+  const tripForStatus = await prisma.trip.findUnique({ where: { id: payment.tripId }, select: { status: true } });
+  const tripStatusCanon = canonicalWorkflowTripStatus(tripForStatus?.status);
+  if (tripStatusCanon === 'completed' || tripStatusCanon === 'archived') {
+    return NextResponse.json({ error: FROZEN_PAYMENT_TRIP_STATUS_MESSAGE }, { status: 409 });
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.payment.delete({ where: { id } });
     if (payment?.tripId) await recalcTripPayments(payment.tripId, tx);

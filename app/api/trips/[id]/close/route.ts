@@ -6,6 +6,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { assertRole, TRIP_DENORMALIZED_PAYMENT_ROLES } from '@/lib/auth/role-guard';
 import { computeClientDueAmd, computeCarrierDueAmd, computeDebtAmd } from '@/lib/finance/formulas';
+import { recordTripHistory } from '@/lib/trip-history';
 
 export async function POST(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -145,25 +146,38 @@ export async function POST(request: Request, { params: paramsPromise }: { params
   }
 }
 
-/** Reopen a completed trip — set status back to 'unloaded' */
+/**
+ * Reopen a completed trip — set status back to 'sverka' (на шаг назад по workflow,
+ * симметрично un-archive из /api/trips/[id]/archive, который возвращает archived → completed).
+ * Роль ограничена так же, как closeDebts/денормализованные платёжные поля выше — отмена
+ * закрытия сделки требует финансовой роли, а не только «работы с заявками» (TMS-AUDIT-0015).
+ * 'archived' сюда намеренно не принимается — выход из архива теперь только через
+ * PUT /api/trips/[id]/archive, чтобы не было двух разных путей с разным результатом.
+ */
 export async function PUT(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
 
+    const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'повторное открытие завершённой заявки');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
+
     const tripId = params.id;
     const trip = await prisma.trip.findUnique({ where: { id: tripId } });
     if (!trip) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
 
-    if (trip.status !== 'completed' && trip.status !== 'paid' && trip.status !== 'archived') {
-      return NextResponse.json({ error: 'Заявка не завершена' }, { status: 400 });
+    if (trip.status !== 'completed' && trip.status !== 'paid') {
+      return NextResponse.json({ error: 'Заявка не завершена. Архивную заявку сначала верните из архива («Из архива»).' }, { status: 400 });
     }
 
     await prisma.trip.update({
       where: { id: tripId },
       data: { status: 'sverka' },
     });
+    await recordTripHistory(tripId, 'status_changed', (session as any)?.user?.id ?? null, (session as any)?.user?.name ?? 'Система', [
+      { field: 'status', oldValue: trip.status, newValue: 'sverka' },
+    ]);
 
     return NextResponse.json({ success: true, status: 'sverka' });
   } catch (error) {

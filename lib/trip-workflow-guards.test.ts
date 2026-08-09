@@ -5,6 +5,8 @@ import {
   assertCompletedWorkflowTransition,
   assertReopenToAwaitingPaymentTransition,
   assertInitialTripWorkflowStatus,
+  assertTripCompletionAllowed,
+  assertTripFinancialsEditable,
 } from './trip-workflow-guards';
 
 describe('normalizeIncomingWorkflowStatus', () => {
@@ -115,6 +117,103 @@ describe('assertReopenToAwaitingPaymentTransition', () => {
   it('currently blocks the completed -> awaiting_payment reopen it is meant to allow', () => {
     const result = assertReopenToAwaitingPaymentTransition('completed');
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('assertTripCompletionAllowed (TMS-AUDIT-0014 — чек-лист «Сверка → Завершён»)', () => {
+  const base = {
+    tripType: 'expedition',
+    clientRateAmd: 100_000,
+    carrierRateAmd: 60_000,
+    expenses: [],
+    clientPaidAmountAmd: 100_000,
+    carrierPaidAmountAmd: 60_000,
+    taxCode: '1234',
+  };
+
+  it('allows completion when client/carrier fully paid and tax code filled', () => {
+    expect(assertTripCompletionAllowed(base).ok).toBe(true);
+  });
+
+  it('blocks when client has not paid in full', () => {
+    const r = assertTripCompletionAllowed({ ...base, clientPaidAmountAmd: 50_000 });
+    expect(r.ok).toBe(false);
+  });
+
+  it('blocks when carrier has not been paid in full for an expedition trip', () => {
+    const r = assertTripCompletionAllowed({ ...base, carrierPaidAmountAmd: 0 });
+    expect(r.ok).toBe(false);
+  });
+
+  it('ignores carrier debt for own_transport trips', () => {
+    const r = assertTripCompletionAllowed({ ...base, tripType: 'own_transport', carrierRateAmd: 60_000, carrierPaidAmountAmd: 0 });
+    expect(r.ok).toBe(true);
+  });
+
+  it('blocks when tax code is empty', () => {
+    expect(assertTripCompletionAllowed({ ...base, taxCode: '' }).ok).toBe(false);
+    expect(assertTripCompletionAllowed({ ...base, taxCode: '   ' }).ok).toBe(false);
+    expect(assertTripCompletionAllowed({ ...base, taxCode: null }).ok).toBe(false);
+  });
+
+  it('reports every unmet condition together', () => {
+    const r = assertTripCompletionAllowed({ ...base, clientPaidAmountAmd: 0, taxCode: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toContain('клиент не оплатил');
+      expect(r.message).toContain('налоговый код');
+    }
+  });
+});
+
+describe('assertTripFinancialsEditable (TMS-AUDIT-0016 — заморозка после «Завершён»/«Архив»)', () => {
+  const completedTrip = {
+    status: 'completed',
+    clientRate: 1000,
+    carrierRate: 600,
+    currency: 'USD',
+    exchangeRate: 400,
+    carrierCurrency: 'USD',
+    carrierExchangeRate: 400,
+    tripType: 'expedition',
+    expenses: [{ amountAmd: 5000, currency: 'AMD', expenseType: 'other', description: '' }],
+  };
+
+  it('allows a no-op save (same values resent) while completed', () => {
+    const body = { clientRate: 1000, carrierRate: 600, currency: 'USD', status: 'completed' };
+    expect(assertTripFinancialsEditable(completedTrip, body).ok).toBe(true);
+  });
+
+  it('allows editing non-financial fields (tax code, notes, route) while completed', () => {
+    const body = { taxCode: '1234', notes: 'updated', routeFrom: 'Yerevan', routeTo: 'Sochi' };
+    expect(assertTripFinancialsEditable(completedTrip, body).ok).toBe(true);
+  });
+
+  it('blocks changing clientRate while completed', () => {
+    const r = assertTripFinancialsEditable(completedTrip, { clientRate: 9999 });
+    expect(r.ok).toBe(false);
+  });
+
+  it('blocks changing the expenses composition while completed', () => {
+    const r = assertTripFinancialsEditable(completedTrip, { expenses: [{ amountAmd: 5000, currency: 'AMD', expenseType: 'other', description: '' }, { amountAmd: 100, currency: 'AMD', expenseType: 'other', description: '' }] });
+    expect(r.ok).toBe(false);
+  });
+
+  it('blocks skipping status away from completed via PUT/PATCH (must use reopen/archive endpoints)', () => {
+    const r = assertTripFinancialsEditable(completedTrip, { status: 'sverka' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('blocks any edit at all while archived', () => {
+    const archivedTrip = { ...completedTrip, status: 'archived' };
+    const r = assertTripFinancialsEditable(archivedTrip, { notes: 'anything' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('does not restrict edits for any other status', () => {
+    const sverkaTrip = { ...completedTrip, status: 'sverka' };
+    const r = assertTripFinancialsEditable(sverkaTrip, { clientRate: 9999, status: 'completed' });
+    expect(r.ok).toBe(true);
   });
 });
 
