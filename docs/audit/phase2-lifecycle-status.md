@@ -1,5 +1,9 @@
 # TMS Audit — Фаза 2: Жизненный цикл заявки/рейса и статусы
 
+> **Обновление 2026-08-09 (2):** TMS-AUDIT-0017 (driverId) тоже исправлен — не блокирующим
+> предупреждением, не жёстким запретом (расхождение оказалось легитимным сценарием подмены
+> водителя, см. `lib/vehicle-trips/attach-service.ts`, `describeDriverMismatch`).
+>
 > **Обновление 2026-08-09:** TMS-AUDIT-0013, 0014, 0015, 0016 исправлены и live-протестированы
 > (QA-пользователи создали/протестировали/удалены). См. `lib/trip-workflow-guards.ts`
 > (`assertTripCompletionAllowed`, `assertTripFinancialsEditable`), `app/api/trips/[id]/route.ts`,

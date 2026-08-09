@@ -23,11 +23,17 @@ export interface ResolveLinkParams {
   /** Машина заявки ДО сохранения (для PUT) — undefined для создания новой заявки. */
   previousVehicleId?: string | null;
   previousVehicleTripId?: string | null;
+  /** Водитель, назначенный на саму заявку — для не-блокирующей проверки рассинхронизации
+   *  с водителем рейса (TMS-AUDIT-0017). Не путать с previousVehicleId — это про машину. */
+  driverId?: string | null;
 }
 
 export interface ResolveLinkResult {
   vehicleTripId: string | null;
   error?: string;
+  /** Не блокирует привязку — водитель заявки и водитель рейса не совпадают (например,
+   *  реальная подмена водителя в рейсе — легитимный сценарий, см. TMS-AUDIT-0017). */
+  warning?: string;
 }
 
 /**
@@ -41,8 +47,21 @@ export interface ResolveLinkResult {
  *   привязки (диспетчер выберет вручную, если рейсов несколько, либо свяжет позже,
  *   если рейса ещё нет вовсе).
  */
+/** Не блокирует ничего — только читаемое предупреждение, если у заявки и у рейса указаны
+ *  РАЗНЫЕ водители (см. TMS-AUDIT-0017). Пустой driverId с любой стороны — не расхождение,
+ *  это норма (заявка/рейс без назначенного водителя). */
+async function describeDriverMismatch(tripDriverId: string | null | undefined, vehicleTripDriverId: string | null | undefined): Promise<string | undefined> {
+  if (!tripDriverId || !vehicleTripDriverId || tripDriverId === vehicleTripDriverId) return undefined;
+  const drivers = await prisma.driver.findMany({
+    where: { id: { in: [tripDriverId, vehicleTripDriverId] } },
+    select: { id: true, fullName: true },
+  });
+  const nameOf = (id: string) => drivers.find((d) => d.id === id)?.fullName ?? id;
+  return `Водитель заявки (${nameOf(tripDriverId)}) не совпадает с водителем рейса (${nameOf(vehicleTripDriverId)}).`;
+}
+
 export async function resolveVehicleTripLink(params: ResolveLinkParams): Promise<ResolveLinkResult> {
-  const { tripType, vehicleId, vehicleTripIdProvided, explicitVehicleTripId, previousVehicleId, previousVehicleTripId } = params;
+  const { tripType, vehicleId, vehicleTripIdProvided, explicitVehicleTripId, previousVehicleId, previousVehicleTripId, driverId } = params;
 
   if (tripType !== 'own_transport' || !vehicleId) {
     return { vehicleTripId: null };
@@ -54,22 +73,24 @@ export async function resolveVehicleTripLink(params: ResolveLinkParams): Promise
     }
     const vt = await prisma.vehicleTrip.findUnique({
       where: { id: explicitVehicleTripId },
-      select: { vehicleId: true },
+      select: { vehicleId: true, driverId: true },
     });
     if (!vt) return { vehicleTripId: previousVehicleTripId ?? null, error: 'Указанный рейс не найден' };
     if (vt.vehicleId !== vehicleId) return { vehicleTripId: previousVehicleTripId ?? null, error: 'Рейс принадлежит другой машине' };
-    return { vehicleTripId: explicitVehicleTripId };
+    return { vehicleTripId: explicitVehicleTripId, warning: await describeDriverMismatch(driverId, vt.driverId) };
   }
 
   if (previousVehicleId !== undefined && previousVehicleId === vehicleId) {
-    return { vehicleTripId: previousVehicleTripId ?? null };
+    if (!previousVehicleTripId) return { vehicleTripId: null };
+    const vt = await prisma.vehicleTrip.findUnique({ where: { id: previousVehicleTripId }, select: { driverId: true } });
+    return { vehicleTripId: previousVehicleTripId, warning: await describeDriverMismatch(driverId, vt?.driverId) };
   }
 
   const openTrips = await prisma.vehicleTrip.findMany({
     where: { vehicleId, status: 'active' },
-    select: { id: true },
+    select: { id: true, driverId: true },
   });
-  if (openTrips.length === 1) return { vehicleTripId: openTrips[0].id };
+  if (openTrips.length === 1) return { vehicleTripId: openTrips[0].id, warning: await describeDriverMismatch(driverId, openTrips[0].driverId) };
   return { vehicleTripId: null };
 }
 
@@ -157,6 +178,8 @@ export async function getAvailableTripsForAttach(vehicleId: string, excludeVehic
 export interface BulkAttachResult {
   attached: string[];
   skipped: Array<{ tripId: string; reason: string }>;
+  /** Не блокирует привязку — см. describeDriverMismatch/TMS-AUDIT-0017. */
+  warnings: Array<{ tripId: string; tripNumber: string; reason: string }>;
 }
 
 /**
@@ -164,26 +187,29 @@ export interface BulkAttachResult {
  * Заявка, уже привязанная к другому рейсу той же машины (любого статуса), переносится.
  */
 export async function attachTripsToVehicleTrip(vehicleTripId: string, tripIds: string[]): Promise<BulkAttachResult> {
-  const vt = await prisma.vehicleTrip.findUnique({ where: { id: vehicleTripId }, select: { vehicleId: true } });
-  if (!vt) return { attached: [], skipped: tripIds.map((id) => ({ tripId: id, reason: 'Рейс не найден' })) };
+  const vt = await prisma.vehicleTrip.findUnique({ where: { id: vehicleTripId }, select: { vehicleId: true, driverId: true } });
+  if (!vt) return { attached: [], skipped: tripIds.map((id) => ({ tripId: id, reason: 'Рейс не найден' })), warnings: [] };
 
   const trips = await prisma.trip.findMany({
     where: { id: { in: tripIds } },
-    select: { id: true, vehicleId: true },
+    select: { id: true, tripNumber: true, vehicleId: true, driverId: true },
   });
   const attached: string[] = [];
   const skipped: Array<{ tripId: string; reason: string }> = [];
+  const warnings: Array<{ tripId: string; tripNumber: string; reason: string }> = [];
   for (const t of trips) {
     if (t.vehicleId !== vt.vehicleId) {
       skipped.push({ tripId: t.id, reason: 'Заявка другой машины' });
       continue;
     }
     attached.push(t.id);
+    const mismatch = await describeDriverMismatch(t.driverId, vt.driverId);
+    if (mismatch) warnings.push({ tripId: t.id, tripNumber: t.tripNumber, reason: mismatch });
   }
   if (attached.length > 0) {
     await prisma.trip.updateMany({ where: { id: { in: attached } }, data: { vehicleTripId } });
   }
-  return { attached, skipped };
+  return { attached, skipped, warnings };
 }
 
 /**

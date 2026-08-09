@@ -670,6 +670,12 @@ export default function DashboardPage() {
             </button>
           ))}
         </div>
+        {/* Машины/Водители не поддерживают фильтр периода на бэкенде (в отличие от
+            Клиенты/Перевозчики) — явно подписываем, чтобы расхождение с выбранным на
+            странице периодом не выглядело багом (TMS-AUDIT-0026/0034). */}
+        {(rankTab === 'vehicles' || rankTab === 'drivers') && (
+          <p className="text-[10px] text-muted-foreground -mt-2 mb-2">За всё время, без учёта периода выше</p>
+        )}
         {rankState[rankTab] === 'loading' ? <div className="py-6 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
           : rankState[rankTab] === 'error' ? <div className="text-xs text-red-500">Не удалось загрузить. <button onClick={() => loadRankTab(rankTab)} className="underline">Повторить</button></div>
           : rankRows.length === 0 ? <div className="text-xs text-muted-foreground py-4 text-center">Нет данных</div>

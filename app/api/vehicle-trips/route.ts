@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle, vehicleTripFinancialsChanged } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle, vehicleTripFinancialsChanged, logClosedTripEdits } from '@/lib/vehicle-trips/close-trip';
 import { assertRole, VEHICLE_TRIP_FINANCIAL_ROLES } from '@/lib/auth/role-guard';
 
 export const dynamic = 'force-dynamic';
@@ -355,40 +355,20 @@ export async function PUT(req: NextRequest) {
   // 2026-07-23) — авторасчёт по Wialon и синхронизация пробега машины теперь выполняются
   // при любой правке дат, а не только для ещё не завершённых рейсов. Правки уже
   // завершённого рейса дополнительно логируются (журнал изменений).
-  await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
+  const fuelCalc = await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
   await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
   if (wasClosed) {
-    await logClosedTripEdits(id, userId, before, record);
+    // record ещё содержит calculatedKm/calculatedFuelConsumedL ДО пересчёта выше (fuelCalc —
+    // то, что реально применилось, в т.ч. при неудаче Wialon — старые значения, см.
+    // maybeCalculateTotals) — сравниваем с ним, а не с record, иначе сам пересчёт остался бы
+    // незалогированным (TMS-AUDIT-0025).
+    const afterForLog = fuelCalc
+      ? { ...record, calculatedKm: fuelCalc.calculatedKm, calculatedFuelConsumedL: fuelCalc.calculatedFuelConsumedL }
+      : record;
+    await logClosedTripEdits(id, userId, before, afterForLog);
   }
 
   return NextResponse.json(record);
-}
-
-/** Поля закрытого рейса, правки которых логируются (п.7 — журнал изменений). */
-const LOGGED_FIELDS = [
-  'departureDate', 'returnDate', 'finalRevenueAmd', 'finalExpensesAmd',
-  'startMileage', 'endMileage', 'startFuel', 'endFuel', 'notes',
-] as const;
-
-function formatLogValue(v: unknown): string | null {
-  if (v == null) return null;
-  if (v instanceof Date) return v.toISOString();
-  return String(v);
-}
-
-async function logClosedTripEdits(vehicleTripId: string, userId: string | undefined, before: any, after: any) {
-  const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
-  for (const field of LOGGED_FIELDS) {
-    const oldValue = formatLogValue(before[field]);
-    const newValue = formatLogValue(after[field]);
-    if (oldValue !== newValue) changes.push({ field, oldValue, newValue });
-  }
-  if (changes.length === 0) return;
-  await prisma.vehicleTripEvent.createMany({
-    data: changes.map((c) => ({
-      vehicleTripId, action: 'manual_edit', field: c.field, oldValue: c.oldValue, newValue: c.newValue, userId: userId ?? null,
-    })),
-  });
 }
 
 /**

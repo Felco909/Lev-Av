@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
+import { calculateVehicleTripTotals, type TripFuelCalcResult } from '@/lib/wialon/calculateTripFuel';
 
 /**
  * Автоматический расчёт итогов рейса при сохранении. Для закрытого рейса (обе даты) считается
@@ -13,12 +13,17 @@ import { calculateVehicleTripTotals } from '@/lib/wialon/calculateTripFuel';
  * фоновый сервис lib/company-base/baseCheck.ts при автозакрытии рейса по GPS-возврату
  * на базу — не дублировать эту логику в двух местах.
  */
-export async function maybeCalculateTotals(tripId: string, departureDate: Date | null, returnDate: Date | null) {
-  if (!departureDate) return;
+/** Возвращает результат расчёта (в т.ч. при неудаче Wialon — со старыми значениями, см.
+ *  calculateVehicleTripTotals) — вызывающая сторона может использовать его, чтобы залогировать
+ *  фактически применённые calculatedKm/calculatedFuelConsumedL (TMS-AUDIT-0025), а не то, что
+ *  было в записи ДО пересчёта. null — если пересчёт не запускался вовсе (нет departureDate). */
+export async function maybeCalculateTotals(tripId: string, departureDate: Date | null, returnDate: Date | null): Promise<TripFuelCalcResult | null> {
+  if (!departureDate) return null;
   try {
-    await calculateVehicleTripTotals(tripId);
+    return await calculateVehicleTripTotals(tripId);
   } catch (e) {
     console.error('[vehicle-trips] авторасчёт итогов рейса не удался:', e);
+    return null;
   }
 }
 
@@ -29,6 +34,40 @@ export async function maybeCalculateTotals(tripId: string, departureDate: Date |
  * видел актуальный пробег сразу при закрытии рейса, а не только на следующей ежедневной
  * синхронизации с Wialon (06:00, lib/wialon/syncMileage.ts).
  */
+/** Поля закрытого рейса, правки которых логируются (журнал изменений, VehicleTripEvent).
+ *  calculatedKm/calculatedFuelConsumedL добавлены при TMS-AUDIT-0025 — раньше пересчёт по
+ *  Wialon на уже закрытом рейсе (кнопка "Пересчитать по Wialon" и автопересчёт при любой
+ *  правке дат, см. maybeCalculateTotals выше) не оставлял следа "было/стало". */
+export const LOGGED_VEHICLE_TRIP_FIELDS = [
+  'departureDate', 'returnDate', 'finalRevenueAmd', 'finalExpensesAmd',
+  'startMileage', 'endMileage', 'startFuel', 'endFuel', 'notes',
+  'calculatedKm', 'calculatedFuelConsumedL',
+] as const;
+
+function formatLogValue(v: unknown): string | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString();
+  return String(v);
+}
+
+/** Пишет в VehicleTripEvent разницу между before/after по LOGGED_VEHICLE_TRIP_FIELDS —
+ *  общая логика для ручной правки закрытого рейса (app/api/vehicle-trips/route.ts) и
+ *  пересчёта по Wialon (app/api/vehicle-trips/[id]/recalculate-fuel/route.ts). */
+export async function logClosedTripEdits(vehicleTripId: string, userId: string | undefined | null, before: any, after: any) {
+  const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
+  for (const field of LOGGED_VEHICLE_TRIP_FIELDS) {
+    const oldValue = formatLogValue(before[field]);
+    const newValue = formatLogValue(after[field]);
+    if (oldValue !== newValue) changes.push({ field, oldValue, newValue });
+  }
+  if (changes.length === 0) return;
+  await prisma.vehicleTripEvent.createMany({
+    data: changes.map((c) => ({
+      vehicleTripId, action: 'manual_edit', field: c.field, oldValue: c.oldValue, newValue: c.newValue, userId: userId ?? null,
+    })),
+  });
+}
+
 export async function maybeSyncVehicleMileage(vehicleId: string, endMileage: number | null) {
   if (endMileage == null) return;
   try {

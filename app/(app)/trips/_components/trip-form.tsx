@@ -955,6 +955,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
         appToast.warning(data.warnings.join('\n\n'));
       }
+      if (data?.driverMismatchWarning) {
+        appToast.warning(data.driverMismatchWarning);
+      }
       appToast.success(isEdit ? 'Заявка сохранена' : 'Заявка создана');
       if (data?.status && isEdit) {
         setStatus(data.status === 'paid' ? 'completed' : data.status);

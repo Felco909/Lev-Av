@@ -283,6 +283,7 @@ export async function POST(req: Request) {
       vehicleId: body?.vehicleId || null,
       vehicleTripIdProvided: Object.prototype.hasOwnProperty.call(body ?? {}, 'vehicleTripId'),
       explicitVehicleTripId: body?.vehicleTripId ?? null,
+      driverId: body?.driverId || null,
     });
     if (linkResult.error) {
       return NextResponse.json({ error: linkResult.error }, { status: 400 });
@@ -399,6 +400,7 @@ export async function POST(req: Request) {
         exchangeRate: Number(e?.exchangeRate ?? 1),
         currency: e?.currency ?? 'AMD',
       })),
+      driverMismatchWarning: linkResult.warning ?? null,
     });
   } catch (e: any) {
     console.error('POST /api/trips error:', e);

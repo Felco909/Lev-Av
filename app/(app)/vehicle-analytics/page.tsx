@@ -54,7 +54,10 @@ export default function VehicleAnalyticsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl lg:text-2xl font-display font-bold tracking-tight">Аналитика машин</h1>
-        <p className="text-sm text-muted-foreground">Рейсы, пробег, топливо и рентабельность по каждому автомобилю</p>
+        {/* Явно подписываем охват (TMS-AUDIT-0026) — страница не имеет фильтра по периоду,
+            в отличие от /reports "Автопарк", и по умолчанию не включает архивные машины;
+            цифры не сопоставимы напрямую. */}
+        <p className="text-sm text-muted-foreground">Рейсы, пробег, топливо и рентабельность по каждому автомобилю — за всё время, без архивных машин</p>
       </div>
 
       {/* Summary */}

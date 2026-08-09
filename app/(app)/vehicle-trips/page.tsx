@@ -4,6 +4,7 @@ import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive, AlertTriangle } from 'lucide-react';
 import { formatDate, formatCurrency, FLEET_EXPENSE_TYPE_MAP, STATUS_MAP } from '@/lib/utils';
+import { appToast } from '@/lib/app-toast';
 
 function baseStatusLabel(status: string | null): string {
   if (!status) return '—';
@@ -526,10 +527,14 @@ export default function VehicleTripsPage() {
 
     setSuggestSaving(true);
     try {
-      await fetch(`/api/vehicle-trips/${suggestForVehicleTripId}/attach-trips`, {
+      const res = await fetch(`/api/vehicle-trips/${suggestForVehicleTripId}/attach-trips`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tripIds: Array.from(suggestSelected) }),
       });
+      const result = await res.json().catch(() => null);
+      if (result?.warnings?.length > 0) {
+        appToast.warning(result.warnings.map((w: any) => `№${w.tripNumber}: ${w.reason}`).join('\n'));
+      }
       await loadUnattachedCount();
       if (expandedId === suggestForVehicleTripId) await loadDetail(suggestForVehicleTripId);
     } finally {
@@ -674,10 +679,14 @@ export default function VehicleTripsPage() {
     if (!detail || closeUnattachedSelected.size === 0) return;
     setClosing(true);
     try {
-      await fetch(`/api/vehicle-trips/${detail.id}/attach-trips`, {
+      const res = await fetch(`/api/vehicle-trips/${detail.id}/attach-trips`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tripIds: Array.from(closeUnattachedSelected) }),
       });
+      const result = await res.json().catch(() => null);
+      if (result?.warnings?.length > 0) {
+        appToast.warning(result.warnings.map((w: any) => `№${w.tripNumber}: ${w.reason}`).join('\n'));
+      }
       setCloseUnattached([]); setCloseUnattachedSelected(new Set());
       await confirmCloseTrip();
     } finally { setClosing(false); }
@@ -817,6 +826,14 @@ export default function VehicleTripsPage() {
                         {isDuplicateNumber && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
                             <AlertTriangle className="w-3 h-3" />{'Дубль номера'}
+                          </span>
+                        )}
+                        {r.fuelCostAmd == null && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                            title="Стоимость топлива ещё не введена — в расходах/прибыли сейчас считается как 0 (TMS-AUDIT-0024)"
+                          >
+                            <Fuel className="w-3 h-3" />{'Топливо не указано'}
                           </span>
                         )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
@@ -1230,6 +1247,9 @@ export default function VehicleTripsPage() {
                                   {detailForm.fuelCurrency !== 'AMD' && (parseFloat(detailForm.fuelCost) || 0) > 0 ? fmtAmd(Math.round((parseFloat(detailForm.fuelCost) || 0) * (parseFloat(detailForm.fuelRate) || 1))) : ''}
                                 </div>
                               </div>
+                              {detailForm.fuelCost === '' && (
+                                <p className="text-[11px] text-amber-600">{'Стоимость не указана — в расходах/прибыли пока считается как 0'}</p>
+                              )}
                               <div className="mt-1">
                                 <input type="number" step="0.01" min="0" value={detailForm.fuelLiters} onChange={e => setDetailForm({...detailForm, fuelLiters: e.target.value})} className="border rounded-lg px-2 py-1.5 text-sm w-[140px]" placeholder={'Литры'} />
                               </div>

@@ -199,6 +199,7 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
       explicitVehicleTripId: body?.vehicleTripId ?? null,
       previousVehicleId: oldTrip?.vehicleId ?? null,
       previousVehicleTripId: (oldTrip as any)?.vehicleTripId ?? null,
+      driverId: body?.driverId || null,
     });
     if (linkResult.error) {
       return NextResponse.json({ error: linkResult.error }, { status: 400 });
@@ -295,7 +296,7 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
       savedCarrierPaymentStatus: String(trip.carrierPaymentStatus ?? 'not_paid'),
     }, 'trips:PUT');
 
-    return NextResponse.json(serializeTrip(trip));
+    return NextResponse.json({ ...serializeTrip(trip), driverMismatchWarning: linkResult.warning ?? null });
   } catch (e: any) {
     console.error(e);
     return NextResponse.json({ error: 'Ошибка обновления' }, { status: 500 });

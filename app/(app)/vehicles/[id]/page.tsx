@@ -133,7 +133,7 @@ export default function VehicleDetailPage() {
               <p className="text-base font-bold font-mono text-red-600">{economics ? formatCurrency(economics.totalExpenses) : '—'}</p>
             </div>
             <div className={`rounded-lg p-3 ${economics && economics.profit >= 0 ? 'bg-green-50 dark:bg-green-950/30' : 'bg-red-50 dark:bg-red-950/30'}`}>
-              <p className={`text-[10px] ${economics && economics.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Прибыль автомобиля</p>
+              <p className={`text-[10px] ${economics && economics.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>Прибыль автомобиля (все рейсы)</p>
               <p className={`text-base font-bold font-mono ${economics && economics.profit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>{economics ? formatCurrency(economics.profit) : '—'}</p>
             </div>
             <div className="bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3">
@@ -146,6 +146,9 @@ export default function VehicleDetailPage() {
               )}
             </div>
           </div>
+          {/* Охват (TMS-AUDIT-0026): за всё время машины, не за выбранный период — эти цифры
+              не сопоставимы напрямую с period-scoped отчётами (/reports "Автопарк" и т.п.). */}
+          <p className="text-[11px] text-muted-foreground -mt-2 mb-4">За всё время эксплуатации машины, без фильтра по периоду</p>
 
           <div className="bg-card rounded-xl border p-4 space-y-2 mb-4">
             <h2 className="text-sm font-semibold flex items-center gap-1.5"><User className="w-4 h-4" /> Водитель</h2>
