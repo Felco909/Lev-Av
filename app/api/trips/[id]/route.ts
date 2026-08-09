@@ -98,6 +98,23 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     // Get old trip for diff
     const oldTrip = await prisma.trip.findUnique({ where: { id: params?.id }, include: { expenses: true } });
 
+    // Оптимистическая блокировка (TMS-AUDIT-0043, live-подтверждено: две сессии сохраняют
+    // одну заявку почти одновременно — версия B молча стирает правки A без единой ошибки).
+    // Клиент шлёт updatedAt, полученный при последней загрузке/сохранении; несовпадение с
+    // текущим значением в БД означает, что кто-то другой сохранил заявку раньше — отклоняем
+    // с понятной ошибкой вместо тихой потери его правок. body.updatedAt отсутствует —
+    // например, старый закэшированный фронт до этого фикса — проверку пропускаем, не рушим
+    // существующих вызывающих.
+    if (oldTrip && body?.updatedAt) {
+      const currentUpdatedAtIso = oldTrip.updatedAt.toISOString();
+      if (currentUpdatedAtIso !== body.updatedAt) {
+        return NextResponse.json(
+          { error: 'Заявка была изменена другим пользователем, пока вы её редактировали. Обновите страницу и повторите изменения.' },
+          { status: 409 }
+        );
+      }
+    }
+
     // ПРИМЕЧАНИЕ: строгую проверку соседнего шага воркфлоу (assertDirectWorkflowStatusChange)
     // сюда намеренно НЕ добавляем — форма (trip-form.tsx) позволяет локально прокликать
     // несколько шагов подряд перед одним Save, и тогда body.status может законно отличаться

@@ -3,7 +3,6 @@ import {
   normalizeIncomingWorkflowStatus,
   assertDirectWorkflowStatusChange,
   assertCompletedWorkflowTransition,
-  assertReopenToAwaitingPaymentTransition,
   assertInitialTripWorkflowStatus,
   assertTripCompletionAllowed,
   assertTripFinancialsEditable,
@@ -103,20 +102,6 @@ describe('assertCompletedWorkflowTransition', () => {
 
   it('blocks completing directly from cancelled', () => {
     expect(assertCompletedWorkflowTransition('cancelled').ok).toBe(false);
-  });
-});
-
-describe('assertReopenToAwaitingPaymentTransition', () => {
-  // KNOWN ISSUE (found while writing this test, not fixed here — function is still
-  // unused/unwired anywhere in the app): its own docstring says "reopen from
-  // completed -> awaiting_payment", but it's implemented as a thin wrapper around
-  // assertDirectWorkflowStatusChange, which enforces adjacent-step-only movement.
-  // completed and awaiting_payment are two steps apart in STATUS_ORDER, so this
-  // call is actually blocked, contradicting the stated intent. Flagging via this
-  // test rather than silently changing behavior of code nothing currently calls.
-  it('currently blocks the completed -> awaiting_payment reopen it is meant to allow', () => {
-    const result = assertReopenToAwaitingPaymentTransition('completed');
-    expect(result.ok).toBe(false);
   });
 });
 

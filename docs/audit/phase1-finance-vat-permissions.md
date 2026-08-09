@@ -1,5 +1,12 @@
 # TMS Audit — Фаза 1: Финансы / НДС / Права доступа
 
+> **Обновление 2026-08-09 (4):** TMS-AUDIT-0004 сверен и подтверждён закрытым — та же правка,
+> что и 0008/0015 (`af773a9a`): `assertRole` на reopen-ветке `app/api/trips/[id]/close/route.ts`,
+> `archived` больше не принимается как исходный статус. Дополнительно удалён мёртвый хелпер
+> `assertReopenToAwaitingPaymentTransition` (`lib/trip-workflow-guards.ts`) — не использовался
+> нигде, целился в статус `awaiting_payment`, которого в актуальном reopen-потоке больше нет
+> (сейчас `'sverka'`, проверяется inline). Новый код не потребовался, только сверка и уборка.
+>
 > **Обновление 2026-08-09 (3):** TMS-AUDIT-0009, 0010, 0012 исправлены. 0009 — `assertRole`
 > на POST/DELETE `fuel-records`, POST/PUT/DELETE `service-records` (выровнено с
 > `VEHICLE_TRIP_FINANCIAL_ROLES`, как и остальные финансовые поля рейса). 0010 — `lib/auth-options.ts`

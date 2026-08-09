@@ -83,6 +83,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [paymentDueDate, setPaymentDueDate] = useState('');
   const [unloadPaymentHint, setUnloadPaymentHint] = useState('');
   const paymentDueManualRef = useRef(false);
+  // TMS-AUDIT-0043: последний известный Trip.updatedAt — оптимистическая блокировка,
+  // см. app/api/trips/[id]/route.ts (PUT).
+  const loadedUpdatedAtRef = useRef<string | null>(null);
   const [basisText, setBasisText] = useState('');
   const [clientInvoiceSeries, setClientInvoiceSeries] = useState('');
   const [carrierInvoiceSeries, setCarrierInvoiceSeries] = useState('');
@@ -393,10 +396,12 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           setStatus('new');
           setTripDate(new Date().toISOString().split('T')[0]);
           setUnloadDate('');
+          loadedUpdatedAtRef.current = null; // копия — новая заявка, не редактирование существующей
         } else {
           const st = t?.status ?? 'new';
           const normalized = st === 'paid' ? 'completed' : st;
           setStatus(normalized);
+          loadedUpdatedAtRef.current = t?.updatedAt ?? null;
           setTripDate(t?.tripDate ? new Date(t.tripDate).toISOString().split('T')[0] : '');
           setUnloadDate(t?.unloadDate ? new Date(t.unloadDate).toISOString().split('T')[0] : '');
         }
@@ -945,6 +950,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           ...clientExpenses.map((e: Expense) => ({ ...e, description: '' })),
           ...carrierExpenses.map((e: Expense) => ({ ...e, description: '__carrier__' })),
         ],
+        // TMS-AUDIT-0043: оптимистическая блокировка — сервер сравнит с текущим Trip.updatedAt.
+        ...(isEdit ? { updatedAt: loadedUpdatedAtRef.current } : {}),
       };
 
       const url = isEdit ? `/api/trips/${tripId}` : '/api/trips';
@@ -952,6 +959,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) { appToast.error(data?.error ?? 'Ошибка сохранения'); return; }
+      loadedUpdatedAtRef.current = data?.updatedAt ?? loadedUpdatedAtRef.current;
 
       if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
         appToast.warning(data.warnings.join('\n\n'));

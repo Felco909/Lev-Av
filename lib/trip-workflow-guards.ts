@@ -87,13 +87,6 @@ export function assertCompletedWorkflowTransition(
   return { ok: true };
 }
 
-/** Повторное открытие: только из «Оплачен / Завершён» → «На оплату». */
-export function assertReopenToAwaitingPaymentTransition(
-  fromRaw: string | null | undefined,
-): WorkflowGuardResult {
-  return assertDirectWorkflowStatusChange(fromRaw, 'awaiting_payment');
-}
-
 /**
  * Чек-лист перед переходом в «Оплачен / Завершён»: долг клиента, долг перевозчику
  * (для экспедиции) и налоговый код (см. CLAUDE.md, workflow "Сверка → чек-лист →
