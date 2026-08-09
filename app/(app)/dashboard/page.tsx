@@ -172,6 +172,7 @@ export default function DashboardPage() {
 
   const [auditData, setAuditData] = useState<any>(null);
   const [auditState, setAuditState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const [backupStatus, setBackupStatus] = useState<any>(null);
 
   const [expandRisks, setExpandRisks] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -229,6 +230,13 @@ export default function DashboardPage() {
     fetch('/api/finance/audit').then(r => r.json()).then(d => { setAuditData(d); setAuditState('ok'); }).catch(() => setAuditState('error'));
   }, []);
   useEffect(() => { loadAudit(); }, [loadAudit]);
+
+  // Свежесть бэкапа БД (TMS-AUDIT-0042) — отдельный необлокирующий запрос, тот же паттерн, что
+  // и Finance Audit выше; при ошибке молча не показываем риск (нет смысла пугать несвежими
+  // данными о самой проверке свежести).
+  useEffect(() => {
+    fetch('/api/backup-status').then(r => r.json()).then(setBackupStatus).catch(() => {});
+  }, []);
 
   const refreshAll = async () => { setRefreshing(true); await Promise.all([load(), Promise.resolve(loadAudit())]); setRefreshing(false); };
 
@@ -401,8 +409,25 @@ export default function DashboardPage() {
       if (minsAgo > 30) list.push({ key: 'wialon', severity: 'info', icon: AlertTriangle, title: 'Wialon: давно нет синхронизации', sub: `последняя ${minsAgo} мин назад`, owner: 'автопарк/IT', onClick: () => router.push('/telematics/monitoring') });
     }
 
+    // Копирование бэкапа БД на Google Drive может простаивать сутками без единого видимого
+    // предупреждения — раньше сбой уходил только в лог-файл, который никто не читает
+    // проактивно (TMS-AUDIT-0042, живой инцидент — разрыв 4 дня, найден только во время
+    // аудита). Локальный pg_dump — отдельный, независимый сигнал, не связан с Google Drive.
+    const gdAge = backupStatus?.googleDrive?.ageHours;
+    if (typeof gdAge === 'number') {
+      if (gdAge > 72) {
+        list.push({ key: 'backup-gdrive-crit', severity: 'crit', icon: AlertTriangle, title: 'Бэкап БД не копируется на Google Drive', sub: `последняя успешная копия ${Math.floor(gdAge / 24)} дн. назад`, impact: 'офсайт-копия бэкапа отстаёт — риск при потере локального диска', owner: 'директор/IT', onClick: () => {} });
+      } else if (gdAge > 30) {
+        list.push({ key: 'backup-gdrive-high', severity: 'high', icon: AlertTriangle, title: 'Бэкап БД давно не копировался на Google Drive', sub: `последняя успешная копия ${Math.floor(gdAge)} ч. назад`, owner: 'директор/IT', onClick: () => {} });
+      }
+    }
+    const localAge = backupStatus?.local?.ageHours;
+    if (typeof localAge === 'number' && localAge > 30) {
+      list.push({ key: 'backup-local', severity: 'crit', icon: AlertTriangle, title: 'Локальный бэкап БД не обновлялся', sub: `последний ${Math.floor(localAge)} ч. назад`, impact: 'ежедневная задача бэкапа не сработала', owner: 'директор/IT', onClick: () => {} });
+    }
+
     return list.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
-  }, [data, auditData, auditState, router]);
+  }, [data, auditData, auditState, backupStatus, router]);
 
   const visibleRisks = expandRisks ? risks : risks.slice(0, 5);
 

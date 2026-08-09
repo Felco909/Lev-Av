@@ -10,7 +10,10 @@
   - Авто-восстановление диска G: (инцидент 24-30.07.2026, рецидив 31.07.2026): GoogleDriveFS.exe
     периодически теряет смонтированную букву диска, оставаясь при этом живым процессом
     (не крашится, просто перестаёт быть виден Test-Path "G:\"). Перед копированием — если
-    диска нет — пробуем убить процесс и перезапустить launch.bat, с ожиданием до 45 сек.
+    диска нет — пробуем убить процесс и перезапустить launch.bat, с ожиданием до 90 сек
+    (было 45 — в реальном инциденте 05-08.08.2026 Google Drive Desktop поднимался дольше
+    таймаута; полная защита от долгого простоя — не бесконечный retry здесь, а предупреждение
+    на Dashboard при N часов без успешной копии, см. TMS-AUDIT-0042, lib/backup-status.ts).
     Если это не сработало (диск всё ещё недоступен) — как и раньше, пишем WARN и выходим 0.
     Известное ограничение: если этот скрипт запущен из-под задачи планировщика с
     LogonType=S4U (не интерактивная сессия), перезапуск GUI-процесса Google Drive может не
@@ -65,7 +68,7 @@ function Test-GoogleDriveRoot([string]$Root) {
   try { return (Test-Path -LiteralPath $Root -ErrorAction Stop) } catch { return $false }
 }
 
-function Restore-GoogleDriveMount([string]$Root, [int]$TimeoutSeconds = 45) {
+function Restore-GoogleDriveMount([string]$Root, [int]$TimeoutSeconds = 90) {
   if (Test-GoogleDriveRoot $Root) { return $true }
   Write-GLog "WARN: G: not mounted - attempting automatic restart of Google Drive Desktop..."
   try {
