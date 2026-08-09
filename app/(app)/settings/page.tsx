@@ -123,14 +123,12 @@ export default function SettingsPage() {
     try {
       const res = await fetch('/api/exchange-rates');
       const data = await res.json();
-      if (data.rates) {
-        setRates({
-          USD: data.rates.USD != null ? String(data.rates.USD) : '',
-          EUR: data.rates.EUR != null ? String(data.rates.EUR) : '',
-          RUB: data.rates.RUB != null ? String(data.rates.RUB) : '',
-          GEL: data.rates.GEL != null ? String(data.rates.GEL) : '',
-        });
-      }
+      setRates({
+        USD: data.USD != null ? String(data.USD) : '',
+        EUR: data.EUR != null ? String(data.EUR) : '',
+        RUB: data.RUB != null ? String(data.RUB) : '',
+        GEL: data.GEL != null ? String(data.GEL) : '',
+      });
     } catch {}
   }, []);
 
@@ -139,11 +137,16 @@ export default function SettingsPage() {
     try {
       const rateObj: Record<string, number> = {};
       Object.entries(rates).forEach(([k, v]) => { if (v) rateObj[k] = parseFloat(v); });
-      await fetch('/api/exchange-rates', {
-        method: 'POST',
+      const res = await fetch('/api/exchange-rates', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rates: rateObj }),
+        body: JSON.stringify(rateObj),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error || '\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F');
+        return;
+      }
       setRatesSaved(true);
       setTimeout(() => setRatesSaved(false), 2000);
     } catch { alert('\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F'); }

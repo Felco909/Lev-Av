@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
-import { assertRole, CLIENT_GLOBAL_DOC_NUMBERING_ROLES, diffClientDocNumberingFields } from '@/lib/auth/role-guard';
+import { assertRole, CLIENT_GLOBAL_DOC_NUMBERING_ROLES, CRITICAL_FINANCE_FIELDS_ROLES, diffClientDocNumberingFields } from '@/lib/auth/role-guard';
 
 export async function PUT(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -56,6 +56,8 @@ export async function DELETE(req: Request, { params: paramsPromise }: { params: 
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    const guard = assertRole(session, CRITICAL_FINANCE_FIELDS_ROLES, 'удаление клиента');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
     // Check if client has linked trips
     const tripCount = await prisma.trip.count({ where: { clientId: params?.id } });

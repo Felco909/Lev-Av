@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
+import { assertRole, CRITICAL_FINANCE_FIELDS_ROLES } from '@/lib/auth/role-guard';
 
 // Daily exchange rates stored as a Setting with key 'exchange_rates'
 // Format: JSON { "USD": 387.5, "EUR": 420.0, "RUB": 4.2, "GEL": 140.0 }
@@ -24,6 +25,8 @@ export async function PUT(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    const guard = assertRole(session, CRITICAL_FINANCE_FIELDS_ROLES, 'изменение курсов валют компании');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const body = await req.json();
     // body = { USD: 387.5, EUR: 420.0, RUB: 4.2, GEL: 140.0 }
     const rates: Record<string, number> = {};

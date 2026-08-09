@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { resolveAttachmentDownloadUrl } from '@/lib/attachment-service';
+import { assertRole, CRITICAL_PAYMENTS_ROLES } from '@/lib/auth/role-guard';
 
 export async function GET(req: Request) {
   try {
@@ -57,6 +58,8 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: '\u041d\u0435 \u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d' }, { status: 401 });
+    const guard = assertRole(session, CRITICAL_PAYMENTS_ROLES, '\u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u0437\u0430\u043a\u0443\u043f\u043a\u0438 \u0437\u0430\u043f\u0447\u0430\u0441\u0442\u0435\u0439');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const body = await req.json();
     const { vehicleId, supplierId, date, partName, quantity, unitPrice, notes } = body;
     if (!vehicleId || !date || !partName) {

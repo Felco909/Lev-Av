@@ -505,6 +505,8 @@ export async function DELETE(req: Request, { params: paramsPromise }: { params: 
   try {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    const guard = assertRole(session, TRIP_DENORMALIZED_PAYMENT_ROLES, 'удаление заявки');
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
     const tripId = params?.id;
     if (!tripId) return NextResponse.json({ error: 'Неверный идентификатор' }, { status: 400 });
 

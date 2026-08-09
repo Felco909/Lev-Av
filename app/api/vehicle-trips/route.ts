@@ -405,6 +405,8 @@ async function logClosedTripEdits(vehicleTripId: string, userId: string | undefi
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const guard = assertRole(session, VEHICLE_TRIP_FINANCIAL_ROLES, 'удаление рейса');
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
 
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'ID обязателен' }, { status: 400 });
