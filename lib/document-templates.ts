@@ -75,9 +75,14 @@ function today(): string { return formatDateShort(new Date()); }
  * введённое один раз в редакторе документов (docEditorData.ndsTax) и переданное
  * ОДНИМ overrides-объектом сразу для обоих документов в generate-docs/route.ts,
  * поэтому этой функции достаточно, чтобы оба шаблона показывали одно и то же.
+ *
+ * Важно: `||` здесь нельзя — пользователь, стерший поле НДС в редакторе, шлёт
+ * ndsTax: '' (пустую строку, не undefined), и раньше это трактовалось как "поле не
+ * заполнено" и подменялось дефолтом "НДС 0%" — из-за чего строку было невозможно
+ * убрать вообще (аудит 2026-08-07). Дефолт нужен только когда поле не передано совсем.
  */
 function resolveNdsTaxLabel(ov?: DocOverrides): string {
-  return ov?.ndsTax || 'НДС 0%';
+  return ov?.ndsTax !== undefined ? ov.ndsTax : 'НДС 0%';
 }
 
 export interface DocOverrides {
@@ -225,7 +230,7 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
         <td class="num">\u0410\u0432/\u043F\u0440</td>
         <td class="num">1</td>
         <td class="money">${formatAmountPlain(amount)}</td>
-        <td class="money">${formatAmountPlain(amount)}<br/><small>${ndsTax}</small></td>
+        <td class="money">${formatAmountPlain(amount)}${ndsTax ? `<br/><small>${ndsTax}</small>` : ''}</td>
       </tr>
       ${veh || trailer || driverName ? `<tr>
         <td></td>
@@ -334,7 +339,7 @@ export function generateActHtml(trip: TripData, ov?: DocOverrides): string {
         <td>${serviceDesc}</td>
         <td class="num">\u0410\u0432/\u043F\u0440</td>
         <td class="num">1</td>
-        <td class="money">${formatAmountPlain(amount)}<br/><small>${ndsTax}</small></td>
+        <td class="money">${formatAmountPlain(amount)}${ndsTax ? `<br/><small>${ndsTax}</small>` : ''}</td>
       </tr>
       ${veh || trailer || driverName ? `<tr>
         <td></td>

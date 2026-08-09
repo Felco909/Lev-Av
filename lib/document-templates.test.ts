@@ -34,4 +34,14 @@ describe('НДС в счёте и акте — единый источник (а
     expect(invoiceHtml).toContain(ndsTax);
     expect(actHtml).toContain(ndsTax);
   });
+
+  it('очищенное поле НДС (пустая строка, не undefined) убирает строку НДС из обоих документов (аудит 2026-08-07)', () => {
+    const ov: DocOverrides = { ndsTax: '' };
+    const invoiceHtml = generateInvoiceHtml(trip, ov);
+    const actHtml = generateActHtml(trip, ov);
+    expect(invoiceHtml).not.toContain('НДС');
+    expect(actHtml).not.toContain('НДС');
+    expect(invoiceHtml).not.toMatch(/<small><\/small>/);
+    expect(actHtml).not.toMatch(/<small><\/small>/);
+  });
 });
