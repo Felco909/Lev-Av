@@ -9,10 +9,11 @@
 > `app/api/trips/[id]/route.ts` (PUT), `app/(app)/trips/_components/trip-form.tsx`
 > (`loadedUpdatedAtRef`). QA-данные удалены после теста.
 >
-> TMS-AUDIT-0041 — код готов (`scripts/Install-LevAv-AttachmentsBackupTask.ps1`), но реальная
-> регистрация задачи в планировщике Windows не выполнена — это системное изменение машины,
-> заблокировано классификатором автономного режима как требующее явного подтверждения. См.
-> заметку в `docs/audit/FINAL-REPORT.md`.
+> TMS-AUDIT-0041 — `scripts/Install-LevAv-AttachmentsBackupTask.ps1` создан и запущен с явного
+> подтверждения пользователя (регистрация задачи в планировщике — системное изменение машины,
+> изначально заблокировано классификатором автономного режима). Задача `LevAV Attachments
+> Daily Backup` зарегистрирована и в состоянии Ready (ежедневно 13:15). См. заметку в
+> `docs/audit/FINAL-REPORT.md`.
 >
 > **Обновление 2026-08-09 (3):** TMS-AUDIT-0042 исправлен и live-протестирован —
 > `lib/backup-status.ts` + `app/api/backup-status/route.ts` читают те же файлы (`db/levav_prod_local_*.sql`,
