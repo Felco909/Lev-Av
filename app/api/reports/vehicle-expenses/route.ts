@@ -32,14 +32,10 @@ export async function GET(req: Request) {
     // (Аудит топлива, 2026-07-24, жёсткий cutover), не FuelRecord: та же сумма, что в
     // /api/reports/own-fleet и на карточке рейса, группировка по дате рейса (departureDate),
     // не по дате заправки.
-    const [vehicleTrips, maintenances, serviceRecords, partPurchases, vehicles] = await Promise.all([
+    const [vehicleTrips, serviceRecords, partPurchases, vehicles] = await Promise.all([
       prisma.vehicleTrip.findMany({
         where: { ...vFilter, departureDate: dateFilter },
         select: { vehicleId: true, departureDate: true, calculatedFuelConsumedL: true, fuelCostAmd: true },
-      }),
-      prisma.maintenance.findMany({
-        where: { ...vFilter, date: dateFilter },
-        select: { vehicleId: true, date: true, cost: true, type: true },
       }),
       prisma.serviceRecord.findMany({
         where: { ...vFilter, date: dateFilter },
@@ -97,16 +93,9 @@ export async function GET(req: Request) {
       vehicleMap[r.vehicleId].totals.fuelLiters += liters;
     }
 
-    // Maintenance (old model)
-    for (const r of maintenances) {
-      const m = ensureMonth(r.vehicleId, new Date(r.date));
-      if (!m) continue;
-      const cost = Number(r.cost);
-      m.maintenance += cost;
-      m.total += cost;
-      vehicleMap[r.vehicleId].totals.maintenance += cost;
-      vehicleMap[r.vehicleId].totals.total += cost;
-    }
+    // TMS-AUDIT-0046: модель Maintenance удалена — никогда не имела пути записи, была всегда
+    // пуста. Поле "maintenance" оставлено в форме ответа (всегда 0) ради стабильности JSON
+    // для фронтенда (app/(app)/maintenance/page.tsx).
 
     // Service records
     for (const r of serviceRecords) {

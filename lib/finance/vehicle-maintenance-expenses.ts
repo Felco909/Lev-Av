@@ -1,10 +1,12 @@
 import { prisma } from '@/lib/prisma';
 
 /**
- * Расходы на ТО (Maintenance) + внеплановый сервис (ServiceRecord) + запчасти (PartPurchase)
- * по машинам за период — учитываются в прибыли собственного транспорта наравне с зарплатой/
- * суточными/топливом/FleetExpense (см. CLAUDE.md, TMS-AUDIT-0023: раньше нигде не вычитались,
- * прибыль по своему транспорту была системно завышена).
+ * Расходы на ТО (ServiceRecord) + запчасти (PartPurchase) по машинам за период — учитываются
+ * в прибыли собственного транспорта наравне с зарплатой/суточными/топливом/FleetExpense (см.
+ * CLAUDE.md, TMS-AUDIT-0023: раньше нигде не вычитались, прибыль по своему транспорту была
+ * системно завышена). Модель Maintenance (отдельная от ServiceRecord) была удалена
+ * (TMS-AUDIT-0046) — никогда не имела пути записи ни в UI, ни в API, таблица была всегда
+ * пуста; весь ТО фактически вёлся через ServiceRecord/ServiceRegulation.
  *
  * Эти расходы привязаны к Vehicle+date, НЕ к конкретному VehicleTrip (один комплект ТО может
  * покрывать несколько рейсов машины за период) — поэтому это добавка к итогам отчёта поверх
@@ -30,11 +32,7 @@ export async function getVehicleMaintenancePartsExpensesAmdBulk(
   const dateWhere = range.dateFrom || range.dateTo ? { gte: range.dateFrom, lte: range.dateTo } : undefined;
   const add = (vehicleId: string, amount: number) => map.set(vehicleId, (map.get(vehicleId) ?? 0) + amount);
 
-  const [maintenance, service, parts] = await Promise.all([
-    prisma.maintenance.findMany({
-      where: { vehicleId: { in: vehicleIds }, ...(dateWhere ? { date: dateWhere } : {}) },
-      select: { vehicleId: true, cost: true },
-    }),
+  const [service, parts] = await Promise.all([
     prisma.serviceRecord.findMany({
       where: { vehicleId: { in: vehicleIds }, ...(dateWhere ? { date: dateWhere } : {}) },
       select: { vehicleId: true, cost: true },
@@ -45,7 +43,6 @@ export async function getVehicleMaintenancePartsExpensesAmdBulk(
     }),
   ]);
 
-  for (const m of maintenance) add(m.vehicleId, Number(m.cost) || 0);
   for (const s of service) add(s.vehicleId, Number(s.cost) || 0);
   for (const p of parts) add(p.vehicleId, Number(p.totalAmount) || 0);
 

@@ -39,21 +39,10 @@ export async function GET(req: NextRequest, { params: paramsPromise }: { params:
     }
   }
 
-  // ТО/ремонт — вне периметра этой миграции (нет связи с VehicleTrip), старая месячная эвристика
-  // осталась как была (Аудит топлива, 2026-07-24 — решение: не трогать в этом шаге).
-  let maintenanceCost = 0;
-  let maintenanceRecords: { date: Date; type: string; cost: number; description: string | null }[] = [];
-  if (trip.vehicleId && trip.tripDate) {
-    const tripDate = new Date(trip.tripDate);
-    const monthStart = new Date(tripDate.getFullYear(), tripDate.getMonth(), 1);
-    const monthEnd = new Date(tripDate.getFullYear(), tripDate.getMonth() + 1, 0);
-    const records = await prisma.maintenance.findMany({
-      where: { vehicleId: trip.vehicleId, date: { gte: monthStart, lte: monthEnd } },
-      orderBy: { date: 'asc' },
-    });
-    maintenanceCost = records.reduce((s, r) => s + Number(r.cost ?? 0), 0);
-    maintenanceRecords = records.map((r) => ({ date: r.date, type: r.type, cost: Number(r.cost), description: r.description }));
-  }
+  // TMS-AUDIT-0046: модель Maintenance удалена — никогда не имела пути записи, таблица была
+  // всегда пуста. Поля оставлены в ответе (0/[]) ради стабильной формы JSON для фронтенда.
+  const maintenanceCost = 0;
+  const maintenanceRecords: { date: Date; type: string; cost: number; description: string | null }[] = [];
 
   return NextResponse.json({
     fuelCost: Math.round(fuelCost),

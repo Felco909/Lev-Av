@@ -81,7 +81,6 @@ model Vehicle {
   atBaseChangedAt         DateTime?              @map("at_base_changed_at")
   createdAt               DateTime               @default(now()) @map("created_at")
   trips                   Trip[]
-  maintenances            Maintenance[]
   serviceRecords          ServiceRecord[]
   fuelRecords             FuelRecord[]
   tireSets                TireSet[]
@@ -261,24 +260,6 @@ model TripAttachment {
 
   @@index([tripId])
   @@map("trip_attachments")
-}
-
-model Maintenance {
-  id          String    @id @default(cuid())
-  vehicleId   String    @map("vehicle_id")
-  vehicle     Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  type        String // oil_change | tire_change | brake_service | engine_service | inspection | other
-  description String?
-  date        DateTime  @db.Date
-  nextDate    DateTime? @map("next_date") @db.Date
-  cost        Decimal   @default(0) @db.Decimal(12, 2)
-  mileage     Int?
-  notes       String?
-  createdAt   DateTime  @default(now()) @map("created_at")
-
-  @@index([vehicleId])
-  @@index([nextDate])
-  @@map("maintenances")
 }
 
 model RouteTemplate {
