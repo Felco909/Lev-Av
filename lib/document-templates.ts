@@ -110,27 +110,35 @@ export interface DocOverrides {
 }
 
 /* ================= STYLES ================= */
+/**
+ * Отступы намеренно сжаты (2026-08-09, живой баг): у части реальных заявок длинный
+ * юридический адрес клиента + полные банковские реквизиты (12 строк) переполняли один
+ * A4-лист — блок подписи "улетал" в одиночку на почти пустую вторую страницу при печати.
+ * Подтверждено прогоном шаблона по всем реальным заявкам в БД (104 шт., 2 давали 2 страницы
+ * до этой правки) — после сжатия отступов те же 2 заявки укладываются в 1 страницу, важно
+ * не откатывать эти значения обратно к прежним без повторной проверки той же выборкой.
+ */
 const sampleStyles = `<style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Times New Roman', Times, serif; font-size: 12px; color: #000; line-height: 1.4; padding: 30px 40px; }
-  .company-header { margin-bottom: 16px; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 12px; color: #000; line-height: 1.35; padding: 22px 36px; }
+  .company-header { margin-bottom: 10px; }
   .company-header .name { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
   .company-header .detail { font-size: 11px; margin-bottom: 1px; }
-  table.bank-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
-  table.bank-table td { border: 1px solid #000; padding: 4px 8px; }
+  table.bank-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+  table.bank-table td { border: 1px solid #000; padding: 3px 8px; }
   table.bank-table td.bank-title { text-align: center; font-weight: bold; font-size: 13px; background: #f5f5f5; }
-  table.bank-table td.bank-body { line-height: 1.5; }
-  .doc-title { text-align: center; margin: 20px 0 16px; font-size: 13px; }
-  .client-block { margin-bottom: 16px; font-size: 12px; line-height: 1.5; }
+  table.bank-table td.bank-body { line-height: 1.35; }
+  .doc-title { text-align: center; margin: 12px 0 10px; font-size: 13px; }
+  .client-block { margin-bottom: 10px; font-size: 12px; line-height: 1.35; }
   .client-block .cl-name { font-weight: bold; }
   table.items { width: 100%; border-collapse: collapse; margin-bottom: 4px; font-size: 12px; }
   table.items th, table.items td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; }
   table.items th { background: #f5f5f5; font-weight: bold; text-align: center; font-size: 11px; }
   table.items td.num { text-align: center; }
   table.items td.money { text-align: right; white-space: nowrap; }
-  .total-text { margin-top: 16px; font-size: 12px; font-style: italic; }
-  .signature-block { margin-top: 40px; }
-  table.sig-table { width: 100%; margin-top: 30px; border: none; }
+  .total-text { margin-top: 10px; font-size: 12px; font-style: italic; }
+  .signature-block { margin-top: 18px; }
+  table.sig-table { width: 100%; margin-top: 12px; border: none; }
   table.sig-table td { border: none; padding: 0; vertical-align: bottom; width: 50%; }
   .sig-label { font-size: 11px; color: #444; margin-bottom: 4px; }
   table.sig-line { width: 100%; border-collapse: collapse; }
@@ -138,16 +146,16 @@ const sampleStyles = `<style>
   table.sig-line td.sig-name { text-align: right; }
   .mp { font-size: 10px; color: #888; margin-top: 2px; }
   /* Act specific */
-  .act-header { text-align: center; margin-bottom: 16px; font-size: 13px; }
-  .act-subtitle { text-align: center; font-size: 11px; margin-bottom: 16px; font-style: italic; color: #333; }
-  .parties { margin-bottom: 16px; font-size: 12px; line-height: 1.6; }
-  .parties .party { margin-bottom: 8px; }
+  .act-header { text-align: center; margin-bottom: 10px; font-size: 13px; }
+  .act-subtitle { text-align: center; font-size: 11px; margin-bottom: 10px; font-style: italic; color: #333; }
+  .parties { margin-bottom: 10px; font-size: 12px; line-height: 1.4; }
+  .parties .party { margin-bottom: 6px; }
   .parties .party-label { font-weight: bold; }
-  table.act-sig-table { width: 100%; margin-top: 30px; border: none; }
+  table.act-sig-table { width: 100%; margin-top: 16px; border: none; }
   table.act-sig-table td { border: none; padding: 0 10px; vertical-align: top; width: 50%; text-align: center; }
   .act-sig .role { font-weight: bold; font-size: 12px; margin-bottom: 4px; }
-  .act-sig .company-label { font-size: 11px; margin-bottom: 20px; }
-  .act-sig .sig-underline { border-bottom: 1px solid #000; margin-top: 30px; padding-bottom: 2px; font-size: 11px; }
+  .act-sig .company-label { font-size: 11px; margin-bottom: 12px; }
+  .act-sig .sig-underline { border-bottom: 1px solid #000; margin-top: 16px; padding-bottom: 2px; font-size: 11px; }
 </style>`;
 
 /* ================= INVOICE ================= */
