@@ -21,7 +21,7 @@ function buildHtml(data: any): string {
 
   const tableHtml = (title: string, headers: string[], rowsFn: () => string) => `
     <h2>${title}</h2>
-    <table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+    <table border="1" width="100%" cellpadding="4" cellspacing="0"><thead><tr>${headers.map(h => `<th bgcolor="#f3f4f6">${h}</th>`).join('')}</tr></thead>
     <tbody>${rowsFn()}</tbody></table>`;
 
   const problemRowsHtml = () => (data.problemRows || []).map((r: any) =>

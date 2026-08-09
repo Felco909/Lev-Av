@@ -6,6 +6,7 @@
 import ExcelJS from 'exceljs';
 import fs from 'fs';
 import path from 'path';
+import { getCompanySettings } from '@/lib/template-processor';
 
 export interface DocData {
   tripNumber: string;
@@ -328,8 +329,14 @@ const CR_CONDITIONS = [
   'Исполнитель обязан выслать подтверждение с печатью и подписью. Если в течение 3 часов отказ не поступил — заявка считается принятой.',
   'Номера автомобиля предоставляются не позднее 24 часов до загрузки.',
   'Исполнитель обязан выслать копии документов (Счёт, Акт, CMR) в течение 15 дней с момента выгрузки. Оригиналы — в течение 20 дней.',
-  'Оригиналы направлять по адресу: 0046 РА, г. Ереван, ул. С. Таронци 3/18, ООО «Лев Энд Ав».',
 ];
+
+/** Последний пункт условий (куда отправлять оригиналы) — единственный, ссылающийся на адрес/
+ *  название компании, поэтому строится отдельно с учётом реквизитов из Settings (TMS-AUDIT-0033),
+ *  а не хардкодится в CR_CONDITIONS вместе с остальными пунктами. */
+function crMailingAddressCondition(ruCompany: typeof CR_COMPANY_RU): string {
+  return `Оригиналы направлять по адресу: ${ruCompany.address}, ${ruCompany.name}.`;
+}
 
 const CR_CONDITIONS_AM = [
   'Փոխադրումն իրականացվում է TIR և CMR կոնվենցիաների, Պայմանագրի և սույն Հայտի համաձայն: Հայտի ընդունման հաստատմամբ երաշխավորվում է, որ ավտոբեռնատարը՝\n' +
@@ -403,7 +410,7 @@ function crCompanyBlock(c: typeof CR_COMPANY_RU, align: string = AlignmentType.L
   ];
 }
 
-function crHeaderBlock(isAm: boolean): Paragraph[] {
+function crHeaderBlock(isAm: boolean, ruCompany: typeof CR_COMPANY_RU = CR_COMPANY_RU): Paragraph[] {
   let logoP: Paragraph;
   try {
     const logoData = require('fs').readFileSync(CR_LOGO_PATH);
@@ -420,7 +427,7 @@ function crHeaderBlock(isAm: boolean): Paragraph[] {
 
   const companyBlock = isAm
     ? crCompanyBlock(CR_COMPANY_AM, AlignmentType.RIGHT)
-    : crCompanyBlock(CR_COMPANY_RU);
+    : crCompanyBlock(ruCompany);
 
   return [logoP, ...companyBlock];
 }
@@ -455,9 +462,9 @@ function crBuildInfoTable(order: OrderForCarrierRequest, isAm: boolean): Table {
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
 }
 
-function crConditions(isAm: boolean): Paragraph[] {
+function crConditions(isAm: boolean, ruCompany: typeof CR_COMPANY_RU = CR_COMPANY_RU): Paragraph[] {
   const title = isAm ? CR_T.condTitle.am : CR_T.condTitle.ru;
-  const list = isAm ? CR_CONDITIONS_AM : CR_CONDITIONS;
+  const list = isAm ? CR_CONDITIONS_AM : [...CR_CONDITIONS, crMailingAddressCondition(ruCompany)];
   const out: Paragraph[] = [
     crP(title, { bold: true, size: 20 }),
     new Paragraph({ spacing: { after: 40 } }),
@@ -474,6 +481,22 @@ export async function carrierRequestDocx(
 ): Promise<Buffer> {
   const isAm = options.lang === 'am';
   const t = <R, A>(ru: R, am: A) => isAm ? am : ru;
+
+  // Реквизиты компании для RU — из Настроек (та же getCompanySettings(), что использует
+  // счёт/акт, lib/document-templates.ts), с фоллбэком на хардкод, если поле не заполнено —
+  // раньше этот документ не видел правки реквизитов в /settings вообще (TMS-AUDIT-0033).
+  // AM-вариант остаётся хардкодом — в Settings нет армянских реквизитов, расширение схемы
+  // настроек под это — отдельная задача. Телефон/email тоже не сводим с Settings: телефон
+  // хранит имя контактного лица ("(Саргис)"), не входит в общий company_phone; ключа для
+  // email в Settings нет вовсе.
+  const settings = isAm ? {} : await getCompanySettings();
+  const ruCompany = {
+    ...CR_COMPANY_RU,
+    name: settings.company_name || CR_COMPANY_RU.name,
+    address: settings.company_address || CR_COMPANY_RU.address,
+    inn: settings.company_inn ? `ИНН: ${settings.company_inn}` : CR_COMPANY_RU.inn,
+  };
+  const directorNameRu = settings.company_director || 'А. Зограбян';
 
   const contractRef = order.contract_number
     ? t(
@@ -505,8 +528,8 @@ export async function carrierRequestDocx(
   });
 
   // Director name differs between RU and AM — not a typo
-  const directorName = isAm ? 'Ա. Զոհրաբյան' : 'А. Зограбян';
-  const companyName = isAm ? CR_COMPANY_AM.name : CR_COMPANY_RU.name;
+  const directorName = isAm ? 'Ա. Զոհրաբյան' : directorNameRu;
+  const companyName = isAm ? CR_COMPANY_AM.name : ruCompany.name;
   const directorTitle = t(CR_T.directorTitle.ru, CR_T.directorTitle.am);
 
   const sigTable = new Table({
@@ -530,7 +553,7 @@ export async function carrierRequestDocx(
   });
 
   const children: (Paragraph | Table)[] = [
-    ...crHeaderBlock(isAm),
+    ...crHeaderBlock(isAm, ruCompany),
     new Paragraph({ spacing: { after: 160 } }),
     crP(
       t(CR_T.requestTitle.ru(order.order_number, order.order_date),
@@ -545,7 +568,7 @@ export async function carrierRequestDocx(
     new Paragraph({ spacing: { after: 100 } }),
     crBuildInfoTable(order, isAm),
     new Paragraph({ spacing: { after: 160 } }),
-    ...crConditions(isAm),
+    ...crConditions(isAm, ruCompany),
     new Paragraph({ spacing: { after: 160 } }),
     ...(isAm ? [crP(CR_T.financeTitle, { bold: true, size: 20 })] : []),
     financeTable,

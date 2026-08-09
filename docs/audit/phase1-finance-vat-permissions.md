@@ -1,5 +1,9 @@
 # TMS Audit — Фаза 1: Финансы / НДС / Права доступа
 
+> **Обновление 2026-08-09 (2):** TMS-AUDIT-0007 тоже исправлен — открытый вопрос "используется
+> ли `/api/documents/generate` из AI-агента" закрыт (нет, `app/api/agents/document/route.ts`
+> вызывает `carrierRequestDocx` напрямую) — мёртвый роут удалён целиком.
+>
 > **Обновление 2026-08-09:** TMS-AUDIT-0002, 0003, 0005, 0006 исправлены и live-протестированы
 > (QA-пользователи dispatcher/accountant, созданы/протестированы/удалены). См.
 > `app/api/trips/revalue/route.ts`, `app/api/exchange-rates/route.ts`, `app/(app)/settings/page.tsx`,
