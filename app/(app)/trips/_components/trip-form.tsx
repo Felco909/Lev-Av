@@ -709,11 +709,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'completed' }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-        appToast.error(err.error || 'Ошибка завершения заявки');
+        appToast.error(data?.error || 'Ошибка завершения заявки');
         return;
       }
+      // TMS-AUDIT-0043: PATCH тоже меняет Trip.updatedAt — без обновления ref следующее
+      // сохранение через основную форму (PUT) ложно словит "изменено другим пользователем".
+      loadedUpdatedAtRef.current = data?.updatedAt ?? loadedUpdatedAtRef.current;
       setStatus('completed');
       await loadPayments();
       appToast.success('Статус изменён на «Оплачен / Завершён». Налоговый код можно внести до отправки в архив.');
@@ -799,11 +802,12 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'new' }),
         });
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-          appToast.error(err.error || 'Ошибка');
+          appToast.error(data?.error || 'Ошибка');
           return;
         }
+        loadedUpdatedAtRef.current = data?.updatedAt ?? loadedUpdatedAtRef.current;
         setStatus('new');
         appToast.success('Заявка восстановлена в статус «Новая».');
       } catch { appToast.error('Ошибка'); }
@@ -823,11 +827,12 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'cancelled' }),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-        appToast.error(err.error || 'Ошибка');
+        appToast.error(data?.error || 'Ошибка');
         return;
       }
+      loadedUpdatedAtRef.current = data?.updatedAt ?? loadedUpdatedAtRef.current;
       setStatus('cancelled');
       appToast.success('Заявка отменена.');
     } catch { appToast.error('Ошибка'); }
@@ -874,9 +879,13 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
             taxCode: taxCode.trim() || null,
           }),
         });
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'Ошибка' }));
-          appToast.error(err.error || 'Ошибка сохранения серии');
+          appToast.error(data?.error || 'Ошибка сохранения серии');
+        } else {
+          // TMS-AUDIT-0043: это фоновый автосейв (debounce на изменение серии/налог. кода) —
+          // без обновления ref он ложно "состарит" следующее сохранение через основную форму.
+          loadedUpdatedAtRef.current = data?.updatedAt ?? loadedUpdatedAtRef.current;
         }
       } catch { appToast.error('Ошибка сохранения серии'); }
       finally { setSavingSeries(false); }
