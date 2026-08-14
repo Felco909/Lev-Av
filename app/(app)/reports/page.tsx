@@ -10,6 +10,7 @@ import {
   TrendingUp, DollarSign, TrendingDown, Wallet, CheckCircle2, Settings2, ChevronRight,
 } from 'lucide-react';
 import { formatDate, FLEET_EXPENSE_TYPE_MAP } from '@/lib/utils';
+import { CurrencyAmount } from '@/components/ui/currency-amount';
 import ReportChart from './_components/report-chart';
 
 type Tab = 'overview' | 'profit' | 'own_fleet' | 'debts';
@@ -1055,7 +1056,11 @@ export default function ReportsPage() {
                           <td className="py-2.5 px-3">
                             <span className={`text-[10px] px-2 py-0.5 rounded-full ${r.tripTypeRaw === 'own_transport' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>{r.tripType}</span>
                           </td>
-                          <td className="py-2.5 px-3 text-right font-mono text-xs">{fmtAmd(Number(r.clientRateAmd || r.clientRate || 0))}</td>
+                          <td className="py-2.5 px-3 text-right text-xs">
+                            {r.currency && r.currency !== 'AMD' ? (
+                              <CurrencyAmount amount={r.clientRate} currency={r.currency} rate={r.exchangeRate} amountAmd={r.clientRateAmd || r.clientRate} variant="compact" className="items-end ml-auto" />
+                            ) : fmtAmd(Number(r.clientRateAmd || r.clientRate || 0))}
+                          </td>
                           <td className="py-2.5 px-3 text-right font-mono text-xs text-red-500">{fmtAmd(exp)}</td>
                           <td className={`py-2.5 px-3 text-right font-mono text-xs font-semibold ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{fmtAmd(profit)}</td>
                         </tr>
@@ -1192,7 +1197,11 @@ export default function ReportsPage() {
                         <td className="py-2 px-4 text-xs whitespace-nowrap">{r.date}</td>
                         <td className="py-2 px-3 max-w-[220px]"><CrumbLink href={`/trips/${r.id}`} fromLabel="Отчёты" fromKey="reports" className="block truncate text-primary hover:underline text-xs" title={`${r.routeFrom} → ${r.routeTo}`}>{r.routeFrom} → {r.routeTo}</CrumbLink></td>
                         <td className="py-2 px-3 text-xs text-muted-foreground hidden sm:table-cell">{r.client}</td>
-                        <td className="py-2 px-3 text-right font-mono text-xs">{fmtAmd(Number(r.clientRateAmd || r.clientRate || 0))}</td>
+                        <td className="py-2 px-3 text-right text-xs">
+                          {r.currency && r.currency !== 'AMD' ? (
+                            <CurrencyAmount amount={r.clientRate} currency={r.currency} rate={r.exchangeRate} amountAmd={r.clientRateAmd || r.clientRate} variant="compact" className="items-end ml-auto" />
+                          ) : fmtAmd(Number(r.clientRateAmd || r.clientRate || 0))}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1225,7 +1234,6 @@ export default function ReportsPage() {
                       <th className="py-2.5 px-3">Машина</th>
                       <th className="py-2.5 px-3">Тип</th>
                       <th className="py-2.5 px-3 text-right">Сумма</th>
-                      <th className="py-2.5 px-3 text-right hidden sm:table-cell">AMD ֏</th>
                       <th className="py-2.5 px-3 hidden md:table-cell">Комментарий</th>
                     </tr>
                   </thead>
@@ -1239,11 +1247,11 @@ export default function ReportsPage() {
                             {FLEET_EXPENSE_TYPE_MAP[fe.expenseType] || fe.expenseType}
                           </span>
                         </td>
-                        <td className="py-2 px-3 text-right font-mono text-xs whitespace-nowrap">
-                          {Number(fe.amount).toLocaleString('ru-RU')} {fe.currency === 'AMD' ? '֏' : fe.currency === 'RUB' ? '₽' : '$'}
-                          {fe.currency !== 'AMD' && <span className="text-muted-foreground text-[9px] ml-1">(×{Number(fe.exchangeRate)})</span>}
+                        <td className="py-2 px-3 text-right text-xs">
+                          {fe.currency && fe.currency !== 'AMD' ? (
+                            <CurrencyAmount amount={fe.amount} currency={fe.currency} rate={fe.exchangeRate} amountAmd={fe.amountAmd} variant="compact" className="items-end ml-auto" />
+                          ) : fmtAmd(Number(fe.amountAmd))}
                         </td>
-                        <td className="py-2 px-3 text-right font-mono text-xs font-medium hidden sm:table-cell">{fmtAmd(Number(fe.amountAmd))}</td>
                         <td className="py-2 px-3 text-xs text-muted-foreground hidden md:table-cell max-w-[200px] truncate">{fe.comment || '—'}</td>
                       </tr>
                     ))}
@@ -1251,8 +1259,7 @@ export default function ReportsPage() {
                   <tfoot>
                     <tr className="border-t-2 bg-muted/20 font-semibold">
                       <td colSpan={3} className="py-2.5 px-4 text-right text-xs">ИТОГО:</td>
-                      <td className="py-2.5 px-3"></td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs text-red-500 hidden sm:table-cell">{fmtAmd(fleetTotalExpenses)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-xs text-red-500">{fmtAmd(fleetTotalExpenses)}</td>
                       <td className="hidden md:table-cell"></td>
                     </tr>
                   </tfoot>
@@ -1313,18 +1320,33 @@ export default function ReportsPage() {
                       <table className="w-full text-sm">
                         <thead><tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
                           <th className="py-2.5 px-4">Дата</th><th className="py-2.5 px-3">Заявка</th><th className="py-2.5 px-3">Клиент</th>
-                          <th className="py-2.5 px-3 text-right">Ставка клиента ֏</th><th className="py-2.5 px-3 text-right">Разрыв ֏</th>
+                          <th className="py-2.5 px-3 text-right">Ставка клиента</th><th className="py-2.5 px-3 text-right">Оплата перевозчику</th>
+                          <th className="py-2.5 px-3 text-right">Разрыв ֏</th>
                         </tr></thead>
                         <tbody>
-                          {allCashGapTrips.map((d: any) => (
-                            <tr key={d.id} className="border-b hover:bg-muted/30 transition">
-                              <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(d.tripDate)}</td>
-                              <td className="py-2 px-3 text-xs"><CrumbLink href={`/trips/${d.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline">{d.tripNumber}</CrumbLink></td>
-                              <td className="py-2 px-3 text-xs">{d.clientName}</td>
-                              <td className="py-2 px-3 text-right font-mono text-xs">{fmtAmd(d.rateAmd)}</td>
-                              <td className="py-2 px-3 text-right font-mono text-xs font-semibold text-red-600">{fmtAmd(d.cashGap)}</td>
-                            </tr>
-                          ))}
+                          {allCashGapTrips.map((d: any) => {
+                            const carrierCur = d.carrierCurrency || 'AMD';
+                            const carrierPaidAmd = d.carrierPaidAmd ?? 0;
+                            const carrierPaidOriginal = carrierCur !== 'AMD' && d.carrierExchangeRate ? carrierPaidAmd / d.carrierExchangeRate : carrierPaidAmd;
+                            return (
+                              <tr key={d.id} className="border-b hover:bg-muted/30 transition">
+                                <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(d.tripDate)}</td>
+                                <td className="py-2 px-3 text-xs"><CrumbLink href={`/trips/${d.id}`} fromLabel="Отчёты" fromKey="reports" className="text-primary hover:underline">{d.tripNumber}</CrumbLink></td>
+                                <td className="py-2 px-3 text-xs">{d.clientName}</td>
+                                <td className="py-2 px-3 text-right text-xs">
+                                  {d.currency && d.currency !== 'AMD' ? (
+                                    <CurrencyAmount amount={d.rate} currency={d.currency} rate={d.exchangeRate} amountAmd={d.rateAmd} variant="compact" className="items-end ml-auto" />
+                                  ) : fmtAmd(d.rateAmd)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-xs">
+                                  {carrierCur !== 'AMD' ? (
+                                    <CurrencyAmount amount={carrierPaidOriginal} currency={carrierCur} rate={d.carrierExchangeRate} amountAmd={carrierPaidAmd} variant="compact" className="items-end ml-auto" />
+                                  ) : fmtAmd(carrierPaidAmd)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-xs font-semibold text-red-600">{fmtAmd(d.cashGap)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

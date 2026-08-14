@@ -66,6 +66,7 @@ export async function GET(req: Request) {
           select: {
             id: true, tripNumber: true, tripDate: true, routeFrom: true, routeTo: true,
             clientRateAmd: true, clientRate: true, vehicleTripId: true,
+            currency: true, exchangeRate: true,
             client: { select: { name: true } },
           },
           orderBy: { tripDate: 'asc' },
@@ -155,7 +156,10 @@ export async function GET(req: Request) {
         routeFrom: t.routeFrom,
         routeTo: t.routeTo,
         client: t.client?.name ?? '',
+        clientRate: Number(t.clientRate ?? 0),
         clientRateAmd: Number(t.clientRateAmd ?? t.clientRate ?? 0),
+        currency: t.currency || 'AMD',
+        exchangeRate: Number(t.exchangeRate ?? 1),
       })),
       fleetExpenseRows,
       totals: {
