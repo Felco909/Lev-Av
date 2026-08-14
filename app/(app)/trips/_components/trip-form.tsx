@@ -31,7 +31,10 @@ interface Expense {
   expenseType: string;
   amount: number;
   currency: string;
-  exchangeRate: number;
+  // Может временно быть "сырой" строкой во время набора (напр. "4.") — см.
+  // updateClientExpense/updateCarrierExpense, чтобы не терять десятичную точку на
+  // каждый onChange (TMS-AUDIT: точка "съедалась" при мгновенном parseFloat в контроле).
+  exchangeRate: number | string;
   amountAmd: number;
   description: string;
 }
@@ -670,7 +673,9 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       if (field === 'amount' || field === 'currency' || field === 'exchangeRate') {
         const amt = Number(field === 'amount' ? value : u.amount) || 0;
         const cur = field === 'currency' ? value : u.currency;
-        let rate = Number(field === 'exchangeRate' ? value : u.exchangeRate) || 1;
+        // parseRateInput вместо Number() — во время набора курса значение может быть
+        // промежуточной строкой ("4.", "4,4"), Number() дал бы NaN/неверный результат.
+        let rate = parseRateInput(field === 'exchangeRate' ? value : u.exchangeRate) || 1;
         if (field === 'currency' && value === 'AMD') { rate = 1; u.exchangeRate = 1; }
         u.amountAmd = cur === 'AMD' ? amt : Math.round(amt * rate * 100) / 100;
       }
@@ -1467,7 +1472,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                             {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
                           {exp.currency !== 'AMD' && (
-                            <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateClientExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
+                            <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateClientExpense(idx, 'exchangeRate', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
                           )}
                           {exp.currency !== 'AMD' && dailyRates[exp.currency] > 0 && Number(exp.exchangeRate) !== dailyRates[exp.currency] && (
                             <button type="button" onClick={() => updateClientExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline self-center px-1">{dailyRates[exp.currency]}</button>
@@ -1666,7 +1671,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                               {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
                             {exp.currency !== 'AMD' && (
-                              <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateCarrierExpense(idx, 'exchangeRate', parseRateInput(e.target.value) || 1)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
+                              <input type="text" inputMode="decimal" value={exp.exchangeRate} onChange={(e) => updateCarrierExpense(idx, 'exchangeRate', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-16 font-mono" placeholder="Курс" />
                             )}
                             {exp.currency !== 'AMD' && dailyRates[exp.currency] > 0 && Number(exp.exchangeRate) !== dailyRates[exp.currency] && (
                               <button type="button" onClick={() => updateCarrierExpense(idx, 'exchangeRate', dailyRates[exp.currency])} className="text-[10px] text-primary hover:underline self-center px-1">{dailyRates[exp.currency]}</button>
