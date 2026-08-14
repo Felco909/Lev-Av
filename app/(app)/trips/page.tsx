@@ -5,6 +5,7 @@ import CrumbLink from '@/components/nav/crumb-link';
 import { useNavState } from '@/hooks/use-nav-state';
 import { Plus, Search, Filter, Eye, ChevronLeft, ChevronRight, ArrowDown, ArrowUp, Layers, Archive } from 'lucide-react';
 import { formatCurrency, formatDate, STATUS_MAP, TRIP_TYPE_MAP } from '@/lib/utils';
+import { CurrencyAmount } from '@/components/ui/currency-amount';
 
 const PAGE_SIZE = 50;
 
@@ -212,7 +213,11 @@ export default function TripsPage() {
             );
           })() : <span className="text-[10px] text-muted-foreground">&mdash;</span>}
         </td>
-        <td className="px-4 py-3 text-right font-mono text-xs hidden sm:table-cell">{formatCurrency(t?.clientRateAmd ?? t?.clientRate)}</td>
+        <td className="px-4 py-3 text-right font-mono text-xs hidden sm:table-cell">
+          {t?.currency && t.currency !== 'AMD' ? (
+            <CurrencyAmount amount={t?.clientRate} currency={t.currency} rate={t?.exchangeRate} amountAmd={t?.clientRateAmd ?? t?.clientRate} variant="compact" className="items-end" />
+          ) : formatCurrency(t?.clientRateAmd ?? t?.clientRate)}
+        </td>
         <td className={`px-4 py-3 text-right font-mono text-xs font-medium ${(t?.profitAmd ?? t?.profit ?? 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>{formatCurrency(t?.profitAmd ?? t?.profit)}</td>
         <td className="px-4 py-3 text-right">
           <div className="flex items-center justify-end gap-1">

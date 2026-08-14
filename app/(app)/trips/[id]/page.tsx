@@ -1,9 +1,9 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Pencil, MapPin, Package, Truck, Building2, DollarSign, FileText, Loader2, Paperclip, Download, X, ChevronRight, ClipboardList, Copy, Fuel, Wrench, Info, Lock } from 'lucide-react';
-import { formatCurrency, formatCurrencyRaw, formatDate, STATUS_MAP, STATUS_ORDER, TRIP_TYPE_MAP } from '@/lib/utils';
+import { formatCurrency, formatCurrencyRaw, formatRate, formatDate, STATUS_MAP, STATUS_ORDER, TRIP_TYPE_MAP } from '@/lib/utils';
 import { generateSumInWordsLine } from '@/lib/number-to-words';
 import { detectTripAttachmentSection, TRIP_ATTACHMENT_SECTION_LABELS } from '@/lib/trip-attachment-section';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
@@ -91,8 +91,6 @@ interface Attachment {
   downloadUrl: string;
 }
 
-const CUR_SYMBOLS: Record<string, string> = { AMD: '֏', USD: '$', RUB: '₽', EUR: '€', GEL: '₾' };
-
 interface PaymentItem {
   id: string;
   type: string;
@@ -172,7 +170,7 @@ function TripFinance({ trip }: { trip: any }) {
     insurance: 'Страховка', other: 'Прочее',
   };
 
-  const SummaryRow = ({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: 'green' | 'red' | 'debt' | null }) => {
+  const SummaryRow = ({ label, value, sub, highlight }: { label: string; value: ReactNode; sub?: string; highlight?: 'green' | 'red' | 'debt' | null }) => {
     let cls = 'bg-muted/50';
     if (highlight === 'green') cls = 'text-green-700 dark:text-green-400 bg-muted/50';
     if (highlight === 'debt') cls = 'text-red-700 bg-red-50 dark:text-red-400 dark:bg-red-950/30 font-bold';
@@ -203,8 +201,8 @@ function TripFinance({ trip }: { trip: any }) {
               <span className="text-muted-foreground">{label}</span>
               <span className="font-mono">
                 {cur !== 'AMD'
-                  ? `${fmt(amt)} ${CUR_SYMBOLS[cur] || cur} × ${rate} = ${fmt(amd)} ֏`
-                  : `${fmt(amd)} ֏`}
+                  ? `${formatCurrencyRaw(amt, cur)} × ${formatRate(rate)} = ${formatCurrency(amd)}`
+                  : formatCurrency(amd)}
               </span>
             </div>
           );
@@ -221,10 +219,10 @@ function TripFinance({ trip }: { trip: any }) {
           <div key={p.id} className="bg-muted/30 rounded-lg px-3 py-2">
             <div className="flex items-center gap-2 text-xs flex-wrap">
               <span className="text-muted-foreground shrink-0">{fmtDate(p.paymentDate)}</span>
-              <span className="font-mono font-semibold">{fmt(p.amount)} {CUR_SYMBOLS[p.currency] || p.currency}</span>
+              <span className="font-mono font-semibold">{formatCurrencyRaw(p.amount, p.currency)}</span>
               {p.currency !== 'AMD' && (
                 <span className="text-muted-foreground">
-                  × {Number(p.exchangeRate)} → <span className={`font-semibold ${accentColor}`}>{fmt(p.amountAmd)} ֏</span>
+                  × {formatRate(p.exchangeRate)} → <span className={`font-semibold ${accentColor}`}>{formatCurrency(p.amountAmd)}</span>
                 </span>
               )}
             </div>
@@ -282,10 +280,8 @@ function TripFinance({ trip }: { trip: any }) {
           <div className="space-y-2">
             <SummaryRow
               label="Ставка"
-              value={clientIsMultiCur
-                ? `${fmt(clientRate)} ${CUR_SYMBOLS[clientCurrency] || clientCurrency}`
-                : `${fmt(clientRate)} ֏`}
-              sub={clientIsMultiCur ? `курс ${clientExRate} → ${fmt(clientRateAmd)} ֏` : undefined}
+              value={clientIsMultiCur ? formatCurrencyRaw(clientRate, clientCurrency) : formatCurrency(clientRate)}
+              sub={clientIsMultiCur ? `курс ${formatRate(clientExRate)} → ${formatCurrency(clientRateAmd)}` : undefined}
             />
             {clientExpenses.length > 0 && (
               <div>
@@ -327,10 +323,8 @@ function TripFinance({ trip }: { trip: any }) {
             <div className="space-y-2">
               <SummaryRow
                 label="Сумма"
-                value={carrierIsMultiCur
-                  ? `${fmt(carrierRate)} ${CUR_SYMBOLS[carrierCurrency] || carrierCurrency}`
-                  : `${fmt(carrierRate)} ֏`}
-                sub={carrierIsMultiCur ? `курс ${carrierExRate} → ${fmt(carrierRateAmd)} ֏` : undefined}
+                value={carrierIsMultiCur ? formatCurrencyRaw(carrierRate, carrierCurrency) : formatCurrency(carrierRate)}
+                sub={carrierIsMultiCur ? `курс ${formatRate(carrierExRate)} → ${formatCurrency(carrierRateAmd)}` : undefined}
               />
               {carrierExpenses.length > 0 && (
                 <div>
@@ -582,7 +576,12 @@ export default function TripDetailPage() {
             ) : (
               <>
                 <div className="flex justify-between"><span className="text-muted-foreground">Перевозчик</span><span className="font-medium">{trip?.carrier?.name ?? '—'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Ставка перевозчика</span><span className="font-medium font-mono">{formatCurrencyRaw(trip?.carrierRate, trip?.carrierCurrency || trip?.currency || 'AMD')}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Ставка перевозчика</span><span className="font-medium font-mono text-right">
+                  {formatCurrencyRaw(trip?.carrierRate, trip?.carrierCurrency || trip?.currency || 'AMD')}
+                  {(trip?.carrierCurrency || trip?.currency || 'AMD') !== 'AMD' && (
+                    <span className="block text-[10px] text-muted-foreground font-normal">курс {formatRate(trip?.carrierExchangeRate ?? trip?.exchangeRate ?? 1)} → {formatCurrency(trip?.carrierRateAmd)}</span>
+                  )}
+                </span></div>
               </>
             )}
           </div>
