@@ -8,6 +8,7 @@ import {
   CheckCircle2, Loader2, Truck,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
+import { CurrencyAmount } from '@/components/ui/currency-amount';
 
 type Tab = 'overview' | 'clients' | 'carriers' | 'suppliers' | 'cashgaps';
 
@@ -26,6 +27,14 @@ interface TripDebtRow {
   isOverdue: boolean;
   isUrgent: boolean;
   cashGap: number;
+  // Единый слой отображения валют — см. lib/finance/debts-service.ts.
+  rate?: number;
+  currency?: string;
+  exchangeRate?: number;
+  carrierRate?: number;
+  carrierCurrency?: string;
+  carrierExchangeRate?: number;
+  carrierPaidAmd?: number;
 }
 
 interface GroupedClient { client: { id: string; name: string; phone: string | null; email: string | null }; trips: TripDebtRow[]; totalDebt: number; }
@@ -188,7 +197,11 @@ export default function DebtsPage() {
           </span>
         )}
         <div className="flex items-center gap-3 text-xs ml-auto shrink-0">
-          <span className="text-muted-foreground font-mono">{fmt(t.rateAmd)} ֏</span>
+          {t.currency && t.currency !== 'AMD' ? (
+            <CurrencyAmount amount={t.rate} currency={t.currency} rate={t.exchangeRate} amountAmd={t.rateAmd} variant="compact" className="items-end text-muted-foreground" />
+          ) : (
+            <span className="text-muted-foreground font-mono">{fmt(t.rateAmd)} ֏</span>
+          )}
           <span className="text-green-600 font-mono">{fmt(t.paidAmd)} ֏</span>
           <span className={`font-mono ${remainingClass(t)}`}>{fmt(t.remaining)} ֏</span>
         </div>
@@ -524,18 +537,35 @@ export default function DebtsPage() {
                     <table className="w-full text-sm">
                       <thead><tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
                         <th className="py-2.5 px-4">Дата</th><th className="py-2.5 px-3">Заявка</th><th className="py-2.5 px-3">Маршрут</th>
-                        <th className="py-2.5 px-3 text-right">Ставка клиента ֏</th><th className="py-2.5 px-3 text-right">Разрыв ֏</th>
+                        <th className="py-2.5 px-3 text-right">Ставка клиента</th><th className="py-2.5 px-3 text-right">Оплата перевозчику</th>
+                        <th className="py-2.5 px-3 text-right">Разрыв ֏</th>
                       </tr></thead>
                       <tbody>
-                        {cashGapRows.map(t => (
-                          <tr key={t.id} className="border-b hover:bg-muted/30 transition">
-                            <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(t.tripDate)}</td>
-                            <td className="py-2 px-3 text-xs"><CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="text-primary hover:underline">{t.tripNumber}</CrumbLink></td>
-                            <td className="py-2 px-3 text-xs text-muted-foreground truncate max-w-[220px]">{t.routeFrom} → {t.routeTo}</td>
-                            <td className="py-2 px-3 text-right font-mono text-xs">{fmt(t.rateAmd)} ֏</td>
-                            <td className="py-2 px-3 text-right font-mono text-xs font-semibold text-orange-600">{fmt(t.cashGap)} ֏</td>
-                          </tr>
-                        ))}
+                        {cashGapRows.map(t => {
+                          const carrierCur = t.carrierCurrency || 'AMD';
+                          const carrierPaidAmd = t.carrierPaidAmd ?? 0;
+                          const carrierPaidOriginal = carrierCur !== 'AMD' && t.carrierExchangeRate
+                            ? carrierPaidAmd / t.carrierExchangeRate
+                            : carrierPaidAmd;
+                          return (
+                            <tr key={t.id} className="border-b hover:bg-muted/30 transition">
+                              <td className="py-2 px-4 text-xs whitespace-nowrap">{formatDate(t.tripDate)}</td>
+                              <td className="py-2 px-3 text-xs"><CrumbLink href={`/trips/${t.id}`} fromLabel="Долги" fromKey="debts" className="text-primary hover:underline">{t.tripNumber}</CrumbLink></td>
+                              <td className="py-2 px-3 text-xs text-muted-foreground truncate max-w-[220px]">{t.routeFrom} → {t.routeTo}</td>
+                              <td className="py-2 px-3 text-right text-xs">
+                                {t.currency && t.currency !== 'AMD' ? (
+                                  <CurrencyAmount amount={t.rate} currency={t.currency} rate={t.exchangeRate} amountAmd={t.rateAmd} variant="compact" className="items-end ml-auto" />
+                                ) : `${fmt(t.rateAmd)} ֏`}
+                              </td>
+                              <td className="py-2 px-3 text-right text-xs">
+                                {carrierCur !== 'AMD' ? (
+                                  <CurrencyAmount amount={carrierPaidOriginal} currency={carrierCur} rate={t.carrierExchangeRate} amountAmd={carrierPaidAmd} variant="compact" className="items-end ml-auto" />
+                                ) : `${fmt(carrierPaidAmd)} ֏`}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono text-xs font-semibold text-orange-600">{fmt(t.cashGap)} ֏</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

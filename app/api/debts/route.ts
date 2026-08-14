@@ -51,6 +51,14 @@ export async function GET() {
       daysLeft: r.daysLeft,
       isOverdue: r.isOverdue,
       isUrgent: r.isUrgent,
+      // Единый слой отображения валют — чистый проброс, формула долга не меняется.
+      rate: r.rate,
+      currency: r.currency,
+      exchangeRate: r.exchangeRate,
+      carrierRate: r.carrierRate,
+      carrierCurrency: r.carrierCurrency,
+      carrierExchangeRate: r.carrierExchangeRate,
+      carrierPaidAmd: r.carrierPaidAmd,
     }));
 
     const carrierDebts = carrierRows.map((r) => ({
@@ -70,6 +78,9 @@ export async function GET() {
       daysLeft: r.daysLeft,
       isOverdue: r.isOverdue,
       isUrgent: r.isUrgent,
+      rate: r.rate,
+      currency: r.currency,
+      exchangeRate: r.exchangeRate,
     }));
 
     const grouped = groupDebtRows(clientRows).map((g) => ({
@@ -79,6 +90,7 @@ export async function GET() {
         tripDate: t.tripDate, rateAmd: t.rateAmd, paidAmd: t.paidAmd, remaining: t.remaining,
         status: t.status, cashGap: t.cashGap, paymentDueDate: t.paymentDueDate,
         daysLeft: t.daysLeft, isOverdue: t.isOverdue, isUrgent: t.isUrgent,
+        rate: t.rate, currency: t.currency, exchangeRate: t.exchangeRate,
       })),
       totalDebt: g.totalDebt,
     }));
@@ -90,6 +102,7 @@ export async function GET() {
         tripDate: t.tripDate, rateAmd: t.rateAmd, paidAmd: t.paidAmd, remaining: t.remaining,
         status: t.status, cashGap: t.cashGap, paymentDueDate: t.paymentDueDate,
         daysLeft: t.daysLeft, isOverdue: t.isOverdue, isUrgent: t.isUrgent,
+        rate: t.rate, currency: t.currency, exchangeRate: t.exchangeRate,
       })),
       totalDebt: g.totalDebt,
     }));

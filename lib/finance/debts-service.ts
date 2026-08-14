@@ -43,6 +43,20 @@ export interface DebtTripRow {
   entityName: string;
   entityPhone?: string | null;
   entityEmail?: string | null;
+  // Единый слой отображения валют (не расчёт — чистый проброс уже загруженных полей
+  // Trip, formulas.ts не тронуты). "Своя" сторона строки (клиент — для
+  // getClientDebtRows, перевозчик — для getCarrierDebtRows) — исходная ставка,
+  // не rateAmd (который может включать доп.расходы в других валютах).
+  rate?: number;
+  currency?: string;
+  exchangeRate?: number;
+  // Только для клиентских строк (используются вкладкой "Кассовые разрывы", см.
+  // debts/page.tsx cashGapRows = clientDebts.filter(cashGap>0)) — сторона
+  // перевозчика, которой в этой строке иначе вообще нет.
+  carrierRate?: number;
+  carrierCurrency?: string;
+  carrierExchangeRate?: number;
+  carrierPaidAmd?: number;
 }
 
 function calcDaysLeft(dueDate: Date | null, todayStart: Date): number | null {
@@ -121,6 +135,13 @@ export async function getClientDebtRows(prisma: PrismaClient, todayStart = new D
         entityName: t.client?.name ?? '—',
         entityPhone: (t.client as any)?.phone ?? null,
         entityEmail: (t.client as any)?.email ?? null,
+        rate: Number(t.clientRate ?? 0),
+        currency: t.currency || 'AMD',
+        exchangeRate: Number((t as any).exchangeRate ?? 1),
+        carrierRate: t.carrierRate != null ? Number(t.carrierRate) : undefined,
+        carrierCurrency: (t as any).carrierCurrency || t.currency || 'AMD',
+        carrierExchangeRate: (t as any).carrierExchangeRate != null ? Number((t as any).carrierExchangeRate) : undefined,
+        carrierPaidAmd,
       };
     })
     .filter((r) => r.remaining > 0);
@@ -173,6 +194,9 @@ export async function getCarrierDebtRows(prisma: PrismaClient, todayStart = new 
         cashGap,
         entityId: t.carrier?.id ?? 'unknown',
         entityName: t.carrier?.name ?? '—',
+        rate: t.carrierRate != null ? Number(t.carrierRate) : undefined,
+        currency: (t as any).carrierCurrency || t.currency || 'AMD',
+        exchangeRate: (t as any).carrierExchangeRate != null ? Number((t as any).carrierExchangeRate) : Number((t as any).exchangeRate ?? 1),
       };
     })
     .filter((r) => r.remaining > 0);
