@@ -52,7 +52,7 @@ export async function GET(req: Request) {
     function addSheet(
       name: string,
       color: string,
-      columns: { header: string; key: string; width: number; isNum?: boolean }[],
+      columns: { header: string; key: string; width: number; isNum?: boolean; numFmt?: string }[],
       rows: any[],
     ) {
       const ws = wb.addWorksheet(name);
@@ -72,7 +72,7 @@ export async function GET(req: Request) {
         const r = ws.addRow(row);
         r.eachCell((cell, colNumber) => {
           cell.font = bodyFont;
-          if (columns[colNumber - 1]?.isNum) cell.numFmt = NUM_FMT;
+          if (columns[colNumber - 1]?.isNum) cell.numFmt = columns[colNumber - 1]?.numFmt || NUM_FMT;
         });
         if (idx % 2 === 1) {
           r.eachCell(cell => { cell.fill = altFill; });
@@ -108,6 +108,12 @@ export async function GET(req: Request) {
       { header: '\u041e\u043f\u043b. \u043a\u043b\u0438\u0435\u043d\u0442\u043e\u043c \u058f', key: 'clientPaid', width: 18, isNum: true },
       { header: '\u041e\u043f\u043b. \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443 \u058f', key: 'carrierPaid', width: 22, isNum: true },
       { header: '\u0420\u0430\u0437\u043d\u0438\u0446\u0430 \u058f', key: 'diff', width: 16, isNum: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430 \u043a\u043b\u0438\u0435\u043d\u0442\u0430', key: 'clientCurrency', width: 14 },
+      { header: '\u041e\u043f\u043b. \u043a\u043b\u0438\u0435\u043d\u0442\u043e\u043c \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'clientPaidOriginal', width: 22, isNum: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441 \u043a\u043b\u0438\u0435\u043d\u0442\u0430', key: 'clientFxRate', width: 14, isNum: true, numFmt: '#,##0.0000' },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430', key: 'carrierCurrency', width: 16 },
+      { header: '\u041e\u043f\u043b. \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'carrierPaidOriginal', width: 24, isNum: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430', key: 'carrierFxRate', width: 16, isNum: true, numFmt: '#,##0.0000' },
     ], data.problemRows ?? []);
 
     // Sheet 2: Client debts
@@ -117,6 +123,9 @@ export async function GET(req: Request) {
       { header: '\u0421\u0442\u0430\u0432\u043a\u0430 \u058f', key: 'rate', width: 16, isNum: true },
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u058f', key: 'paid', width: 16, isNum: true },
       { header: '\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u058f', key: 'remaining', width: 16, isNum: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0421\u0442\u0430\u0432\u043a\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origRate', width: 18, isNum: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNum: true, numFmt: '#,##0.0000' },
     ], data.clientDebts ?? []);
 
     // Sheet 3: Carrier debts
@@ -126,6 +135,9 @@ export async function GET(req: Request) {
       { header: '\u0421\u0443\u043c\u043c\u0430 \u058f', key: 'rate', width: 16, isNum: true },
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u058f', key: 'paid', width: 16, isNum: true },
       { header: '\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u058f', key: 'remaining', width: 16, isNum: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0421\u0443\u043c\u043c\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origRate', width: 18, isNum: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNum: true, numFmt: '#,##0.0000' },
     ], data.carrierDebts ?? []);
 
     // Sheet 4: Profit
@@ -135,6 +147,9 @@ export async function GET(req: Request) {
       { header: '\u0414\u043e\u0445\u043e\u0434 \u058f', key: 'income', width: 16, isNum: true },
       { header: '\u0420\u0430\u0441\u0445\u043e\u0434 \u058f', key: 'expense', width: 16, isNum: true },
       { header: '\u041f\u0440\u0438\u0431\u044b\u043b\u044c \u058f', key: 'profit', width: 16, isNum: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0414\u043e\u0445\u043e\u0434 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origIncome', width: 18, isNum: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNum: true, numFmt: '#,##0.0000' },
     ], data.profitRows ?? []);
 
     // Sheet 5: Fuel (own fleet, VehicleTrip/Wialon)

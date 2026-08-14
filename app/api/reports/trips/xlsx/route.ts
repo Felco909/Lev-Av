@@ -20,6 +20,9 @@ interface ColDef {
   width: number;
   isNumber?: boolean;
   isDate?: boolean;
+  /** Переопределяет числовой формат по умолчанию ('#,##0') — например для курса/сумм
+   *  в валюте, где округление до целого потеряло бы значимую точность. */
+  numFmt?: string;
 }
 
 function createSheet(
@@ -60,7 +63,7 @@ function createSheet(
   columns.forEach((col, i) => {
     const colNum = i + 1;
     if (col.isNumber) {
-      ws.getColumn(colNum).numFmt = '#,##0';
+      ws.getColumn(colNum).numFmt = col.numFmt || '#,##0';
       ws.getColumn(colNum).alignment = { horizontal: 'right', vertical: 'middle' };
     }
     if (col.isDate) {
@@ -192,6 +195,9 @@ export async function GET(req: Request) {
         rate: Math.round(rate),
         paid: Math.round(paid),
         remaining: Math.round(computeDebtAmd(rate, paid)),
+        currency: t.currency || 'AMD',
+        origRate: Math.round(Number(t.clientRate ?? 0) * 100) / 100,
+        fxRate: Number(t.exchangeRate ?? 1),
       };
     });
 
@@ -204,6 +210,9 @@ export async function GET(req: Request) {
       { header: '\u0421\u0442\u0430\u0432\u043a\u0430 \u058f', key: 'rate', width: 16, isNumber: true },
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u058f', key: 'paid', width: 16, isNumber: true },
       { header: '\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u058f', key: 'remaining', width: 16, isNumber: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0421\u0443\u043c\u043c\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origRate', width: 18, isNumber: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNumber: true, numFmt: '#,##0.0000' },
     ], clientDebtRows, { headerColor: 'FF2563EB', totalsColumns: ['rate', 'paid', 'remaining'] });
 
     // ========== SHEET 2: Carrier Debts ==========
@@ -212,6 +221,7 @@ export async function GET(req: Request) {
     const carrierDebtRows = carrierDebtTrips.map(t => {
       const rate = computeCarrierDueAmd(Number((t as any).carrierRateAmd ?? t.carrierRate ?? 0), (t as any).expenses ?? []);
       const paid = Number((t as any).carrierPaidAmountAmd ?? (t as any).carrierPaidAmount ?? 0);
+      const carrierCurrency = (t as any).carrierCurrency || t.currency || 'AMD';
       return {
         carrier: t.carrier?.name || '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d',
         tripNumber: t.tripNumber,
@@ -221,6 +231,9 @@ export async function GET(req: Request) {
         rate: Math.round(rate),
         paid: Math.round(paid),
         remaining: Math.round(computeDebtAmd(rate, paid)),
+        currency: carrierCurrency,
+        origRate: t.carrierRate != null ? Math.round(Number(t.carrierRate) * 100) / 100 : null,
+        fxRate: Number((t as any).carrierExchangeRate ?? t.exchangeRate ?? 1),
       };
     });
 
@@ -233,6 +246,9 @@ export async function GET(req: Request) {
       { header: '\u0421\u0443\u043c\u043c\u0430 \u058f', key: 'rate', width: 16, isNumber: true },
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u058f', key: 'paid', width: 16, isNumber: true },
       { header: '\u041e\u0441\u0442\u0430\u0442\u043e\u043a \u058f', key: 'remaining', width: 16, isNumber: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0421\u0443\u043c\u043c\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origRate', width: 18, isNumber: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNumber: true, numFmt: '#,##0.0000' },
     ], carrierDebtRows, { headerColor: 'FFEA580C', totalsColumns: ['rate', 'paid', 'remaining'] });
 
     // ========== SHEET 3: Profit ==========
@@ -252,6 +268,9 @@ export async function GET(req: Request) {
         revenue: Math.round(revenue),
         expense: Math.round(expense),
         profit: Math.round(profit),
+        currency: t.currency || 'AMD',
+        origRevenue: Math.round(Number(t.clientRate ?? 0) * 100) / 100,
+        fxRate: Number(t.exchangeRate ?? 1),
       };
     });
 
@@ -264,6 +283,9 @@ export async function GET(req: Request) {
       { header: '\u0414\u043e\u0445\u043e\u0434 \u058f', key: 'revenue', width: 16, isNumber: true },
       { header: '\u0420\u0430\u0441\u0445\u043e\u0434 \u058f', key: 'expense', width: 16, isNumber: true },
       { header: '\u041f\u0440\u0438\u0431\u044b\u043b\u044c \u058f', key: 'profit', width: 16, isNumber: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430', key: 'currency', width: 12 },
+      { header: '\u0414\u043e\u0445\u043e\u0434 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'origRevenue', width: 18, isNumber: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441', key: 'fxRate', width: 12, isNumber: true, numFmt: '#,##0.0000' },
     ], profitRows, { headerColor: 'FF16A34A', totalsColumns: ['revenue', 'expense', 'profit'] });
 
     // ========== SHEET 4: Cash Gaps ==========
@@ -277,6 +299,8 @@ export async function GET(req: Request) {
         const clientRate = Number((t as any).clientRateAmd ?? t.clientRate ?? 0);
         const clientPaid = Number((t as any).clientPaidAmountAmd ?? 0);
         const carrierPaid = Number((t as any).carrierPaidAmountAmd ?? (t as any).carrierPaidAmount ?? 0);
+        const carrierCurrency = (t as any).carrierCurrency || t.currency || 'AMD';
+        const carrierFxRate = Number((t as any).carrierExchangeRate ?? t.exchangeRate ?? 1);
         return {
           date: t.tripDate,
           tripNumber: t.tripNumber,
@@ -286,6 +310,14 @@ export async function GET(req: Request) {
           clientPaid: Math.round(clientPaid),
           carrierPaid: Math.round(carrierPaid),
           gap: Math.round(carrierPaid - clientPaid),
+          clientCurrency: t.currency || 'AMD',
+          clientOrigRate: Math.round(Number(t.clientRate ?? 0) * 100) / 100,
+          clientFxRate: Number(t.exchangeRate ?? 1),
+          carrierCurrency,
+          // \u041e\u0442\u0434\u0435\u043b\u044c\u043d\u043e\u0433\u043e \u043f\u043e\u043b\u044f \u0432\u0430\u043b\u044e\u0442\u044b \u0434\u043b\u044f \u0444\u0430\u043a\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0439 \u0432\u044b\u043f\u043b\u0430\u0442\u044b \u0432 \u0441\u0445\u0435\u043c\u0435 \u043d\u0435\u0442 \u2014 \u0441\u0447\u0438\u0442\u0430\u0435\u043c \u0432 \u0432\u0430\u043b\u044e\u0442\u0435
+          // \u0441\u0442\u0430\u0432\u043a\u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430 (carrierCurrency/carrierExchangeRate), \u0441\u043c. \u0440\u0435\u0448\u0435\u043d\u0438\u0435 \u043f\u043e \u0411\u0430\u0442\u0447\u0443 3.
+          carrierPaidOriginal: carrierCurrency !== 'AMD' && carrierFxRate ? Math.round((carrierPaid / carrierFxRate) * 100) / 100 : Math.round(carrierPaid),
+          carrierFxRate,
         };
       });
 
@@ -298,6 +330,12 @@ export async function GET(req: Request) {
       { header: '\u041f\u043e\u043b\u0443\u0447\u0435\u043d\u043e \u043e\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430 \u058f', key: 'clientPaid', width: 22, isNumber: true },
       { header: '\u041e\u043f\u043b\u0430\u0447\u0435\u043d\u043e \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0443 \u058f', key: 'carrierPaid', width: 24, isNumber: true },
       { header: '\u0420\u0430\u0437\u0440\u044b\u0432 \u058f', key: 'gap', width: 16, isNumber: true },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430 \u043a\u043b\u0438\u0435\u043d\u0442\u0430', key: 'clientCurrency', width: 14 },
+      { header: '\u0421\u0442\u0430\u0432\u043a\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'clientOrigRate', width: 18, isNumber: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441 \u043a\u043b\u0438\u0435\u043d\u0442\u0430', key: 'clientFxRate', width: 14, isNumber: true, numFmt: '#,##0.0000' },
+      { header: '\u0412\u0430\u043b\u044e\u0442\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430', key: 'carrierCurrency', width: 16 },
+      { header: '\u041e\u043f\u043b\u0430\u0442\u0430 \u0432 \u0432\u0430\u043b\u044e\u0442\u0435', key: 'carrierPaidOriginal', width: 18, isNumber: true, numFmt: '#,##0.00' },
+      { header: '\u041a\u0443\u0440\u0441 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430', key: 'carrierFxRate', width: 16, isNumber: true, numFmt: '#,##0.0000' },
     ], cashGapRows, { headerColor: 'FFDC2626', totalsColumns: ['clientRate', 'clientPaid', 'carrierPaid', 'gap'] });
 
     // ========== SHEET 5: Fuel (own fleet, VehicleTrip/Wialon) ==========

@@ -85,6 +85,7 @@ export async function GET(req: Request) {
           clientRateAmd: true, clientRate: true,
           carrierRateAmd: true, carrierRate: true,
           profitAmd: true, profit: true,
+          currency: true, exchangeRate: true,
           client: { select: { name: true } },
           expenses: { select: { amountAmd: true, description: true } },
         },
@@ -99,6 +100,7 @@ export async function GET(req: Request) {
           id: true, tripNumber: true,
           clientPaidAmountAmd: true, clientPaidAmount: true,
           carrierPaidAmountAmd: true, carrierPaidAmount: true,
+          currency: true, exchangeRate: true, carrierCurrency: true, carrierExchangeRate: true,
           client: { select: { name: true } },
           carrier: { select: { name: true } },
         },
@@ -111,6 +113,7 @@ export async function GET(req: Request) {
       id: r.id, tripNumber: r.tripNumber,
       clientName: r.entityName, clientId: r.entityId,
       rate: r.rateAmd, paid: r.paidAmd, remaining: r.remaining,
+      currency: r.currency, origRate: r.rate, fxRate: r.exchangeRate,
     }));
 
     const totalClientDebt = sumDebt(clientRows);
@@ -132,6 +135,7 @@ export async function GET(req: Request) {
     const carrierDebts = carrierRows.map(r => ({
       id: r.id, tripNumber: r.tripNumber, carrierName: r.entityName,
       rate: r.rateAmd, paid: r.paidAmd, remaining: r.remaining,
+      currency: r.currency, origRate: r.rate, fxRate: r.exchangeRate,
     }));
 
     const totalCarrierDebt = sumDebt(carrierRows);
@@ -148,6 +152,7 @@ export async function GET(req: Request) {
       return {
         id: t.id, tripNumber: t.tripNumber, clientName: t.client?.name ?? '',
         income, expense, profit: profitVal,
+        currency: t.currency || 'AMD', origIncome: Number(t.clientRate ?? 0), fxRate: Number(t.exchangeRate ?? 1),
       };
     });
 
@@ -162,10 +167,16 @@ export async function GET(req: Request) {
         const clientPaid = Number(t.clientPaidAmountAmd ?? t.clientPaidAmount ?? 0);
         const carrierPaid = Number(t.carrierPaidAmountAmd ?? t.carrierPaidAmount ?? 0);
         const diff = computeCashGapAmd(clientPaid, carrierPaid);
+        const clientCurrency = t.currency || 'AMD';
+        const clientFxRate = Number(t.exchangeRate ?? 1);
+        const carrierCurrency = t.carrierCurrency || t.currency || 'AMD';
+        const carrierFxRate = Number(t.carrierExchangeRate ?? t.exchangeRate ?? 1);
         return {
           id: t.id, tripNumber: t.tripNumber,
           clientName: t.client?.name ?? '', carrierName: t.carrier?.name ?? '',
           clientPaid, carrierPaid, diff,
+          clientCurrency, clientPaidOriginal: clientCurrency !== 'AMD' && clientFxRate ? clientPaid / clientFxRate : clientPaid, clientFxRate,
+          carrierCurrency, carrierPaidOriginal: carrierCurrency !== 'AMD' && carrierFxRate ? carrierPaid / carrierFxRate : carrierPaid, carrierFxRate,
         };
       })
       .filter(r => r.diff > 0)
