@@ -29,7 +29,8 @@ import { VEHICLE_TYPE_MAP } from '@/lib/vehicle-types';
 
 interface Expense {
   expenseType: string;
-  amount: number;
+  // Тоже допускает промежуточную строку во время набора — та же причина, что и exchangeRate.
+  amount: number | string;
   currency: string;
   // Может временно быть "сырой" строкой во время набора (напр. "4.") — см.
   // updateClientExpense/updateCarrierExpense, чтобы не терять десятичную точку на
@@ -67,10 +68,13 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [contactId, setContactId] = useState('');
   const [routeFrom, setRouteFrom] = useState('');
   const [routeTo, setRouteTo] = useState('');
-  const [distance, setDistance] = useState<number | ''>('');
-  const [cargoWeight, setCargoWeight] = useState<number | ''>('');
+  const [distance, setDistance] = useState('');
+  // TMS-AUDIT: значения хранятся как "сырая" строка, парсятся в число только при
+  // использовании — иначе онChange, вызывающий Number(e.target.value) на каждое
+  // нажатие клавиши, "съедает" десятичную точку/недописанный ввод (было "1234.5" -> "05").
+  const [cargoWeight, setCargoWeight] = useState('');
   const [tripType, setTripType] = useState('own_transport');
-  const [clientRate, setClientRate] = useState(0);
+  const [clientRate, setClientRate] = useState('0');
   const [vehicleId, setVehicleId] = useState('');
   // Открытые рейсы выбранной машины — для привязки заявки к рейсу (см. архитектуру
   // "заявка → рейс"). Один открытый — привязка автоматическая (на сервере), несколько —
@@ -79,7 +83,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [selectedVehicleTripId, setSelectedVehicleTripId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [carrierId, setCarrierId] = useState('');
-  const [carrierRate, setCarrierRate] = useState(0);
+  const [carrierRate, setCarrierRate] = useState('0');
   const [status, setStatus] = useState('new');
   const [tripDate, setTripDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [unloadDate, setUnloadDate] = useState('');
@@ -99,7 +103,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   const [customsDeparture, setCustomsDeparture] = useState('');
   const [customsDestination, setCustomsDestination] = useState('');
   const [cargoName, setCargoName] = useState('');
-  const [cargoValue, setCargoValue] = useState<number | ''>('');
+  const [cargoValue, setCargoValue] = useState('');
   const [truckType, setTruckType] = useState('');
   const [loadingAddress, setLoadingAddress] = useState('');
   const [unloadingAddress, setUnloadingAddress] = useState('');
@@ -339,7 +343,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     }
     if (extractData.routeFrom) setRouteFrom(String(extractData.routeFrom));
     if (extractData.routeTo) setRouteTo(String(extractData.routeTo));
-    if (extractData.amount != null && !isNaN(Number(extractData.amount))) setClientRate(Number(extractData.amount));
+    if (extractData.amount != null && !isNaN(Number(extractData.amount))) setClientRate(String(extractData.amount));
     if (extractData.currency && (CURRENCIES as readonly string[]).includes(String(extractData.currency).toUpperCase())) {
       setCurrency(String(extractData.currency).toUpperCase());
     }
@@ -385,14 +389,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         setContactId(t?.contactId ?? '');
         setRouteFrom(t?.routeFrom ?? '');
         setRouteTo(t?.routeTo ?? '');
-        setDistance(t?.distance ?? '');
-        setCargoWeight(t?.cargoWeight != null ? Number(t.cargoWeight) : '');
+        setDistance(t?.distance != null ? String(t.distance) : '');
+        setCargoWeight(t?.cargoWeight != null ? String(t.cargoWeight) : '');
         setTripType(t?.tripType ?? 'own_transport');
-        setClientRate(t?.clientRate ?? 0);
+        setClientRate(String(t?.clientRate ?? 0));
         setVehicleId(t?.vehicleId ?? '');
         setDriverId(t?.driverId ?? '');
         setCarrierId(t?.carrierId ?? '');
-        setCarrierRate(t?.carrierRate ?? 0);
+        setCarrierRate(String(t?.carrierRate ?? 0));
         paymentDueManualRef.current = false;
         setUnloadPaymentHint('');
         if (copyFromId) {
@@ -425,7 +429,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
         setCustomsDeparture(t?.customsDeparture || '');
         setCustomsDestination(t?.customsDestination || '');
         setCargoName(t?.cargoName || '');
-        setCargoValue(t?.cargoValue != null ? Number(t.cargoValue) : '');
+        setCargoValue(t?.cargoValue != null ? String(t.cargoValue) : '');
         setTruckType(t?.truckType || '');
         setLoadingAddress(t?.loadingAddress || '');
         setUnloadingAddress(t?.unloadingAddress || '');
@@ -531,8 +535,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (!rt) return;
     setRouteFrom(rt.routeFrom);
     setRouteTo(rt.routeTo);
-    if (rt.distance != null) setDistance(rt.distance);
-    if (rt.defaultRate != null) setClientRate(rt.defaultRate);
+    if (rt.distance != null) setDistance(String(rt.distance));
+    if (rt.defaultRate != null) setClientRate(String(rt.defaultRate));
     if (rt.currency) handleCurrencyChange(rt.currency);
   };
 
@@ -628,8 +632,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
   const effectiveRate = currency === 'AMD' ? 1 : (parseRateInput(exchangeRate) || 1);
   const effectiveCarrierRate = carrierCurrency === 'AMD' ? 1 : (parseRateInput(carrierExchangeRate) || 1);
-  const clientRateAmd = Math.round(clientRate * effectiveRate * 100) / 100;
-  const carrierRateAmd = Math.round(carrierRate * effectiveCarrierRate * 100) / 100;
+  const clientRateAmd = Math.round(parseRateInput(clientRate) * effectiveRate * 100) / 100;
+  const carrierRateAmd = Math.round(parseRateInput(carrierRate) * effectiveCarrierRate * 100) / 100;
   const totalClientAmd = useMemo(() => Math.round((clientRateAmd + totalClientExpensesAmd) * 100) / 100, [clientRateAmd, totalClientExpensesAmd]);
   const totalCarrierAmd = useMemo(() => Math.round((carrierRateAmd + totalCarrierExpensesAmd) * 100) / 100, [carrierRateAmd, totalCarrierExpensesAmd]);
   // Единая формула прибыли (lib/finance/formulas.ts) — та же, что использует бэкенд.
@@ -671,7 +675,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
       if (i !== idx) return e;
       const u = { ...e, [field]: value };
       if (field === 'amount' || field === 'currency' || field === 'exchangeRate') {
-        const amt = Number(field === 'amount' ? value : u.amount) || 0;
+        const amt = parseRateInput(field === 'amount' ? value : u.amount) || 0;
         const cur = field === 'currency' ? value : u.currency;
         // parseRateInput вместо Number() — во время набора курса значение может быть
         // промежуточной строкой ("4.", "4,4"), Number() дал бы NaN/неверный результат.
@@ -906,7 +910,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
     if (!clientId) { appToast.error('Выберите клиента'); return; }
     if (!routeFrom || !routeTo) { appToast.error('Укажите маршрут'); return; }
     if (!tripDate) { appToast.error('Укажите дату'); return; }
-    if (!clientRate || clientRate <= 0) { appToast.error('Укажите ставку клиента (> 0)'); return; }
+    if (!(parseRateInput(clientRate) > 0)) { appToast.error('Укажите ставку клиента (> 0)'); return; }
     if (tripType === 'own_transport') {
       if (!vehicleId) { appToast.error('Выберите машину для собственного транспорта'); return; }
       if (!driverId) { appToast.error('Выберите водителя'); return; }
@@ -1005,7 +1009,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
             await fetch('/api/route-templates', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ routeFrom, routeTo, distance: distance ? Number(distance) : null, defaultRate: clientRate || null, currency }),
+              body: JSON.stringify({ routeFrom, routeTo, distance: distance ? Number(distance) : null, defaultRate: parseRateInput(clientRate) || null, currency }),
             });
           } catch {}
         }
@@ -1206,11 +1210,11 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Расстояние (км)</label>
-              <input type="number" min={0} value={distance} onChange={(e) => setDistance(e.target.value ? Number(e.target.value) : '')} placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"  onWheel={(e) => e.currentTarget.blur()}/>
+              <input type="text" inputMode="decimal" value={distance} onChange={(e) => setDistance(e.target.value)} placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Вес груза (т)</label>
-              <input type="number" min={0} step="0.1" value={cargoWeight} onChange={(e) => setCargoWeight(e.target.value ? Number(e.target.value) : '')} placeholder="20" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"  onWheel={(e) => e.currentTarget.blur()}/>
+              <input type="text" inputMode="decimal" value={cargoWeight} onChange={(e) => setCargoWeight(e.target.value)} placeholder="20" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
               <div>
@@ -1435,14 +1439,14 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0432\u043a\u0430 \u043a\u043b\u0438\u0435\u043d\u0442\u0430"}, {CURRENCY_SYMBOLS[currency] || currency} *</label>
-                <input type="number" min={0} value={clientRate} onChange={(e) => setClientRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" required  onWheel={(e) => e.currentTarget.blur()}/>
+                <input type="text" inputMode="decimal" value={clientRate} onChange={(e) => setClientRate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" required />
                 {currency !== 'AMD' && (
                   <p className="text-xs font-mono text-muted-foreground mt-1">{clientRateAmd.toLocaleString('ru-RU')} {"\u058F"}</p>
                 )}
               </div>
 
               {lastRateHint && !isEdit && (
-                <button type="button" onClick={() => { setClientRate(lastRateHint.rate); if (lastRateHint.currency !== currency) handleCurrencyChange(lastRateHint.currency); }}
+                <button type="button" onClick={() => { setClientRate(String(lastRateHint.rate)); if (lastRateHint.currency !== currency) handleCurrencyChange(lastRateHint.currency); }}
                   className="w-full text-left text-[11px] bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg px-2.5 py-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition">
                   <span className="text-blue-800 dark:text-blue-300">{"\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u0441\u0442\u0430\u0432\u043a\u0430: "}<strong>{lastRateHint.rate.toLocaleString('ru-RU')} {CURRENCY_SYMBOLS[lastRateHint.currency] || lastRateHint.currency}</strong> ({lastRateHint.date})</span>
                   <span className="text-blue-600 dark:text-blue-400 ml-1">{"\u2190 \u043f\u0440\u0438\u043c\u0435\u043d\u0438\u0442\u044c"}</span>
@@ -1467,7 +1471,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                           <select value={exp.expenseType} onChange={(e) => updateClientExpense(idx, 'expenseType', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background flex-1 min-w-[90px]">
                             {Object.entries(EXPENSE_TYPE_MAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
-                          <input type="number" min={0} value={exp.amount} onChange={(e) => updateClientExpense(idx, 'amount', Number(e.target.value))} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                          <input type="text" inputMode="decimal" value={exp.amount} onChange={(e) => updateClientExpense(idx, 'amount', e.target.value)} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono" />
                           <select value={exp.currency} onChange={(e) => updateClientExpense(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-[68px]">
                             {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
@@ -1642,7 +1646,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
 
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0442\u0430\u0432\u043a\u0430 \u043f\u0435\u0440\u0435\u0432\u043e\u0437\u0447\u0438\u043a\u0430"}, {CURRENCY_SYMBOLS[carrierCurrency] || carrierCurrency}</label>
-                  <input type="number" min={0} value={carrierRate} onChange={(e) => setCarrierRate(Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                  <input type="text" inputMode="decimal" value={carrierRate} onChange={(e) => setCarrierRate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" />
                   {carrierCurrency !== 'AMD' && (
                     <p className="text-xs font-mono text-muted-foreground mt-1">{carrierRateAmd.toLocaleString('ru-RU')} {"\u058F"}</p>
                   )}
@@ -1666,7 +1670,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                             <select value={exp.expenseType} onChange={(e) => updateCarrierExpense(idx, 'expenseType', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background flex-1 min-w-[90px]">
                               {Object.entries(EXPENSE_TYPE_MAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                             </select>
-                            <input type="number" min={0} value={exp.amount} onChange={(e) => updateCarrierExpense(idx, 'amount', Number(e.target.value))} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono"  onWheel={(e) => e.currentTarget.blur()}/>
+                            <input type="text" inputMode="decimal" value={exp.amount} onChange={(e) => updateCarrierExpense(idx, 'amount', e.target.value)} placeholder="Сумма" className="border rounded px-2 py-1.5 text-xs bg-background w-20 font-mono" />
                             <select value={exp.currency} onChange={(e) => updateCarrierExpense(idx, 'currency', e.target.value)} className="border rounded px-2 py-1.5 text-xs bg-background w-[68px]">
                               {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
@@ -2095,8 +2099,8 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Стоимость груза (USD)</label>
-                  <input type="number" min="0" step="0.01" value={cargoValue} onChange={e => setCargoValue(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" onWheel={e => e.currentTarget.blur()} />
+                  <input type="text" inputMode="decimal" value={cargoValue} onChange={e => setCargoValue(e.target.value)}
+                    placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Тип ТС / прицепа</label>
