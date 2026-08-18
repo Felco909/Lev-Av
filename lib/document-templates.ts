@@ -215,7 +215,7 @@ export function generateInvoiceHtml(trip: TripData, ov?: DocOverrides): string {
   ${basisText ? `<div style="text-align:center; font-size:12px; margin-bottom:14px; font-style:italic;">${basisText}</div>` : ''}
 
   <div class="client-block">
-    <div class="cl-name">${clientName}</div>
+    <div class="cl-name">Заказчик: ${clientName}</div>
     ${clientAddress ? `<div>\u042E\u0440\u0438\u0434\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0430\u0434\u0440\u0435\u0441: ${clientAddress}</div>` : ''}
     ${clientInn ? `<div>\u0418\u041D\u041D/\u041A\u041F\u041F: ${clientInn}</div>` : ''}
   </div>

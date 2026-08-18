@@ -128,7 +128,7 @@ export function invoiceDocx(trip: DocData, ov?: DocOverrides): Document {
         ...(basisText ? [txt(basisText)] : []),
         emptyLine(),
         txt('\u041A\u041B\u0418\u0415\u041D\u0422', { bold: true }),
-        txt(`Наименование: ${cName}`),
+        txt(`Заказчик: ${cName}`),
         txt(`ИНН: ${cInn}`),
         txt(`Контакт: ${cContact}`),
         txt(`Адрес: ${cAddr}`),
@@ -636,7 +636,7 @@ export async function invoiceXlsx(trip: DocData, ov?: DocOverrides): Promise<Buf
     nextRow += 1;
   }
 
-  ws.getCell(`A${nextRow}`).value = '\u041A\u043B\u0438\u0435\u043D\u0442:';
+  ws.getCell(`A${nextRow}`).value = '\u0417\u0430\u043A\u0430\u0437\u0447\u0438\u043A:';
   ws.getCell(`A${nextRow}`).font = { bold: true };
   ws.getCell(`B${nextRow}`).value = cName;
   ws.getCell(`A${nextRow + 1}`).value = '\u0418\u041D\u041D:';
