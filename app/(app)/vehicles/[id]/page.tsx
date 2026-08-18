@@ -142,7 +142,9 @@ export default function VehicleDetailPage() {
                 {economics && economics.totalFuelLiters > 0 ? `${economics.totalFuelLiters} л` : '—'}
               </p>
               {economics && economics.fuelPer100Km != null && (
-                <p className="text-[10px] text-muted-foreground mt-0.5">{economics.fuelPer100Km} л/100км · {formatCurrency(economics.totalFuelCost)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {economics.fuelPer100Km} л/100км · {economics.totalFuelCost > 0 ? formatCurrency(economics.totalFuelCost) : 'стоимость не указана'}
+                </p>
               )}
             </div>
           </div>
