@@ -1197,7 +1197,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Дата заявки *</label>
+              <label className="text-xs text-muted-foreground mb-1 block">Дата погрузки *</label>
               <input type="date" value={tripDate} onChange={(e) => setTripDate(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" required />
             </div>
             <div>

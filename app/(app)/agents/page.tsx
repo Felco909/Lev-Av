@@ -470,7 +470,7 @@ export default function AgentsPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Дата заявки *</label>
+                <label className="text-xs text-muted-foreground mb-1 block">Дата погрузки *</label>
                 <input
                   type="date"
                   value={tripDate}
