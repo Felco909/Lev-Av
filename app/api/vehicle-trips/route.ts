@@ -375,6 +375,23 @@ export async function PUT(req: NextRequest) {
     },
   });
 
+  // Архивация/восстановление через обычный PUT (выпадающий список "Статус" в карточке —
+  // единственный способ вернуть рейс из архива в UI, отдельный эндпоинт .../archive
+  // фронтендом не используется) — раньше эта смена статуса нигде не логировалась.
+  // Те же имена action ('archived'/'restored'), что и в .../archive route — общий текст
+  // в журнале событий карточки (page.tsx, строки "Рейс отправлен в архив"/"...возвращён").
+  if (st !== undefined && st !== before.status) {
+    if (st === 'archived') {
+      await prisma.vehicleTripEvent.create({
+        data: { vehicleTripId: id, action: 'archived', field: 'status', oldValue: before.status, newValue: 'archived', userId: userId ?? null },
+      });
+    } else if (before.status === 'archived') {
+      await prisma.vehicleTripEvent.create({
+        data: { vehicleTripId: id, action: 'restored', field: 'status', oldValue: 'archived', newValue: st, userId: userId ?? null },
+      });
+    }
+  }
+
   // Рейс полностью редактируем независимо от статуса (переработка модуля "Рейсы",
   // 2026-07-23) — авторасчёт по Wialon и синхронизация пробега машины теперь выполняются
   // при любой правке дат, а не только для ещё не завершённых рейсов. Правки уже
