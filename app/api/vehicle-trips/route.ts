@@ -419,7 +419,10 @@ export async function DELETE(req: NextRequest) {
     prisma.trip.count({ where: { vehicleTripId: id } }),
     prisma.fleetExpense.count({ where: { vehicleTripId: id } }),
     prisma.fuelRecord.count({ where: { vehicleTripId: id } }),
-    prisma.vehicleTripEvent.count({ where: { vehicleTripId: id } }),
+    // 'status_changed' — автособытие фонового геозонового трекинга (lib/company-base/baseCheck.ts),
+    // появляется на любом активном рейсе за первые же минуты и не отражает реальных действий
+    // пользователя — не должно блокировать удаление ещё не тронутого рейса.
+    prisma.vehicleTripEvent.count({ where: { vehicleTripId: id, NOT: { action: 'status_changed' } } }),
   ]);
   const totalDependents = trips + fleetExpenses + fuelRecords + events;
   if (totalDependents > 0) {
