@@ -1128,7 +1128,10 @@ export default function VehicleTripsPage() {
                             <label className="text-[11px] text-muted-foreground">{'Статус'}</label>
                             <select value={detailForm.status} onChange={e => setDetailForm({...detailForm, status: e.target.value})} className="border rounded-lg px-2 py-1.5 text-xs w-full mt-0.5">
                               <option value="active">{'В работе'}</option>
-                              <option value="completed">{'Завершён'}</option>
+                              {/* Активный рейс не переводим в "Завершён" отсюда — это в обход
+                                  живого снимка Wialon и расчёта по GPS-треку. Только через
+                                  кнопку "Закрыть рейс" выше. */}
+                              <option value="completed" disabled={detail?.status === 'active'} title={detail?.status === 'active' ? 'Чтобы завершить рейс, используйте кнопку «Закрыть рейс» — она посчитает пробег/топливо по Wialon' : undefined}>{'Завершён'}</option>
                               <option value="archived">{'Архив'}</option>
                             </select>
                           </div>
