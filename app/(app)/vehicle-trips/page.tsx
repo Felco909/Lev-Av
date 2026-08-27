@@ -314,6 +314,8 @@ export default function VehicleTripsPage() {
   const [closeError, setCloseError] = useState<string | null>(null);
   const [tripFormError, setTripFormError] = useState<string | null>(null);
   const [detailSaveError, setDetailSaveError] = useState<string | null>(null);
+  const [newTripSnapshotLoading, setNewTripSnapshotLoading] = useState(false);
+  const [newTripHint, setNewTripHint] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
@@ -399,6 +401,41 @@ export default function VehicleTripsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.vehicle?.wialonUnitId, detailForm.returnDate, detailForm.departureDate]);
 
+  // То же автозаполнение — уже в окне создания рейса, а не только в развёрнутой карточке
+  // после сохранения (машина и дата выезда уже известны до "Создать").
+  useEffect(() => {
+    if (!showTripModal) return;
+    const wialonUnitId = vehicles.find(v => v.id === tripForm.vehicleId)?.wialonUnitId;
+    if (!wialonUnitId || !tripForm.departureDate) { setNewTripHint(null); return; }
+    let cancelled = false;
+    setNewTripSnapshotLoading(true);
+    setNewTripHint(null);
+    fetchWialonSnapshot(wialonUnitId, tripForm.departureDate, tripForm.returnDate).then(data => {
+      if (cancelled) return;
+      if (data.available) {
+        setTripForm(prev => ({
+          ...prev,
+          startMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
+          startFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
+          departureLat: data.lat != null ? String(data.lat) : prev.departureLat,
+          departureLon: data.lon != null ? String(data.lon) : prev.departureLon,
+        }));
+        setNewTripHint(
+          data.mileageKm == null && data.rangeDistanceKm != null
+            ? wialonHintText('too_old', data.rangeDistanceKm)
+            : data.isApproximate
+            ? 'Ближайшее найденное показание Wialon не точно на этот момент (машина могла быть вне сети) — проверьте вручную'
+            : null
+        );
+      } else {
+        setNewTripHint(wialonHintText(data.reason, data.rangeDistanceKm));
+      }
+    }).catch(() => { if (!cancelled) setNewTripHint(wialonHintText('wialon_error')); })
+      .finally(() => { if (!cancelled) setNewTripSnapshotLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showTripModal, tripForm.vehicleId, tripForm.departureDate]);
+
   const recalculateFuel = async () => {
     if (!detail?.id) return;
     setRecalculating(true);
@@ -449,9 +486,10 @@ export default function VehicleTripsPage() {
   useEffect(() => { loadUnattachedCount(); }, [loadUnattachedCount]);
 
   // --- Trip CRUD ---
-  // Создание — только машина/водитель/даты (см. план). Всё остальное редактируется
-  // в развёрнутой карточке (detailForm) после создания, не в этой модалке.
-  const openNewTrip = () => { setTripForm(emptyTripForm()); setTripFormError(null); setShowTripModal(true); };
+  // Создание — машина/водитель/даты + пробег/топливо на выезд (автозаполняется из Wialon,
+  // если у машины привязан wialonUnitId). Расходы и статус — всё ещё только в развёрнутой
+  // карточке (detailForm) после создания, не в этой модалке.
+  const openNewTrip = () => { setTripForm(emptyTripForm()); setTripFormError(null); setNewTripHint(null); setShowTripModal(true); };
 
   const saveTripForm = async () => {
     if (!tripForm.vehicleId || !tripForm.departureDate) return;
@@ -1498,7 +1536,7 @@ export default function VehicleTripsPage() {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowTripModal(false)}>
           <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold">{'Новый рейс машины'}</h2>
-            <p className="text-xs text-muted-foreground -mt-2">{'Пробег, топливо, расходы и статус заполняются потом — в развёрнутой карточке рейса.'}</p>
+            <p className="text-xs text-muted-foreground -mt-2">{'Расходы и статус заполняются потом — в развёрнутой карточке рейса.'}</p>
 
             <div>
               <label className="text-xs text-muted-foreground">{'№ рейса'}</label>
@@ -1529,6 +1567,18 @@ export default function VehicleTripsPage() {
                 <input type="datetime-local" value={tripForm.returnDate} onChange={e => setTripForm({...tripForm, returnDate: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" />
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Пробег на выезд (км)'} {newTripSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                <input type="number" min="0" value={tripForm.startMileage} onChange={e => setTripForm({...tripForm, startMileage: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'из Wialon, либо вручную'} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground flex items-center gap-1">{'Топливо на выезд (л)'} {newTripSnapshotLoading && <Loader2 className="w-3 h-3 animate-spin" />}</label>
+                <input type="number" step="0.01" min="0" value={tripForm.startFuel} onChange={e => setTripForm({...tripForm, startFuel: e.target.value})} className="border rounded-lg px-3 py-2 text-sm w-full mt-0.5" placeholder={'из Wialon, либо вручную'} />
+              </div>
+            </div>
+            {newTripHint && <p className="text-[10px] text-amber-600 -mt-2">{newTripHint}</p>}
 
             {tripFormError && <p className="text-xs text-red-600">{tripFormError}</p>}
             <div className="flex justify-end gap-2 pt-2">
