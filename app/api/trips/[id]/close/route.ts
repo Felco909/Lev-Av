@@ -131,12 +131,24 @@ export async function POST(request: Request, { params: paramsPromise }: { params
           } : {}),
         },
       });
+      // Раньше это закрытие (в отличие от обычной правки заявки и от reopen ниже) не
+      // оставляло следа в TripHistory — при аудите закрытия рейсов/заявок обнаружено,
+      // что журнал пуст даже после завершения (аудит закрытия рейсов/заявок, эта же
+      // несостыковка уже была исправлена для VehicleTrip).
+      await recordTripHistory(tripId, 'status_changed', (session as any)?.user?.id ?? null, (session as any)?.user?.name ?? 'Система', [
+        { field: 'status', oldValue: trip.status, newValue: 'completed' },
+        { field: 'clientPaymentStatus', oldValue: trip.clientPaymentStatus, newValue: 'paid' },
+        ...(trip.tripType === 'expedition' ? [{ field: 'carrierPaymentStatus', oldValue: trip.carrierPaymentStatus, newValue: 'paid' }] : []),
+      ]);
     } else {
       // Simple close — just change status
       await prisma.trip.update({
         where: { id: tripId },
         data: { status: 'completed' },
       });
+      await recordTripHistory(tripId, 'status_changed', (session as any)?.user?.id ?? null, (session as any)?.user?.name ?? 'Система', [
+        { field: 'status', oldValue: trip.status, newValue: 'completed' },
+      ]);
     }
 
     return NextResponse.json({ success: true, status: 'completed' });
