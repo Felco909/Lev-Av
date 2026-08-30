@@ -37,11 +37,24 @@ export async function maybeCalculateTotals(tripId: string, departureDate: Date |
 /** Поля закрытого рейса, правки которых логируются (журнал изменений, VehicleTripEvent).
  *  calculatedKm/calculatedFuelConsumedL добавлены при TMS-AUDIT-0025 — раньше пересчёт по
  *  Wialon на уже закрытом рейсе (кнопка "Пересчитать по Wialon" и автопересчёт при любой
- *  правке дат, см. maybeCalculateTotals выше) не оставлял следа "было/стало". */
+ *  правке дат, см. maybeCalculateTotals выше) не оставлял следа "было/стало". Стартовые/
+ *  конечные показатели (пробег/топливо/координаты) отсюда убраны — они исторические
+ *  снимки рейса и логируются ВСЕГДА, а не только для закрытого рейса, см.
+ *  HISTORICAL_SNAPSHOT_FIELDS/logHistoricalSnapshotEdits ниже (аудит интеграции с Wialon,
+ *  30.08.2026 — иначе правка этих полей на ещё активном рейсе не оставляла следа). */
 export const LOGGED_VEHICLE_TRIP_FIELDS = [
-  'departureDate', 'returnDate', 'finalRevenueAmd', 'finalExpensesAmd',
-  'startMileage', 'endMileage', 'startFuel', 'endFuel', 'notes',
+  'departureDate', 'returnDate', 'finalRevenueAmd', 'finalExpensesAmd', 'notes',
   'calculatedKm', 'calculatedFuelConsumedL',
+] as const;
+
+/** Исторические стартовые/конечные показатели рейса (пробег, топливо, координаты) — по
+ *  требованию должны фиксироваться один раз и оставаться неизменными; фронтенд (см.
+ *  page.tsx) больше не подставляет значение Wialon поверх уже заполненного поля, но любое
+ *  РЕАЛЬНОЕ изменение (в т.ч. первое заполнение пустого поля) всё равно должно оставлять
+ *  след — независимо от статуса рейса, не только для закрытого. */
+export const HISTORICAL_SNAPSHOT_FIELDS = [
+  'startMileage', 'startFuel', 'departureLat', 'departureLon',
+  'endMileage', 'endFuel', 'returnLat', 'returnLon',
 ] as const;
 
 function formatLogValue(v: unknown): string | null {
@@ -50,16 +63,35 @@ function formatLogValue(v: unknown): string | null {
   return String(v);
 }
 
-/** Пишет в VehicleTripEvent разницу между before/after по LOGGED_VEHICLE_TRIP_FIELDS —
- *  общая логика для ручной правки закрытого рейса (app/api/vehicle-trips/route.ts) и
- *  пересчёта по Wialon (app/api/vehicle-trips/[id]/recalculate-fuel/route.ts). */
-export async function logClosedTripEdits(vehicleTripId: string, userId: string | undefined | null, before: any, after: any) {
+function diffFieldsForLog(fields: readonly string[], before: any, after: any): Array<{ field: string; oldValue: string | null; newValue: string | null }> {
   const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
-  for (const field of LOGGED_VEHICLE_TRIP_FIELDS) {
+  for (const field of fields) {
     const oldValue = formatLogValue(before[field]);
     const newValue = formatLogValue(after[field]);
     if (oldValue !== newValue) changes.push({ field, oldValue, newValue });
   }
+  return changes;
+}
+
+/** Пишет в VehicleTripEvent разницу между before/after по LOGGED_VEHICLE_TRIP_FIELDS —
+ *  общая логика для ручной правки закрытого рейса (app/api/vehicle-trips/route.ts) и
+ *  пересчёта по Wialon (app/api/vehicle-trips/[id]/recalculate-fuel/route.ts). */
+export async function logClosedTripEdits(vehicleTripId: string, userId: string | undefined | null, before: any, after: any) {
+  const changes = diffFieldsForLog(LOGGED_VEHICLE_TRIP_FIELDS, before, after);
+  if (changes.length === 0) return;
+  await prisma.vehicleTripEvent.createMany({
+    data: changes.map((c) => ({
+      vehicleTripId, action: 'manual_edit', field: c.field, oldValue: c.oldValue, newValue: c.newValue, userId: userId ?? null,
+    })),
+  });
+}
+
+/** Логирует изменение исторических стартовых/конечных показателей — ВСЕГДА, независимо
+ *  от статуса рейса (в отличие от logClosedTripEdits выше). Первое заполнение пустого поля
+ *  тоже логируется (oldValue: null) — это и есть "дата и время фиксации" данных, отдельного
+ *  поля под это не заводили, момент виден по createdAt самого события. */
+export async function logHistoricalSnapshotEdits(vehicleTripId: string, userId: string | undefined | null, before: any, after: any) {
+  const changes = diffFieldsForLog(HISTORICAL_SNAPSHOT_FIELDS, before, after);
   if (changes.length === 0) return;
   await prisma.vehicleTripEvent.createMany({
     data: changes.map((c) => ({

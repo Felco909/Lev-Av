@@ -346,12 +346,17 @@ export default function VehicleTripsPage() {
     fetchWialonSnapshot(wialonUnitId, detailForm.departureDate, detailForm.returnDate).then(data => {
       if (cancelled) return;
       if (data.available) {
+        // Стартовые показатели — исторический снимок рейса, зафиксированный один раз.
+        // Wialon подставляет значение ТОЛЬКО в пустое поле — уже сохранённое (в т.ч. на
+        // закрытом рейсе месячной давности, открытом просто ради правки заметки) трогать
+        // нельзя, иначе повторный запрос на ту же дату молча переписывает историю (аудит
+        // интеграции с Wialon, 30.08.2026).
         setDetailForm(prev => ({
           ...prev,
-          startMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
-          startFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
-          departureLat: data.lat != null ? String(data.lat) : prev.departureLat,
-          departureLon: data.lon != null ? String(data.lon) : prev.departureLon,
+          startMileage: prev.startMileage === '' && data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.startMileage,
+          startFuel: prev.startFuel === '' && data.fuelLevelL != null ? String(data.fuelLevelL) : prev.startFuel,
+          departureLat: prev.departureLat === '' && data.lat != null ? String(data.lat) : prev.departureLat,
+          departureLon: prev.departureLon === '' && data.lon != null ? String(data.lon) : prev.departureLon,
         }));
         setDepartureHint(
           data.mileageKm == null && data.rangeDistanceKm != null
@@ -378,12 +383,13 @@ export default function VehicleTripsPage() {
     fetchWialonSnapshot(wialonUnitId, detailForm.returnDate, detailForm.departureDate).then(data => {
       if (cancelled) return;
       if (data.available) {
+        // Конечные показатели — тот же принцип, что и у стартовых выше: только в пустое поле.
         setDetailForm(prev => ({
           ...prev,
-          endMileage: data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.endMileage,
-          endFuel: data.fuelLevelL != null ? String(data.fuelLevelL) : prev.endFuel,
-          returnLat: data.lat != null ? String(data.lat) : prev.returnLat,
-          returnLon: data.lon != null ? String(data.lon) : prev.returnLon,
+          endMileage: prev.endMileage === '' && data.mileageKm != null ? String(Math.round(data.mileageKm)) : prev.endMileage,
+          endFuel: prev.endFuel === '' && data.fuelLevelL != null ? String(data.fuelLevelL) : prev.endFuel,
+          returnLat: prev.returnLat === '' && data.lat != null ? String(data.lat) : prev.returnLat,
+          returnLon: prev.returnLon === '' && data.lon != null ? String(data.lon) : prev.returnLon,
         }));
         setReturnHint(
           data.mileageKm == null && data.rangeDistanceKm != null

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { prisma } from '@/lib/prisma';
-import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle, vehicleTripFinancialsChanged, logClosedTripEdits } from '@/lib/vehicle-trips/close-trip';
+import { maybeCalculateTotals, maybeSyncVehicleMileage, validateOdometerValues, validateNoOverlappingVehicleTripDates, validateUniqueTripNumberForVehicle, vehicleTripFinancialsChanged, logClosedTripEdits, logHistoricalSnapshotEdits } from '@/lib/vehicle-trips/close-trip';
 import { assertRole, VEHICLE_TRIP_FINANCIAL_ROLES } from '@/lib/auth/role-guard';
 
 export const dynamic = 'force-dynamic';
@@ -410,6 +410,18 @@ export async function PUT(req: NextRequest) {
   // завершённого рейса дополнительно логируются (журнал изменений).
   const fuelCalc = await maybeCalculateTotals(record.id, record.departureDate, record.returnDate);
   await maybeSyncVehicleMileage(record.vehicleId, record.endMileage);
+
+  // Исторические стартовые/конечные показатели (пробег/топливо/координаты) — логируем
+  // изменение ВСЕГДА, а не только для закрытого рейса (см. logHistoricalSnapshotEdits):
+  // это единственная защита на уровне API от того, что такое изменение останется незаметным
+  // (фронтенд после фикса больше не подставляет Wialon поверх уже заполненного поля, но если
+  // значение всё же реально поменялось — должен остаться след, кто/когда это сделал).
+  // record не тронут calculateVehicleTripTotals/maybeCalculateTotals выше — та функция пишет
+  // только calculatedKm/calculatedFuelConsumedL/wialon*, к startMileage/startFuel/endMileage/
+  // endFuel/departureLat/Lon/returnLat/Lon отношения не имеет (аудит интеграции с Wialon,
+  // 30.08.2026) — сравнивать before/record напрямую безопасно.
+  await logHistoricalSnapshotEdits(id, userId, before, record);
+
   if (wasClosed) {
     // record ещё содержит calculatedKm/calculatedFuelConsumedL ДО пересчёта выше (fuelCalc —
     // то, что реально применилось, в т.ч. при неудаче Wialon — старые значения, см.
