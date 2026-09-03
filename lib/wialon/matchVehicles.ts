@@ -25,7 +25,9 @@ export async function matchVehiclesWithWialon(): Promise<VehicleMatchResult> {
   const units = await getUnits(sid);
   const unitByPlate = new Map(units.map((u) => [normalizePlate(u.name), u]));
 
-  const vehicles = await prisma.vehicle.findMany({ select: { id: true, plateNumber: true, wialonUnitId: true } });
+  // kind: 'tractor' — полуприцепы обычно без Wialon-трекера, без фильтра засоряли бы
+  // "не найдено в Wialon" на каждой синхронизации.
+  const vehicles = await prisma.vehicle.findMany({ where: { kind: 'tractor' }, select: { id: true, plateNumber: true, wialonUnitId: true } });
 
   const result: VehicleMatchResult = { matched: [], alreadyLinked: [], notFoundInWialon: [], wialonUnits: units };
 

@@ -20,7 +20,10 @@ export interface OperationalSummary {
 export async function getOperationalSummary(prisma: PrismaClient, todayStart: Date): Promise<OperationalSummary> {
   const [activeVehicleTrips, totalActiveVehicles, statusGroups, completedToday] = await Promise.all([
     prisma.vehicleTrip.findMany({ where: { status: 'active' }, select: { vehicleId: true }, distinct: ['vehicleId'] }),
-    prisma.vehicle.count({ where: { status: 'active' } }),
+    // kind: 'tractor' — полуприцеп никогда не участвует в рейсе сам по себе, без фильтра
+    // он бы засчитывался в totalActiveVehicles и портил "Исп. флота %"/"Всего машин"
+    // (искусственно занижая утилизацию, ведь vehiclesInTrip у полуприцепа всегда 0).
+    prisma.vehicle.count({ where: { status: 'active', kind: 'tractor' } }),
     prisma.trip.groupBy({ by: ['status'], _count: { _all: true }, where: { NOT: { status: 'cancelled' } } }),
     prisma.trip.count({ where: { status: 'completed', updatedAt: { gte: todayStart } } }),
   ]);
@@ -53,7 +56,9 @@ export interface IdleVehicle {
 
 export async function getIdleVehicles(prisma: PrismaClient, thresholdDays = 5): Promise<IdleVehicle[]> {
   const vehicles = await prisma.vehicle.findMany({
-    where: { status: 'active' },
+    // kind: 'tractor' — полуприцеп никогда не получит vehicleTrips, каждый раз выглядел бы
+    // как "простаивает бесконечно давно", хотя это в принципе не то, что здесь измеряется.
+    where: { status: 'active', kind: 'tractor' },
     select: {
       id: true, plateNumber: true,
       vehicleTrips: { orderBy: { departureDate: 'desc' }, take: 1, select: { departureDate: true, status: true } },

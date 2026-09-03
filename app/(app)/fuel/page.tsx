@@ -49,7 +49,7 @@ export default function FuelPage() {
       const [tRes, fRes, vRes] = await Promise.all([
         fetch(`/api/vehicle-trips?${p}`),
         fetch('/api/fuel-records'),
-        fetch('/api/vehicles'),
+        fetch('/api/vehicles?kind=tractor'), // полуприцеп не потребляет топливо — нет двигателя
       ]);
       const [tData, fData, vData] = await Promise.all([tRes.json(), fRes.json(), vRes.json()]);
       setTrips(Array.isArray(tData) ? tData : []);

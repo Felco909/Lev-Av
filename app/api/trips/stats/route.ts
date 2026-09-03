@@ -106,7 +106,7 @@ export async function GET(req: Request) {
         where: { vehicleId: { not: null }, tripDate: { gte: new Date(now.getFullYear(), now.getMonth(), 1) }, NOT: { status: 'cancelled' } },
         _count: true,
       }),
-      prisma.vehicle.count({ where: { status: 'active' } }),
+      prisma.vehicle.count({ where: { status: 'active', kind: 'tractor' } }),
     ]);
     const curMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const curMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);

@@ -86,7 +86,7 @@ export default function AgentsPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/clients').then((r) => r.json()),
-      fetch('/api/vehicles').then((r) => r.json()),
+      fetch('/api/vehicles?kind=tractor').then((r) => r.json()), // документ/заявка — только тягач
       fetch('/api/drivers').then((r) => r.json()),
       fetch('/api/carriers').then((r) => r.json()),
     ])

@@ -8,10 +8,13 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 
 interface VehicleDetail {
   id: string; plateNumber: string; brand: string; model: string; status: string;
+  kind: string; vin: string | null; year: number | null;
   currentMileage: number | null; currentMileageUpdatedAt: string | null; wialonUnitId: string | null;
   driver: { id: string; fullName: string; phone: string | null } | null;
   createdAt: string;
 }
+
+const KIND_LABEL: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
 interface LiveSnapshot {
   available: boolean; mileageKm: number | null; fuelLevelL: number | null;
   lat: number | null; lon: number | null; speedKmh: number | null; lastMessageAt: string | null;
@@ -108,7 +111,12 @@ export default function VehicleDetailPage() {
           <Car className="w-5 h-5 text-indigo-600" />
         </div>
         <div>
-          <h1 className="text-xl font-bold">{vehicle.brand} {vehicle.model}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold">{vehicle.brand} {vehicle.model}</h1>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${vehicle.kind === 'trailer' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+              {KIND_LABEL[vehicle.kind ?? 'tractor']}
+            </span>
+          </div>
           <p className="text-sm text-muted-foreground font-mono">{vehicle.plateNumber}</p>
         </div>
         <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${vehicle.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -152,11 +160,19 @@ export default function VehicleDetailPage() {
               не сопоставимы напрямую с period-scoped отчётами (/reports "Автопарк" и т.п.). */}
           <p className="text-[11px] text-muted-foreground -mt-2 mb-4">За всё время эксплуатации машины, без фильтра по периоду</p>
 
-          <div className="bg-card rounded-xl border p-4 space-y-2 mb-4">
-            <h2 className="text-sm font-semibold flex items-center gap-1.5"><User className="w-4 h-4" /> Водитель</h2>
-            <p className="text-sm text-muted-foreground">
-              {vehicle.driver ? `${vehicle.driver.fullName}${vehicle.driver.phone ? ' · ' + vehicle.driver.phone : ''}` : 'Не назначен'}
-            </p>
+          <div className="grid sm:grid-cols-2 gap-3 mb-4">
+            <div className="bg-card rounded-xl border p-4 space-y-2">
+              <h2 className="text-sm font-semibold flex items-center gap-1.5"><User className="w-4 h-4" /> Водитель</h2>
+              <p className="text-sm text-muted-foreground">
+                {vehicle.driver ? `${vehicle.driver.fullName}${vehicle.driver.phone ? ' · ' + vehicle.driver.phone : ''}` : 'Не назначен'}
+              </p>
+            </div>
+            <div className="bg-card rounded-xl border p-4 space-y-2">
+              <h2 className="text-sm font-semibold flex items-center gap-1.5"><Car className="w-4 h-4" /> VIN / Год выпуска</h2>
+              <p className="text-sm text-muted-foreground font-mono">
+                {vehicle.vin || '—'}{vehicle.year ? ` · ${vehicle.year}` : ''}
+              </p>
+            </div>
           </div>
 
           <div className="bg-card rounded-xl border overflow-hidden">

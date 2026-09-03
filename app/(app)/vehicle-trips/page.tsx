@@ -318,7 +318,9 @@ export default function VehicleTripsPage() {
   const [newTripHint, setNewTripHint] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/vehicles').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
+    // Рейс машины — только тягач, не полуприцеп (полуприцеп существует отдельно, только для
+    // документов/ТО/расходов — см. добавление полуприцепов).
+    fetch('/api/vehicles?kind=tractor').then(r => r.json()).then(d => setVehicles(Array.isArray(d) ? d : d.vehicles || []));
     fetch('/api/drivers').then(r => r.json()).then(d => setDrivers(Array.isArray(d) ? d : d.drivers || []));
   }, []);
 

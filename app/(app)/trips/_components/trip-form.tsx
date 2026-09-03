@@ -172,7 +172,7 @@ export default function TripForm({ tripId, copyFromId }: { tripId?: string; copy
   useEffect(() => {
     Promise.all([
       fetch('/api/clients').then(r => r.json()),
-      fetch('/api/vehicles').then(r => r.json()),
+      fetch('/api/vehicles?kind=tractor').then(r => r.json()), // в заявке выбирается только тягач, не полуприцеп
       fetch('/api/drivers').then(r => r.json()),
       fetch('/api/carriers').then(r => r.json()),
       fetch('/api/route-templates').then(r => r.json()),

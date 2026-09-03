@@ -68,6 +68,15 @@ model Vehicle {
   plateNumber             String                 @map("plate_number")
   brand                   String
   model                   String
+  // 'tractor' (тягач) | 'trailer' (полуприцеп) — все существующие строки по умолчанию
+  // остаются тягачами. Полуприцеп — та же модель Vehicle (не отдельная таблица), чтобы
+  // документы/ТО/расходы/история обслуживания работали без единой правки в этих системах
+  // (см. docs/... добавление полуприцепов, 2026-09). В заявках/рейсах (Trip.vehicleId,
+  // VehicleTrip.vehicleId) должны выбираться только тягачи — фильтруется на уровне
+  // API-запросов (?kind=tractor), а не здесь.
+  kind                    String                 @default("tractor")
+  vin                     String?
+  year                    Int?
   status                  String                 @default("active")
   currentMileage          Int?                   @map("current_mileage")
   currentMileageUpdatedAt DateTime?              @map("current_mileage_updated_at")

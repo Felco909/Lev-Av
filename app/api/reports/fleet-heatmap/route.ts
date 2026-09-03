@@ -20,7 +20,9 @@ export async function GET() {
     const rangeStart = new Date(today); rangeStart.setDate(rangeStart.getDate() - (days - 1));
 
     const vehicles = await prisma.vehicle.findMany({
-      where: { status: 'active' },
+      // kind: 'tractor' — полуприцеп никогда не участвует в рейсе, без фильтра каждый день
+      // выглядел бы как "простаивает" на тепловой карте (шум, не отражающий реальность).
+      where: { status: 'active', kind: 'tractor' },
       select: { id: true, plateNumber: true },
       orderBy: { plateNumber: 'asc' },
     });

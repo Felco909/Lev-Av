@@ -30,6 +30,9 @@ export async function PUT(req: Request, { params: paramsPromise }: { params: Pro
     if (body?.brand !== undefined) data.brand = body.brand;
     if (body?.model !== undefined) data.model = body.model;
     if (body?.status !== undefined) data.status = body.status;
+    if (body?.kind !== undefined) data.kind = body.kind === 'trailer' ? 'trailer' : 'tractor';
+    if (body?.vin !== undefined) data.vin = body.vin || null;
+    if (body?.year !== undefined) data.year = body.year != null && body.year !== '' ? Number(body.year) : null;
     if (body?.currentMileage !== undefined) data.currentMileage = body.currentMileage !== null ? Number(body.currentMileage) : null;
 
     // Handle driver assignment change

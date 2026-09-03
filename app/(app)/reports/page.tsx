@@ -111,7 +111,7 @@ export default function ReportsPage() {
       const list = Array.isArray(data) ? data : data?.clients ?? [];
       setAllClients(list.map((c: any) => ({ id: c.id, name: c.name })));
     }).catch(() => {});
-    fetch('/api/vehicles').then(r => r.json()).then(data => {
+    fetch('/api/vehicles?kind=tractor').then(r => r.json()).then(data => { // отчёты завязаны на рейсы — у полуприцепа их нет
       const list = Array.isArray(data) ? data : [];
       setAllVehicles(list.map((v: any) => ({ id: v.id, plateNumber: v.plateNumber, brand: v.brand, model: v.model })));
     }).catch(() => {});

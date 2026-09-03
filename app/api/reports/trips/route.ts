@@ -180,7 +180,7 @@ export async function GET(req: Request) {
       vehicleMap[r.vehicleId].revenue += r.clientRateAmd || r.clientRate;
     });
     const vehicleStats = Object.values(vehicleMap).sort((a, b) => b.trips - a.trips);
-    const totalActiveVehicles = await prisma.vehicle.count({ where: { status: 'active' } });
+    const totalActiveVehicles = await prisma.vehicle.count({ where: { status: 'active', kind: 'tractor' } });
     const idleVehicles = totalActiveVehicles - Object.keys(vehicleMap).length;
 
     // --- Top clients ---

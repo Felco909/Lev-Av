@@ -6,9 +6,12 @@ import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filte
 interface Driver { id: string; fullName: string; phone?: string | null; }
 interface VehicleItem {
   id: string; plateNumber: string; brand: string; model: string; status: string;
+  kind?: string; vin?: string | null; year?: number | null;
   currentMileage?: number | null; driverId?: string | null;
   driver?: Driver | null;
 }
+
+const KIND_LABEL: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
 interface HistoryItem {
   id: string; vehicleId: string; oldDriverId?: string | null; oldDriverName?: string | null;
   newDriverId?: string | null; newDriverName?: string | null; changedAt: string;
@@ -20,11 +23,12 @@ export default function VehiclesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<VehicleItem | null>(null);
-  const [form, setForm] = useState({ plateNumber: '', brand: '', model: '', status: 'active', driverId: '' });
+  const [form, setForm] = useState({ plateNumber: '', brand: '', model: '', status: 'active', driverId: '', kind: 'tractor', vin: '', year: '' });
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [driverFilter, setDriverFilter] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [kindFilter, setKindFilter] = useState<'' | 'tractor' | 'trailer'>('');
   const [historyVehicle, setHistoryVehicle] = useState<VehicleItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -46,12 +50,13 @@ export default function VehiclesPage() {
       const params = new URLSearchParams();
       if (driverFilter) params.set('driverId', driverFilter);
       if (showArchived) params.set('showArchived', '1');
+      if (kindFilter) params.set('kind', kindFilter);
       const qs = params.toString();
       const res = await fetch(`/api/vehicles${qs ? `?${qs}` : ''}`);
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
     } catch {} finally { setLoading(false); }
-  }, [driverFilter, showArchived]);
+  }, [driverFilter, showArchived, kindFilter]);
 
   useEffect(() => { load(); loadDrivers(); }, [load, loadDrivers]);
 
@@ -67,10 +72,15 @@ export default function VehiclesPage() {
   const openModal = (item?: VehicleItem) => {
     if (item) {
       setEditItem(item);
-      setForm({ plateNumber: item.plateNumber ?? '', brand: item.brand ?? '', model: item.model ?? '', status: item.status ?? 'active', driverId: item.driverId ?? '' });
+      setForm({
+        plateNumber: item.plateNumber ?? '', brand: item.brand ?? '', model: item.model ?? '',
+        status: item.status ?? 'active', driverId: item.driverId ?? '',
+        kind: item.kind === 'trailer' ? 'trailer' : 'tractor',
+        vin: item.vin ?? '', year: item.year != null ? String(item.year) : '',
+      });
     } else {
       setEditItem(null);
-      setForm({ plateNumber: '', brand: '', model: '', status: 'active', driverId: '' });
+      setForm({ plateNumber: '', brand: '', model: '', status: 'active', driverId: '', kind: 'tractor', vin: '', year: '' });
     }
     setShowModal(true);
   };
@@ -155,6 +165,20 @@ export default function VehiclesPage() {
         </button>
       </div>
 
+      {/* Kind tabs */}
+      <div className="inline-flex items-center gap-1 bg-card rounded-lg p-1 shadow-sm">
+        {([['', 'Все'], ['tractor', 'Тягачи'], ['trailer', 'Полуприцепы']] as const).map(([val, label]) => (
+          <button
+            key={val || 'all'}
+            type="button"
+            onClick={() => setKindFilter(val)}
+            className={`px-3 py-1.5 text-sm rounded-md transition ${kindFilter === val ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-muted'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="bg-card rounded-xl p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row gap-3">
@@ -201,6 +225,17 @@ export default function VehiclesPage() {
                 <span className={`text-xs px-2 py-0.5 rounded-full ${v.status === 'active' ? 'bg-green-100 text-green-700' : v.status === 'archived' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
                   {v.status === 'active' ? 'Активна' : v.status === 'archived' ? 'В архиве' : 'Неактивна'}
                 </span>
+              </div>
+
+              <div className="flex items-center gap-2 mb-3 -mt-2">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${v.kind === 'trailer' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+                  {KIND_LABEL[v.kind ?? 'tractor']}
+                </span>
+                {(v.vin || v.year) && (
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {v.vin ? v.vin : ''}{v.vin && v.year ? ' · ' : ''}{v.year ? v.year : ''}
+                  </span>
+                )}
               </div>
 
               {/* Driver section */}
@@ -286,10 +321,28 @@ export default function VehiclesPage() {
               <button onClick={() => setShowModal(false)} className="p-1 hover:bg-muted rounded"><X className="w-4 h-4" /></button>
             </div>
             <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground">Тип ТС</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {(['tractor', 'trailer'] as const).map(k => (
+                    <button
+                      key={k} type="button"
+                      onClick={() => setForm({...form, kind: k})}
+                      className={`px-3 py-2 text-sm rounded-lg border transition ${form.kind === k ? 'border-primary bg-primary/10 text-primary font-medium' : 'hover:bg-muted'}`}
+                    >
+                      {KIND_LABEL[k]}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div><label className="text-xs text-muted-foreground">Гос. номер *</label><input type="text" value={form.plateNumber} onChange={(e) => setForm({...form, plateNumber: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-muted-foreground">Марка *</label><input type="text" value={form.brand} onChange={(e) => setForm({...form, brand: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" /></div>
                 <div><label className="text-xs text-muted-foreground">Модель *</label><input type="text" value={form.model} onChange={(e) => setForm({...form, model: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-muted-foreground">VIN</label><input type="text" value={form.vin} onChange={(e) => setForm({...form, vin: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono" /></div>
+                <div><label className="text-xs text-muted-foreground">Год выпуска</label><input type="number" min="1980" max="2100" value={form.year} onChange={(e) => setForm({...form, year: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" /></div>
               </div>
               <div><label className="text-xs text-muted-foreground">Водитель</label>
                 <select value={form.driverId} onChange={(e) => setForm({...form, driverId: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm mt-1 bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none">
