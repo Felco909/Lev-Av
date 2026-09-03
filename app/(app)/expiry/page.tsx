@@ -8,10 +8,11 @@ const DOC_TYPE_MAP: Record<string, string> = {
   license: 'Вод. удостоверение', permit: 'Лицензия/разрешение', other: 'Прочее',
 };
 const ENTITY_TYPE_MAP: Record<string, string> = { vehicle: 'Машина', driver: 'Водитель', carrier: 'Перевозчик' };
+const VEHICLE_KIND_MAP: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
 
 interface DocExpiry {
   id: string; entityType: string; entityId: string; docType: string; docName: string;
-  expiryDate: string; description: string | null; entityName: string;
+  expiryDate: string; description: string | null; entityName: string; entityKind: string | null;
 }
 
 export default function ExpiryPage() {
@@ -41,7 +42,7 @@ export default function ExpiryPage() {
   useEffect(() => { load(); }, [load]);
 
   const getEntities = () => {
-    if (form.entityType === 'vehicle') return vehicles.map((v: any) => ({ id: v.id, label: `${v.brand} ${v.model} (${v.plateNumber})` }));
+    if (form.entityType === 'vehicle') return vehicles.map((v: any) => ({ id: v.id, label: `${v.brand} ${v.model} (${v.plateNumber}) — ${VEHICLE_KIND_MAP[v.kind] || 'Тягач'}` }));
     if (form.entityType === 'driver') return drivers.map((d: any) => ({ id: d.id, label: d.fullName }));
     return carriers.map((c: any) => ({ id: c.id, label: c.name }));
   };
@@ -123,6 +124,7 @@ export default function ExpiryPage() {
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-muted-foreground border-b bg-muted/30">
                 <th className="text-left py-3 px-4 font-medium">Тип</th>
+                <th className="text-left py-3 px-4 font-medium">Тип ТС</th>
                 <th className="text-left py-3 px-4 font-medium">Объект</th>
                 <th className="text-left py-3 px-4 font-medium">Документ</th>
                 <th className="text-left py-3 px-4 font-medium">Истекает</th>
@@ -135,6 +137,13 @@ export default function ExpiryPage() {
                   return (
                     <tr key={item.id} className="border-b border-muted last:border-0 hover:bg-muted/50">
                       <td className="py-3 px-4"><span className="text-xs px-2 py-1 rounded-full bg-muted font-medium">{ENTITY_TYPE_MAP[item.entityType] || item.entityType}</span></td>
+                      <td className="py-3 px-4">
+                        {item.entityKind ? (
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${item.entityKind === 'trailer' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {VEHICLE_KIND_MAP[item.entityKind] || item.entityKind}
+                          </span>
+                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                      </td>
                       <td className="py-3 px-4 font-medium">{item.entityName}</td>
                       <td className="py-3 px-4">{item.docName}<br/><span className="text-xs text-muted-foreground">{DOC_TYPE_MAP[item.docType] || item.docType}</span></td>
                       <td className="py-3 px-4">{formatDate(item.expiryDate)}</td>

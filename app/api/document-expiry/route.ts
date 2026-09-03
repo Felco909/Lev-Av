@@ -14,15 +14,23 @@ export async function GET() {
     const driverIds = [...new Set(items.filter(i => i.entityType === 'driver').map(i => i.entityId))];
     const carrierIds = [...new Set(items.filter(i => i.entityType === 'carrier').map(i => i.entityId))];
     const [vehicles, drivers, carriers] = await Promise.all([
-      vehicleIds.length ? prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, plateNumber: true, brand: true, model: true } }) : [],
+      // kind — тип ТС (тягач/полуприцеп), см. добавление полуприцепов: этот раздел уже
+      // работал для полуприцепа без изменений (полиморфная связь entityType/entityId),
+      // не хватало только видимого различия тягач/полуприцеп в таблице.
+      vehicleIds.length ? prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, plateNumber: true, brand: true, model: true, kind: true } }) : [],
       driverIds.length ? prisma.driver.findMany({ where: { id: { in: driverIds } }, select: { id: true, fullName: true } }) : [],
       carrierIds.length ? prisma.carrier.findMany({ where: { id: { in: carrierIds } }, select: { id: true, name: true } }) : [],
     ]);
     const nameMap: Record<string, string> = {};
-    vehicles.forEach(v => { nameMap[v.id] = `${v.brand} ${v.model} (${v.plateNumber})`; });
+    const kindMap: Record<string, string> = {};
+    vehicles.forEach(v => { nameMap[v.id] = `${v.brand} ${v.model} (${v.plateNumber})`; kindMap[v.id] = v.kind; });
     drivers.forEach(d => { nameMap[d.id] = d.fullName; });
     carriers.forEach(c => { nameMap[c.id] = c.name; });
-    const enriched = items.map(i => ({ ...i, entityName: nameMap[i.entityId] || 'Неизвестно' }));
+    const enriched = items.map(i => ({
+      ...i,
+      entityName: nameMap[i.entityId] || 'Неизвестно',
+      entityKind: i.entityType === 'vehicle' ? (kindMap[i.entityId] || null) : null,
+    }));
     return NextResponse.json(enriched);
   } catch (e: any) {
     console.error(e);
