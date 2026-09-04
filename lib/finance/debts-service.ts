@@ -94,7 +94,10 @@ function applyDebtFilters(where: any, filters?: DebtFilters) {
 export async function getClientDebtRows(prisma: PrismaClient, todayStart = new Date(), filters?: DebtFilters): Promise<DebtTripRow[]> {
   const trips = await prisma.trip.findMany({
     where: applyDebtFilters({
-      status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
+      // 'new'/'in_progress' исключены намеренно (по просьбе пользователя, 04.09.2026) — груз ещё
+      // не разгружен, показывать его как долг рано. Начинаем с 'unloaded' — та же граница, что
+      // и остальной workflow (см. STATUS_ORDER в lib/utils.ts).
+      status: { in: ['unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
       clientPaymentStatus: { in: ['not_paid', 'partially_paid'] },
     }, filters),
     include: {
@@ -151,7 +154,8 @@ export async function getClientDebtRows(prisma: PrismaClient, todayStart = new D
  * фильтр явно просит 'own_transport' — тогда результат пуст, у собственного транспорта нет перевозчика). */
 export async function getCarrierDebtRows(prisma: PrismaClient, todayStart = new Date(), filters?: DebtFilters): Promise<DebtTripRow[]> {
   const where: any = applyDebtFilters({
-    status: { in: ['new', 'in_progress', 'unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
+    // См. комментарий в getClientDebtRows выше — та же граница "после разгрузки".
+    status: { in: ['unloaded', 'awaiting_payment', 'sverka', 'completed', 'archived'] },
     carrierPaymentStatus: { in: ['not_paid', 'partially_paid'] },
   }, { ...filters, tripType: undefined });
   where.tripType = filters?.tripType === 'own_transport' ? 'own_transport' : 'expedition';
