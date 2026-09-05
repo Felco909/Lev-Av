@@ -26,7 +26,10 @@ export async function GET(req: Request) {
     // архив вообще, в отличие от /api/vehicles и /api/driver-analytics).
     const { searchParams } = new URL(req.url);
     const showArchived = searchParams.get('showArchived');
-    const vehicleWhere: any = {};
+    // kind: 'tractor' — полуприцеп никогда не привязывается к рейсу/заявке напрямую
+    // (см. добавление полуприцепов), в этой аналитике он был бы просто пустой строкой
+    // без единого рейса/дохода/расхода — не несёт информации, только шум.
+    const vehicleWhere: any = { kind: 'tractor' };
     if (showArchived !== '1') vehicleWhere.status = { not: 'archived' };
 
     const vehicles = await prisma.vehicle.findMany({ where: vehicleWhere, orderBy: { plateNumber: 'asc' } });
