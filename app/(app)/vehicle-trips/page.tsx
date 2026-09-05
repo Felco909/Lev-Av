@@ -483,7 +483,11 @@ export default function VehicleTripsPage() {
     const p = new URLSearchParams();
     if (filterVehicle) p.set('vehicleId', filterVehicle);
     if (filterStatus) p.set('status', filterStatus);
-    if (showArchived && !filterStatus) p.set('showArchived', '1');
+    // Разбивка по секциям статуса (конкретная машина, статус не сужен) — нужны все статусы
+    // сразу, включая архив, чтобы посчитать реальное число рейсов в каждой секции
+    // (разделение рейсов по машинам, 05.09.2026). "Все машины"/явный статус — как раньше.
+    const groupedView = !!filterVehicle && !filterStatus;
+    if ((showArchived || groupedView) && !filterStatus) p.set('showArchived', '1');
     const res = await fetch(`/api/vehicle-trips?${p}`);
     const data = await res.json();
     setRows(Array.isArray(data) ? data : []);
@@ -807,15 +811,31 @@ export default function VehicleTripsPage() {
         </button>
       </div>
 
+      {/* Вкладки по машинам — рейсы разных машин визуально разделены (разделение рейсов
+          по машинам, 05.09.2026). "Все машины" — прежний общий список/фильтр по статусу,
+          конкретная машина — её рейсы, сгруппированные по статусу (см. ниже). */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mb-1">
+        <button
+          type="button"
+          onClick={() => setFilterVehicle('')}
+          className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition ${filterVehicle === '' ? 'bg-primary text-white' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
+        >
+          {'Все машины'}
+        </button>
+        {vehicles.map(v => (
+          <button
+            type="button"
+            key={v.id}
+            onClick={() => setFilterVehicle(v.id)}
+            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition ${filterVehicle === v.id ? 'bg-primary text-white' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}
+          >
+            {v.plateNumber} <span className={filterVehicle === v.id ? 'opacity-80' : 'opacity-70'}>({v.brand})</span>
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3 bg-muted/40 rounded-xl p-3">
-        <div>
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{'Машина'}</label>
-          <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)} className="border rounded-lg px-2 py-1.5 text-xs mt-0.5 block w-[160px]">
-            <option value="">{'Все'}</option>
-            {vehicles.map(v => <option key={v.id} value={v.id}>{v.plateNumber} ({v.brand})</option>)}
-          </select>
-        </div>
         <div>
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground">{'Статус'}</label>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-2 py-1.5 text-xs mt-0.5 block w-[130px]">
@@ -856,7 +876,10 @@ export default function VehicleTripsPage() {
               (groups[key] ??= []).push(r.id);
             }
             const duplicateIds = new Set(Object.values(groups).filter(ids => ids.length > 1).flat());
-            return rows.map(r => {
+            // Рендер одной карточки рейса — вынесен в функцию без изменения содержимого,
+            // чтобы переиспользовать её и в обычном плоском списке, и в секциях по статусу
+            // ниже (разделение рейсов по машинам, 05.09.2026). Логика/поля/статусы те же.
+            const renderCard = (r: VT) => {
             const isDuplicateNumber = duplicateIds.has(r.id);
             const isActive = r.status === 'active';
             const isExpanded = expandedId === r.id;
@@ -1427,7 +1450,34 @@ export default function VehicleTripsPage() {
                 )}
               </div>
             );
-          });
+            };
+
+            // Сгруппированный по статусам вид — конкретная машина выбрана и статус не сужен
+            // явно (см. комментарий у renderCard выше). "Все машины" и любой явный выбор
+            // статуса — прежний плоский список, без изменений (разделение рейсов по
+            // машинам, 05.09.2026).
+            if (filterVehicle && !filterStatus) {
+              const sections = [
+                { key: 'active', label: 'Активные', dot: 'bg-blue-500' },
+                { key: 'completed', label: 'Завершённые', dot: 'bg-green-500' },
+                { key: 'archived', label: 'Архив', dot: 'bg-slate-400' },
+              ] as const;
+              return sections.map(sec => {
+                const items = rows.filter(r => r.status === sec.key);
+                if (items.length === 0) return null;
+                return (
+                  <div key={sec.key} className="space-y-2">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold px-1 pt-1">
+                      <span className={`w-2 h-2 rounded-full ${sec.dot}`} />
+                      {sec.label} — {items.length}
+                    </h3>
+                    <div className="space-y-3">{items.map(renderCard)}</div>
+                  </div>
+                );
+              });
+            }
+
+            return rows.map(renderCard);
           })()}
         </div>
       )}
