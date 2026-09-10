@@ -238,6 +238,15 @@ export default function VehicleTripsPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [showArchived, setShowArchived] = useState(false);
 
+  // Переход сюда с ?vehicleId=... (например, из бейджа занятости на странице "Машины") —
+  // сразу открывает рейсы конкретной машины, без лишнего клика по чипу.
+  useEffect(() => {
+    try {
+      const vid = new URLSearchParams(window.location.search).get('vehicleId');
+      if (vid) setFilterVehicle(vid);
+    } catch {}
+  }, []);
+
   // Trip modal
   const [showTripModal, setShowTripModal] = useState(false);
   const [tripForm, setTripForm] = useState<TripForm>(emptyTripForm());

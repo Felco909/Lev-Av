@@ -150,6 +150,40 @@ export async function GET(req: Request) {
     }
     const cashGapTrips = Array.from(cashGapDedup.values());
 
+    // Сроки документов техники/водителей в колокольчике (аудит ТМС 05.09.2026, приоритет 🟠
+    // "Внутренние уведомления") — тот же источник и тот же 30-дневный порог, что /expiry и
+    // шаг 7 /api/dashboard, здесь — только сжатая версия для дропдауна колокольчика.
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const expiringDocsRaw = await prisma.documentExpiry.findMany({
+      where: { expiryDate: { lte: thirtyDaysFromNow } },
+      orderBy: { expiryDate: 'asc' },
+      take: 50,
+    });
+    const docVehicleIds = [...new Set(expiringDocsRaw.filter((i) => i.entityType === 'vehicle').map((i) => i.entityId))];
+    const docDriverIds = [...new Set(expiringDocsRaw.filter((i) => i.entityType === 'driver').map((i) => i.entityId))];
+    const docCarrierIds = [...new Set(expiringDocsRaw.filter((i) => i.entityType === 'carrier').map((i) => i.entityId))];
+    const [docVehicles, docDrivers, docCarriers] = await Promise.all([
+      docVehicleIds.length ? prisma.vehicle.findMany({ where: { id: { in: docVehicleIds } }, select: { id: true, plateNumber: true, brand: true, model: true, status: true } }) : [],
+      docDriverIds.length ? prisma.driver.findMany({ where: { id: { in: docDriverIds } }, select: { id: true, fullName: true } }) : [],
+      docCarrierIds.length ? prisma.carrier.findMany({ where: { id: { in: docCarrierIds } }, select: { id: true, name: true } }) : [],
+    ]);
+    const archivedVehicleIds = new Set(docVehicles.filter((v) => v.status === 'archived').map((v) => v.id));
+    const docNameMap: Record<string, string> = {};
+    docVehicles.forEach((v) => { docNameMap[v.id] = `${v.brand} ${v.model} (${v.plateNumber})`; });
+    docDrivers.forEach((d) => { docNameMap[d.id] = d.fullName; });
+    docCarriers.forEach((c) => { docNameMap[c.id] = c.name; });
+    const expiringDocsEnriched = expiringDocsRaw
+      .filter((i) => !(i.entityType === 'vehicle' && archivedVehicleIds.has(i.entityId)))
+      .map((i) => {
+        const daysLeft = Math.floor((new Date(i.expiryDate).getTime() - Date.now()) / 86400000);
+        const href = i.entityType === 'vehicle' ? `/vehicles/${i.entityId}` : i.entityType === 'driver' ? `/drivers/${i.entityId}` : '/expiry';
+        return { id: i.id, docName: i.docName, docType: i.docType, entityName: docNameMap[i.entityId] || 'Неизвестно', daysLeft, href };
+      });
+    const expiringDocsCritical = expiringDocsEnriched.filter((d) => d.daysLeft < 0).slice(0, 10);
+    const expiringDocsWarning = expiringDocsEnriched.filter((d) => d.daysLeft >= 0 && d.daysLeft <= 7).slice(0, 10);
+    const expiringDocsInfo = expiringDocsEnriched.filter((d) => d.daysLeft > 7 && d.daysLeft <= 30).slice(0, 10);
+
     return NextResponse.json({
       totalTrips: allTrips?._count ?? 0,
       totalProfit: Number(allTrips?._sum?.profitAmd ?? 0),
@@ -185,6 +219,9 @@ export async function GET(req: Request) {
         }),
         overdueClientPayments,
         cashGapTrips,
+        expiringDocsCritical,
+        expiringDocsWarning,
+        expiringDocsInfo,
       },
       vehicleUtilization: {
         totalVehicles: totalVehicles ?? 0,

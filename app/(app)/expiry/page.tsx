@@ -1,12 +1,9 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { Plus, ShieldAlert, X, Trash2, Pencil, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
+import { formatDate, DOCUMENT_TYPE_MAP, documentExpiryStatus } from '@/lib/utils';
 
-const DOC_TYPE_MAP: Record<string, string> = {
-  osago: 'ОСАГО', kasko: 'КАСКО', techosmotr: 'Техосмотр',
-  license: 'Вод. удостоверение', permit: 'Лицензия/разрешение', other: 'Прочее',
-};
+const DOC_TYPE_MAP = DOCUMENT_TYPE_MAP;
 const ENTITY_TYPE_MAP: Record<string, string> = { vehicle: 'Машина', driver: 'Водитель', carrier: 'Перевозчик' };
 const VEHICLE_KIND_MAP: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
 
@@ -74,14 +71,7 @@ export default function ExpiryPage() {
     await load();
   };
 
-  const today = new Date();
-  const getStatus = (expiryDate: string) => {
-    const d = new Date(expiryDate);
-    const days = Math.floor((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (days < 0) return { label: `Просрочено ${Math.abs(days)} дн.`, color: 'bg-red-100 text-red-700', sort: 0 };
-    if (days <= 30) return { label: `Через ${days} дн.`, color: 'bg-amber-100 text-amber-700', sort: 1 };
-    return { label: `Через ${days} дн.`, color: 'bg-emerald-100 text-emerald-700', sort: 2 };
-  };
+  const getStatus = documentExpiryStatus;
 
   const expired = items.filter(i => getStatus(i.expiryDate).sort === 0).length;
   const expiring = items.filter(i => getStatus(i.expiryDate).sort === 1).length;

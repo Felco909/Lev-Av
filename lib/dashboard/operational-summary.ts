@@ -84,6 +84,7 @@ export async function getIdleVehicles(prisma: PrismaClient, thresholdDays = 5): 
  */
 export interface StuckVehicleTrip {
   vehicleTripId: string;
+  vehicleId: string;
   plateNumber: string;
   tripNumber: string;
   daysOpen: number;
@@ -94,12 +95,13 @@ export async function getStuckVehicleTrips(prisma: PrismaClient, thresholdDays =
   threshold.setDate(threshold.getDate() - thresholdDays);
   const stuck = await prisma.vehicleTrip.findMany({
     where: { status: 'active', departureDate: { lte: threshold } },
-    select: { id: true, tripNumber: true, departureDate: true, vehicle: { select: { plateNumber: true } } },
+    select: { id: true, vehicleId: true, tripNumber: true, departureDate: true, vehicle: { select: { plateNumber: true } } },
     orderBy: { departureDate: 'asc' },
   });
   const now = Date.now();
   return stuck.map((vt) => ({
     vehicleTripId: vt.id,
+    vehicleId: vt.vehicleId,
     plateNumber: vt.vehicle.plateNumber,
     tripNumber: vt.tripNumber,
     daysOpen: Math.floor((now - new Date(vt.departureDate).getTime()) / 86400000),

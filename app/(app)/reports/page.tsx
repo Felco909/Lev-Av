@@ -790,6 +790,19 @@ export default function ReportsPage() {
               onClick={() => goTo('profit')} />
           </div>
 
+          {/* TMS-AUDIT-0001: "Прибыль" выше суммирует Trip.profitAmd по всем заявкам, включая
+              собственный транспорт — для него это ставка клиента минус расходы заявки, БЕЗ
+              вычета топлива/зарплаты/ТО (те расходы считаются на рейс машины VehicleTrip, а не
+              на отдельную заявку — один рейс может обслуживать несколько заявок, разнести
+              расходы по заявкам корректно нельзя). Решение владельца (05.09.2026) — не строить
+              альтернативный расчёт, а явно пометить это здесь. */}
+          {allRows.some((r: any) => r.tripTypeRaw === 'own_transport') && (
+            <p className="text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              ⓘ Прибыль по собственному транспорту здесь — по ставке клиента, без вычета топлива/зарплаты/ТО.
+              Точная прибыль по рейсу — <button onClick={() => goTo('own_fleet')} className="underline hover:text-foreground">вкладка «Автопарк»</button>.
+            </p>
+          )}
+
           {/* Динамика прибыли */}
           {widgetVisible.trend && (
             <div className="bg-card rounded-xl p-4 shadow-sm border border-border">
@@ -1006,6 +1019,14 @@ export default function ReportsPage() {
               </p>
             </div>
           </div>
+
+          {/* TMS-AUDIT-0001, см. пояснение на вкладке "Обзор" выше */}
+          {profitRows.some((r: any) => r.tripTypeRaw === 'own_transport') && (
+            <p className="text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              ⓘ Прибыль по собственному транспорту здесь — по ставке клиента, без вычета топлива/зарплаты/ТО.
+              Точная прибыль по рейсу — <button onClick={() => goTo('own_fleet')} className="underline hover:text-foreground">вкладка «Автопарк»</button>.
+            </p>
+          )}
 
           {sverkaRows.length > 0 && (
             <div className="bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-xl px-4 py-3 flex items-center gap-4">

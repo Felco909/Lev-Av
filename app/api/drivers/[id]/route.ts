@@ -4,6 +4,21 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 
+/** GET /api/drivers/[id] — карточка водителя (текущие машины + основные поля). */
+export async function GET(_req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+  const params = await paramsPromise;
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+
+  const driver = await prisma.driver.findUnique({
+    where: { id: params.id },
+    include: { vehicles: { select: { id: true, plateNumber: true, brand: true, model: true, kind: true } } },
+  });
+  if (!driver) return NextResponse.json({ error: 'Не найден' }, { status: 404 });
+
+  return NextResponse.json(driver);
+}
+
 export async function PUT(req: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
   try {

@@ -80,6 +80,32 @@ export const EXPENSE_TYPE_MAP: Record<string, string> = {
 // Fleet (standalone) expense types — not tied to trips. Ключи toll/ferry/repair специально
 // совпадают с EXPENSE_TYPE_MAP выше (та же терминология для похожих категорий в других местах
 // приложения) — advance/fine/customs новые, аналогов там нет.
+// Единый справочник docType для DocumentExpiry (entityType: vehicle | driver | carrier) —
+// используется и в /expiry, и в карточке водителя. Добавлены международные разрешения
+// (аудит ТМС 05.09.2026, приоритет 🔴) — та же модель DocumentExpiry, без второй системы
+// документов: docType задаёт категорию, конкретное название/номер — в docName.
+export const DOCUMENT_TYPE_MAP: Record<string, string> = {
+  osago: 'ОСАГО',
+  kasko: 'КАСКО',
+  techosmotr: 'Техосмотр',
+  license: 'Вод. удостоверение',
+  permit: 'Лицензия/разрешение',
+  dopog: 'ДОПОГ',
+  tir: 'TIR-карнет',
+  cmr: 'CMR',
+  visa: 'Виза/разрешение на въезд',
+  other: 'Прочее',
+};
+
+/** Общий статус срока документа (DocumentExpiry) — вынесено из /expiry, чтобы карточка
+ * водителя показывала точно те же пороги (просрочено / ≤30 дней / в порядке). */
+export function documentExpiryStatus(expiryDate: string): { label: string; color: string; sort: 0 | 1 | 2 } {
+  const days = Math.floor((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (days < 0) return { label: `Просрочено ${Math.abs(days)} дн.`, color: 'bg-red-100 text-red-700', sort: 0 };
+  if (days <= 30) return { label: `Через ${days} дн.`, color: 'bg-amber-100 text-amber-700', sort: 1 };
+  return { label: `Через ${days} дн.`, color: 'bg-emerald-100 text-emerald-700', sort: 2 };
+}
+
 export const FLEET_EXPENSE_TYPE_MAP: Record<string, string> = {
   salary: 'Зарплата водителю',
   fuel: 'Топливо',

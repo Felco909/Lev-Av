@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Route, Users, Car, UserCheck, Building2,
   Menu, X, LogOut, ChevronRight, ChevronDown, BarChart3, Settings, FolderOpen,
   CalendarDays, Wrench, MapPinned, Fuel, ShieldAlert, UserCog, Bell,
-  Search, Wallet, TrendingUp, Bot, Radar,
+  Search, Wallet, TrendingUp, Bot, Radar, AlertTriangle,
 } from 'lucide-react';
 
 function BrandMark({ variant }: { variant?: 'sidebar' | 'compact' }) {
@@ -45,6 +45,7 @@ const navGroups: NavGroup[] = [
     { href: '/dashboard', label: 'Главная', icon: LayoutDashboard },
     { href: '/day-tasks', label: 'Лист дня', icon: CalendarDays },
     { href: '/trips', label: 'Заявки', icon: Route },
+    { href: '/problem-trips', label: 'Проблемные рейсы', icon: AlertTriangle },
     { href: '/calendar', label: 'Календарь', icon: CalendarDays },
     { href: '/documents', label: 'Документы', icon: FolderOpen },
     { href: '/agents', label: 'Агенты', icon: Bot },
@@ -188,6 +189,11 @@ export default function AppShell({ children, user }: { children: React.ReactNode
   const [overduePayments, setOverduePayments] = useState<{id:string;tripNumber:string;clientName?:string;daysOverdue:number;remainingAmd:number}[]>([]);
   const [overdueTotal, setOverdueTotal] = useState(0);
   const [cashGaps, setCashGaps] = useState<{id:string;tripNumber:string;gapAmd:number}[]>([]);
+  // Сроки документов (аудит ТМС 05.09.2026, приоритет 🟠 "Внутренние уведомления") — те же
+  // данные, что /expiry, разбитые на 3 уровня по /api/trips/stats.
+  const [docsCritical, setDocsCritical] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
+  const [docsWarning, setDocsWarning] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
+  const [docsInfo, setDocsInfo] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const pathname = usePathname() ?? '';
   const { state: syncState, lastOkAt } = useServerSync();
@@ -196,12 +202,24 @@ export default function AppShell({ children, user }: { children: React.ReactNode
     fetch('/api/trips/stats').then(r => r.json()).then(d => {
       const overdue: any[] = d?.reminders?.overdueClientPayments ?? [];
       const gaps: any[] = d?.reminders?.cashGapTrips ?? [];
+      const docsCrit: any[] = d?.reminders?.expiringDocsCritical ?? [];
+      const docsWarn: any[] = d?.reminders?.expiringDocsWarning ?? [];
+      const docsInf: any[] = d?.reminders?.expiringDocsInfo ?? [];
       setOverdueTotal(overdue.length);
       setOverduePayments(overdue.slice(0, 8));
       setCashGaps(gaps.slice(0, 5));
-      setBellCount(overdue.length + gaps.length);
+      setDocsCritical(docsCrit);
+      setDocsWarning(docsWarn);
+      setDocsInfo(docsInf);
+      // Громкий бейдж — только срочное (красное + жёлтое); информационные не считаем,
+      // чтобы бейдж не разрастался от документов с запасом в месяц.
+      setBellCount(overdue.length + gaps.length + docsCrit.length + docsWarn.length);
     }).catch(() => {});
   }, [pathname]);
+
+  const critCount = overdueTotal + docsCritical.length;
+  const warnCount = cashGaps.length + docsWarning.length;
+  const infoCount = docsInfo.length;
 
   useEffect(() => {
     if (!bellOpen) return;
@@ -230,54 +248,112 @@ export default function AppShell({ children, user }: { children: React.ReactNode
             </button>
             {bellOpen && (
               <div className="fixed left-4 top-[72px] w-[380px] max-w-[calc(100vw-32px)] max-h-[480px] overflow-y-auto bg-slate-800 border border-white/10 rounded-xl shadow-xl z-[200] p-3">
-                {overduePayments.length === 0 && cashGaps.length === 0 ? (
+                {critCount === 0 && warnCount === 0 && infoCount === 0 ? (
                   <p className="text-xs text-slate-500 py-1">Нет срочных уведомлений</p>
                 ) : (
-                  <div className="space-y-3 max-h-80 overflow-y-auto">
-                    {overduePayments.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">🔴 Просроченные оплаты</p>
-                        <div className="space-y-1">
-                          {overduePayments.map(t => (
-                            <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
-                              className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
-                              <div className="flex justify-between items-center">
-                                <span className="text-slate-300 truncate max-w-[150px]">{t.clientName || t.tripNumber}</span>
-                                <span className="font-semibold text-red-400 shrink-0 ml-2">−{t.daysOverdue} дн.</span>
-                              </div>
-                              <div className="flex justify-between mt-0.5">
-                                <span className="font-mono text-slate-500">{t.tripNumber}</span>
-                                <span className="font-mono text-slate-300">{Math.round(t.remainingAmd).toLocaleString('ru-RU')} ֏</span>
-                              </div>
-                            </Link>
-                          ))}
-                          {overdueTotal > overduePayments.length && (
-                            <Link href="/debts" onClick={() => setBellOpen(false)}
-                              className="block text-[10px] text-red-400 text-center py-1 hover:underline">
-                              и ещё {overdueTotal - overduePayments.length} просроченных →
-                            </Link>
-                          )}
+                  <>
+                    <div className="flex items-center gap-3 text-[11px] font-medium pb-2 mb-2 border-b border-white/10">
+                      {critCount > 0 && <span className="text-red-400">🔴 {critCount} критических</span>}
+                      {warnCount > 0 && <span className="text-amber-400">🟡 {warnCount} предупреждений</span>}
+                      {infoCount > 0 && <span className="text-emerald-400">🟢 {infoCount} информационных</span>}
+                    </div>
+                    <div className="space-y-3 max-h-80 overflow-y-auto">
+                      {overduePayments.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">🔴 Просроченные оплаты</p>
+                          <div className="space-y-1">
+                            {overduePayments.map(t => (
+                              <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300 truncate max-w-[150px]">{t.clientName || t.tripNumber}</span>
+                                  <span className="font-semibold text-red-400 shrink-0 ml-2">−{t.daysOverdue} дн.</span>
+                                </div>
+                                <div className="flex justify-between mt-0.5">
+                                  <span className="font-mono text-slate-500">{t.tripNumber}</span>
+                                  <span className="font-mono text-slate-300">{Math.round(t.remainingAmd).toLocaleString('ru-RU')} ֏</span>
+                                </div>
+                              </Link>
+                            ))}
+                            {overdueTotal > overduePayments.length && (
+                              <Link href="/debts" onClick={() => setBellOpen(false)}
+                                className="block text-[10px] text-red-400 text-center py-1 hover:underline">
+                                и ещё {overdueTotal - overduePayments.length} просроченных →
+                              </Link>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {cashGaps.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟠 Кассовые разрывы</p>
-                        <div className="space-y-1">
-                          {cashGaps.map(t => (
-                            <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
-                              className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
-                              <div className="flex justify-between items-center">
-                                <span className="font-mono text-slate-300">{t.tripNumber}</span>
-                                <span className="font-mono text-amber-400">{Math.round(t.gapAmd).toLocaleString('ru-RU')} ֏</span>
-                              </div>
-                              <span className="text-slate-500 text-[10px]">выплачено перевозчику, клиент не платил</span>
-                            </Link>
-                          ))}
+                      )}
+                      {docsCritical.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">🔴 Просроченные документы</p>
+                          <div className="space-y-1">
+                            {docsCritical.map(d => (
+                              <Link key={d.id} href={d.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300 truncate max-w-[190px]">{d.entityName}</span>
+                                  <span className="font-semibold text-red-400 shrink-0 ml-2">−{Math.abs(d.daysLeft)} дн.</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">{d.docName}</span>
+                              </Link>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                      {cashGaps.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟡 Кассовые разрывы</p>
+                          <div className="space-y-1">
+                            {cashGaps.map(t => (
+                              <Link key={t.id} href={`/trips/${t.id}`} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-mono text-slate-300">{t.tripNumber}</span>
+                                  <span className="font-mono text-amber-400">{Math.round(t.gapAmd).toLocaleString('ru-RU')} ֏</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">выплачено перевозчику, клиент не платил</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {docsWarning.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟡 Документы истекают ≤7 дней</p>
+                          <div className="space-y-1">
+                            {docsWarning.map(d => (
+                              <Link key={d.id} href={d.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300 truncate max-w-[190px]">{d.entityName}</span>
+                                  <span className="font-semibold text-amber-400 shrink-0 ml-2">через {d.daysLeft} дн.</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">{d.docName}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {docsInfo.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1.5">🟢 Документы истекают ≤30 дней</p>
+                          <div className="space-y-1">
+                            {docsInfo.map(d => (
+                              <Link key={d.id} href={d.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-slate-300 truncate max-w-[190px]">{d.entityName}</span>
+                                  <span className="font-semibold text-emerald-400 shrink-0 ml-2">через {d.daysLeft} дн.</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">{d.docName}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
                 <Link href="/dashboard" onClick={() => setBellOpen(false)} className="block text-center text-xs text-primary mt-2 hover:underline">Все напоминания →</Link>
               </div>

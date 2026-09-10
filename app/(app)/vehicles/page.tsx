@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter, Info, ArchiveRestore } from 'lucide-react';
+import { Plus, Pencil, Trash2, Car, X, User, ChevronDown, History, Search, Filter, Info, ArchiveRestore, Navigation } from 'lucide-react';
 
 interface Driver { id: string; fullName: string; phone?: string | null; }
 interface VehicleItem {
@@ -11,7 +11,16 @@ interface VehicleItem {
   driver?: Driver | null;
 }
 
+// Занятость флота — сводка "свободна/в рейсе" (аудит ТМС, 05.09.2026). Данные берём из уже
+// существующего /api/vehicle-trips?status=active, ничего нового в бэкенде не добавляем.
+interface ActiveVehicleTrip {
+  id: string; vehicleId: string; tripNumber: string; departureDate: string;
+  geofenceStatus?: string | null;
+  driver?: { id: string; fullName: string } | null;
+}
+
 const KIND_LABEL: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
+const GEOFENCE_LABEL: Record<string, string> = { at_base: 'на базе', away: 'в пути' };
 interface HistoryItem {
   id: string; vehicleId: string; oldDriverId?: string | null; oldDriverName?: string | null;
   newDriverId?: string | null; newDriverName?: string | null; changedAt: string;
@@ -32,6 +41,7 @@ export default function VehiclesPage() {
   const [historyVehicle, setHistoryVehicle] = useState<VehicleItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTripByVehicle, setActiveTripByVehicle] = useState<Record<string, ActiveVehicleTrip>>({});
   // Driver inline change
   const [driverDropdown, setDriverDropdown] = useState<string | null>(null);
   const [driverSearch, setDriverSearch] = useState('');
@@ -58,7 +68,25 @@ export default function VehiclesPage() {
     } catch {} finally { setLoading(false); }
   }, [driverFilter, showArchived, kindFilter]);
 
-  useEffect(() => { load(); loadDrivers(); }, [load, loadDrivers]);
+  const loadActiveTrips = useCallback(async () => {
+    try {
+      const res = await fetch('/api/vehicle-trips?status=active');
+      const data = await res.json();
+      const map: Record<string, ActiveVehicleTrip> = {};
+      if (Array.isArray(data)) {
+        for (const t of data) {
+          // Если у машины несколько активных рейсов одновременно (не должно, но
+          // на всякий случай) — берём самый ранний по выезду как "текущий".
+          if (!map[t.vehicleId] || new Date(t.departureDate) < new Date(map[t.vehicleId].departureDate)) {
+            map[t.vehicleId] = t;
+          }
+        }
+      }
+      setActiveTripByVehicle(map);
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); loadDrivers(); loadActiveTrips(); }, [load, loadDrivers, loadActiveTrips]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -149,6 +177,13 @@ export default function VehiclesPage() {
     return (v.plateNumber?.toLowerCase().includes(s) || v.brand?.toLowerCase().includes(s) || v.model?.toLowerCase().includes(s) || v.driver?.fullName?.toLowerCase().includes(s));
   });
 
+  // Занятость флота считаем только по тягачам — у полуприцепов нет собственного рейса
+  // (VehicleTrip.vehicleId всегда указывает на тягач), их привязка к рейсу — свободный текст
+  // Trip.trailerPlate, которого недостаточно для надёжного статуса "занят/свободен".
+  const tractors = items.filter(v => (v.kind ?? 'tractor') === 'tractor' && v.status === 'active');
+  const busyTractorsCount = tractors.filter(v => activeTripByVehicle[v.id]).length;
+  const freeTractorsCount = tractors.length - busyTractorsCount;
+
   const filteredDriversForDD = drivers.filter(d =>
     !driverSearch || d.fullName.toLowerCase().includes(driverSearch.toLowerCase())
   );
@@ -163,6 +198,18 @@ export default function VehiclesPage() {
         <button type="button" onClick={() => openModal()} className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition">
           <Plus className="w-4 h-4" /> Добавить
         </button>
+      </div>
+
+      {/* Занятость флота — сводка для диспетчера, без захода в "Рейсы машин" */}
+      <div className="flex flex-wrap items-center gap-3 bg-card rounded-xl px-4 py-3 shadow-sm text-sm">
+        <span className="text-muted-foreground">Тягачи сейчас:</span>
+        <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />{freeTractorsCount} свободно
+        </span>
+        <span className="inline-flex items-center gap-1.5 font-medium text-blue-700">
+          <span className="w-2 h-2 rounded-full bg-blue-500" />{busyTractorsCount} в рейсе
+        </span>
+        <span className="text-muted-foreground">из {tractors.length}</span>
       </div>
 
       {/* Kind tabs */}
@@ -227,7 +274,7 @@ export default function VehiclesPage() {
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 mb-3 -mt-2">
+              <div className="flex items-center gap-2 mb-3 -mt-2 flex-wrap">
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${v.kind === 'trailer' ? 'bg-purple-50 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
                   {KIND_LABEL[v.kind ?? 'tractor']}
                 </span>
@@ -237,6 +284,29 @@ export default function VehiclesPage() {
                   </span>
                 )}
               </div>
+
+              {/* Занятость — только для тягачей, где есть реальный рейс машины */}
+              {(v.kind ?? 'tractor') === 'tractor' && (
+                activeTripByVehicle[v.id] ? (
+                  <Link
+                    href={`/vehicle-trips?vehicleId=${v.id}`}
+                    className="flex items-center gap-1.5 mb-3 -mt-1 px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-[11px] hover:bg-blue-100 transition"
+                    title="Открыть рейс машины"
+                  >
+                    <Navigation className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">
+                      В рейсе №{activeTripByVehicle[v.id].tripNumber}
+                      {activeTripByVehicle[v.id].driver?.fullName ? ` · ${activeTripByVehicle[v.id].driver!.fullName}` : ''}
+                      {activeTripByVehicle[v.id].geofenceStatus ? ` · ${GEOFENCE_LABEL[activeTripByVehicle[v.id].geofenceStatus!] ?? ''}` : ''}
+                    </span>
+                  </Link>
+                ) : (
+                  <div className="flex items-center gap-1.5 mb-3 -mt-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] w-fit">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                    Свободна
+                  </div>
+                )
+              )}
 
               {/* Driver section */}
               <div className="relative mb-3" ref={driverDropdown === v.id ? ddRef : undefined}>

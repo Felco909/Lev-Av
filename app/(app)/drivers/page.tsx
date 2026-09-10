@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Pencil, Trash2, UserCheck, Phone, X, CreditCard, FileText, Loader2, ArchiveRestore } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Pencil, Trash2, UserCheck, Phone, X, CreditCard, FileText, Loader2, ArchiveRestore, Info } from 'lucide-react';
 
 export default function DriversPage() {
   const [items, setItems] = useState<any[]>([]);
@@ -124,6 +125,9 @@ export default function DriversPage() {
                   </div>
                 </div>
                 <div className="flex gap-1">
+                  <Link href={`/drivers/${d?.id}`} className="p-1.5 hover:bg-muted rounded-md transition" title="Карточка водителя">
+                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                  </Link>
                   {d?.status === 'archived' ? (
                     <button onClick={() => handleRestore(d?.id)} className="p-1.5 hover:bg-emerald-50 rounded-md transition" title="Восстановить из архива"><ArchiveRestore className="w-3.5 h-3.5 text-emerald-600" /></button>
                   ) : (

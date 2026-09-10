@@ -47,6 +47,9 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const vehicleId = sp.get('vehicleId') || undefined;
+  // Карточка водителя (аудит ТМС 05.09.2026, приоритет 🔴) — история/текущий рейс водителя
+  // независимо от машины, на которой он сейчас числится.
+  const driverId = sp.get('driverId') || undefined;
   const status = sp.get('status') || undefined;
   const dateFrom = sp.get('dateFrom') || undefined;
   const dateTo = sp.get('dateTo') || undefined;
@@ -54,6 +57,7 @@ export async function GET(req: NextRequest) {
   const showArchived = sp.get('showArchived') || undefined;
   const where: any = {};
   if (vehicleId) where.vehicleId = vehicleId;
+  if (driverId) where.driverId = driverId;
   if (status) {
     where.status = status;
   } else if (showArchived !== '1') {
