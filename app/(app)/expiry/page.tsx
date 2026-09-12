@@ -1,18 +1,17 @@
 'use client';
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, ShieldAlert, X, Trash2, Pencil, AlertTriangle, ChevronLeft, ChevronRight, Truck, Users, Building2 } from 'lucide-react';
+import { Plus, ShieldAlert, X, Trash2, Pencil, AlertTriangle, ChevronLeft, ChevronRight, Truck, Users } from 'lucide-react';
 import { formatDate, DOCUMENT_TYPE_MAP, documentExpiryStatus } from '@/lib/utils';
 
 const DOC_TYPE_MAP = DOCUMENT_TYPE_MAP;
 const VEHICLE_KIND_MAP: Record<string, string> = { tractor: 'Тягач', trailer: 'Полуприцеп' };
 
-type EntityType = 'vehicle' | 'driver' | 'carrier';
+type EntityType = 'vehicle' | 'driver';
 type VehicleKindFilter = 'all' | 'tractor' | 'trailer';
 
 const ENTITY_TABS: { type: EntityType; label: string; icon: any }[] = [
   { type: 'vehicle', label: 'Транспорт', icon: Truck },
   { type: 'driver', label: 'Водители', icon: Users },
-  { type: 'carrier', label: 'Перевозчики', icon: Building2 },
 ];
 
 const STORAGE_KEY = 'expiry-page-selection';
@@ -26,7 +25,6 @@ export default function ExpiryPage() {
   const [items, setItems] = useState<DocExpiry[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
-  const [carriers, setCarriers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -39,14 +37,14 @@ export default function ExpiryPage() {
 
   const load = useCallback(async () => {
     try {
-      const [dRes, vRes, drRes, cRes] = await Promise.all([
-        fetch('/api/document-expiry'), fetch('/api/vehicles'), fetch('/api/drivers'), fetch('/api/carriers'),
+      const [dRes, vRes, drRes] = await Promise.all([
+        fetch('/api/document-expiry'), fetch('/api/vehicles'), fetch('/api/drivers'),
       ]);
-      const [dData, vData, drData, cData] = await Promise.all([dRes.json(), vRes.json(), drRes.json(), cRes.json()]);
-      setItems(Array.isArray(dData) ? dData : []);
+      const [dData, vData, drData] = await Promise.all([dRes.json(), vRes.json(), drRes.json()]);
+      // Carriers are intentionally excluded from this page — only vehicle/driver docs belong here.
+      setItems(Array.isArray(dData) ? dData.filter((i: DocExpiry) => i.entityType !== 'carrier') : []);
       setVehicles(Array.isArray(vData) ? vData : []);
       setDrivers(Array.isArray(drData) ? drData : []);
-      setCarriers(Array.isArray(cData) ? cData : []);
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -69,7 +67,7 @@ export default function ExpiryPage() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ entityType, vehicleKindFilter, selectedId })); } catch {}
   }, [entityType, vehicleKindFilter, selectedId]);
 
-  const entityLabel = (t: EntityType) => t === 'vehicle' ? 'машину/прицеп' : t === 'driver' ? 'водителя' : 'перевозчика';
+  const entityLabel = (t: EntityType) => t === 'vehicle' ? 'машину/прицеп' : 'водителя';
 
   const vehicleOptions = useMemo(() => {
     return vehicles
@@ -79,9 +77,8 @@ export default function ExpiryPage() {
 
   const options = useMemo(() => {
     if (entityType === 'vehicle') return vehicleOptions;
-    if (entityType === 'driver') return drivers.map((d: any) => ({ id: d.id, title: d.fullName }));
-    return carriers.map((c: any) => ({ id: c.id, title: c.name }));
-  }, [entityType, vehicleOptions, drivers, carriers]);
+    return drivers.map((d: any) => ({ id: d.id, title: d.fullName }));
+  }, [entityType, vehicleOptions, drivers]);
 
   // If current selection no longer belongs to the visible options (entity type / kind filter
   // changed, or the saved id was deleted), fall back to the first available option rather than
@@ -108,8 +105,7 @@ export default function ExpiryPage() {
 
   const getEntitiesForModal = () => {
     if (form.entityType === 'vehicle') return vehicles.map((v: any) => ({ id: v.id, label: `${v.plateNumber} — ${v.brand} ${v.model} (${VEHICLE_KIND_MAP[v.kind] || 'Тягач'})` }));
-    if (form.entityType === 'driver') return drivers.map((d: any) => ({ id: d.id, label: d.fullName }));
-    return carriers.map((c: any) => ({ id: c.id, label: c.name }));
+    return drivers.map((d: any) => ({ id: d.id, label: d.fullName }));
   };
 
   const openNew = () => {
@@ -200,7 +196,7 @@ export default function ExpiryPage() {
         )}
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <label className="text-sm text-muted-foreground whitespace-nowrap">
-            {entityType === 'vehicle' ? 'Транспортное средство:' : entityType === 'driver' ? 'Водитель:' : 'Перевозчик:'}
+            {entityType === 'vehicle' ? 'Транспортное средство:' : 'Водитель:'}
           </label>
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <button
