@@ -26,6 +26,40 @@ type ExtractData = {
   confidence: string;
 };
 
+type CarrierOrderExtraFields = {
+  issuedBy: string;
+  loadingTime: string;
+  loadingContact: string;
+  unloadingTime: string;
+  unloadingContact: string;
+  volume: string;
+  packagingType: string;
+  placesCount: string;
+  driverPassport: string;
+  carrierBankAccount: string;
+  carrierRequisites: string;
+  freeTimeHours: string;
+  demurrageRate: string;
+  notes: string;
+};
+
+const EXTRA_FIELDS_INITIAL: CarrierOrderExtraFields = {
+  issuedBy: '',
+  loadingTime: '',
+  loadingContact: '',
+  unloadingTime: '',
+  unloadingContact: '',
+  volume: '',
+  packagingType: '',
+  placesCount: '',
+  driverPassport: '',
+  carrierBankAccount: '',
+  carrierRequisites: '',
+  freeTimeHours: '',
+  demurrageRate: '',
+  notes: '',
+};
+
 type ClientRow = { id: string; name: string };
 type VehicleRow = { id: string; plateNumber: string; driverId?: string | null };
 type DriverRow = { id: string; fullName: string };
@@ -80,8 +114,17 @@ export default function AgentsPage() {
   const [freightAmount, setFreightAmount] = useState('');
   const [freightCurrency, setFreightCurrency] = useState('AMD');
   const [paymentTerms, setPaymentTerms] = useState('');
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [docLanguage, setDocLanguage] = useState<'ru' | 'am'>('ru');
+  const [wordLoading, setWordLoading] = useState(false);
+  const [docLanguage, setDocLanguage] = useState<'ru' | 'hy' | 'en'>('ru');
+  const [showExtraFields, setShowExtraFields] = useState(false);
+  const [extraFields, setExtraFields] = useState<CarrierOrderExtraFields>(EXTRA_FIELDS_INITIAL);
+  const updateExtraField = useCallback(
+    (key: keyof CarrierOrderExtraFields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      setExtraFields((prev) => ({ ...prev, [key]: value }));
+    },
+    [],
+  );
 
   useEffect(() => {
     Promise.all([
@@ -251,8 +294,11 @@ export default function AgentsPage() {
       appToast.error('Выберите заявку из TMS или перевозчика в форме');
       return;
     }
-    setPdfLoading(true);
+    setWordLoading(true);
     try {
+      const extra = Object.fromEntries(
+        Object.entries(extraFields).map(([key, value]) => [key, value.trim() || undefined]),
+      );
       const res = await fetch('/api/agents/document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,6 +308,7 @@ export default function AgentsPage() {
           freightCurrency,
           paymentTerms: paymentTerms.trim() || undefined,
           language: docLanguage,
+          extra,
           tripId: selectedTripId || undefined,
           draft: selectedTripId
             ? undefined
@@ -295,7 +342,7 @@ export default function AgentsPage() {
     } catch (e: unknown) {
       appToast.error(e instanceof Error ? e.message : 'Ошибка');
     } finally {
-      setPdfLoading(false);
+      setWordLoading(false);
     }
   };
 
@@ -393,6 +440,75 @@ export default function AgentsPage() {
               />
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowExtraFields((v) => !v)}
+            className="text-xs text-primary hover:underline"
+          >
+            {showExtraFields ? 'Скрыть дополнительные поля документа' : 'Дополнительные поля документа (время, контакты, груз, реквизиты...)'}
+          </button>
+
+          {showExtraFields && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t pt-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Ответственный менеджер</label>
+                <input value={extraFields.issuedBy} onChange={updateExtraField('issuedBy')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Время погрузки</label>
+                <input value={extraFields.loadingTime} onChange={updateExtraField('loadingTime')} placeholder="напр. 09:00" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Контактное лицо на погрузке</label>
+                <input value={extraFields.loadingContact} onChange={updateExtraField('loadingContact')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Время выгрузки</label>
+                <input value={extraFields.unloadingTime} onChange={updateExtraField('unloadingTime')} placeholder="напр. 09:00" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Контактное лицо на выгрузке</label>
+                <input value={extraFields.unloadingContact} onChange={updateExtraField('unloadingContact')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Объём груза</label>
+                <input value={extraFields.volume} onChange={updateExtraField('volume')} placeholder="напр. 82 м³" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Тип упаковки</label>
+                <input value={extraFields.packagingType} onChange={updateExtraField('packagingType')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Количество мест</label>
+                <input value={extraFields.placesCount} onChange={updateExtraField('placesCount')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Паспортные данные водителя</label>
+                <input value={extraFields.driverPassport} onChange={updateExtraField('driverPassport')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Номер счёта (р/с) перевозчика</label>
+                <input value={extraFields.carrierBankAccount} onChange={updateExtraField('carrierBankAccount')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Реквизиты для оплаты перевозчика</label>
+                <textarea rows={2} value={extraFields.carrierRequisites} onChange={updateExtraField('carrierRequisites')} placeholder="Если пусто — подставятся банковские реквизиты из карточки перевозчика" className="w-full border rounded-lg px-3 py-2 text-sm bg-background resize-y" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Нормативное время простоя, ч</label>
+                <input value={extraFields.freeTimeHours} onChange={updateExtraField('freeTimeHours')} placeholder="48" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Ставка за простой</label>
+                <input value={extraFields.demurrageRate} onChange={updateExtraField('demurrageRate')} placeholder="50 USD" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs text-muted-foreground mb-1 block">Примечания</label>
+                <textarea rows={2} value={extraFields.notes} onChange={updateExtraField('notes')} className="w-full border rounded-lg px-3 py-2 text-sm bg-background resize-y" />
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <div className="flex rounded-lg border overflow-hidden text-sm font-medium">
               <button
@@ -404,20 +520,27 @@ export default function AgentsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setDocLanguage('am')}
-                className={`px-3 py-1.5 border-l transition-colors ${docLanguage === 'am' ? 'bg-slate-800 text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+                onClick={() => setDocLanguage('hy')}
+                className={`px-3 py-1.5 border-l transition-colors ${docLanguage === 'hy' ? 'bg-slate-800 text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
               >
                 AM
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocLanguage('en')}
+                className={`px-3 py-1.5 border-l transition-colors ${docLanguage === 'en' ? 'bg-slate-800 text-white' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
+                EN
               </button>
             </div>
             <button
               type="button"
               onClick={handleDownloadCarrierWord}
-              disabled={pdfLoading}
+              disabled={wordLoading}
               className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-900 disabled:opacity-50"
             >
-              {pdfLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {pdfLoading ? 'Генерация...' : 'Скачать Word (.docx)'}
+              {wordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {wordLoading ? 'Генерация...' : 'Скачать Word (.docx)'}
             </button>
           </div>
         </div>

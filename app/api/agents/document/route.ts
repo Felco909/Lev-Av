@@ -6,13 +6,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import PizZip from 'pizzip';
 import { prisma } from '@/lib/prisma';
-import {
-  buildCarrierApplicationPdf,
-  tripToCarrierApplicationInput,
-  type CarrierApplicationInput,
-  type CarrierApplicationLang,
-} from '@/lib/carrier-application-pdf';
-import { carrierRequestDocx, type DocData, type OrderForCarrierRequest } from '@/lib/doc-generators';
+import type { DocData } from '@/lib/doc-generators';
+import { carrierOrderDocx, type CarrierOrderData, type CarrierOrderLang } from '@/lib/carrier-order-docx';
+import { getCompanySettings } from '@/lib/template-processor';
 import { buildContentDisposition } from '@/lib/content-disposition';
 import {
   GoogleGenerativeAI,
@@ -217,96 +213,22 @@ async function callGeminiJson(parts: Part[]) {
   };
 }
 
-async function handleCarrierApplicationPdf(body: Record<string, unknown>) {
-  const lang: CarrierApplicationLang = body.lang === 'hy' ? 'hy' : 'ru';
-  const freightAmount = String(body.freightAmount ?? '').trim();
-  if (!freightAmount) {
-    return NextResponse.json({ error: 'Укажите сумму фрахта' }, { status: 400 });
-  }
-
-  const freightCurrency = String(body.freightCurrency ?? 'AMD').trim() || 'AMD';
-  const paymentTerms = typeof body.paymentTerms === 'string' ? body.paymentTerms : undefined;
-  let input: CarrierApplicationInput;
-
-  const tripId = typeof body.tripId === 'string' ? body.tripId.trim() : '';
-  if (tripId) {
-    const trip = await prisma.trip.findUnique({
-      where: { id: tripId },
-      include: { client: true, vehicle: true, carrier: true },
-    });
-    if (!trip) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
-    if (!trip.carrier) {
-      return NextResponse.json({ error: 'У заявки не указан перевозчик' }, { status: 400 });
-    }
-    input = tripToCarrierApplicationInput(trip, { lang, freightAmount, freightCurrency, paymentTerms });
-  } else {
-    const draft = (body.draft ?? {}) as Record<string, unknown>;
-    const carrierId = typeof draft.carrierId === 'string' ? draft.carrierId : '';
-    let carrier: { name: string; inn?: string | null; address?: string | null; contactPerson?: string | null } | null =
-      null;
-    if (carrierId) {
-      carrier = await prisma.carrier.findUnique({ where: { id: carrierId } });
-    }
-    const clientId = typeof draft.clientId === 'string' ? draft.clientId : '';
-    const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
-    const vehicleId = typeof draft.vehicleId === 'string' ? draft.vehicleId : '';
-    const vehicle = vehicleId ? await prisma.vehicle.findUnique({ where: { id: vehicleId } }) : null;
-
-    input = {
-      lang,
-      tripNumber: String(draft.tripNumber ?? '—'),
-      tripDate: String(draft.tripDate ?? new Date().toISOString().slice(0, 10)),
-      routeFrom: String(draft.routeFrom ?? ''),
-      routeTo: String(draft.routeTo ?? ''),
-      loadDate: String(draft.tripDate ?? ''),
-      loadPlace: String(draft.routeFrom ?? ''),
-      unloadDate: typeof draft.unloadDate === 'string' ? draft.unloadDate : undefined,
-      unloadPlace: String(draft.routeTo ?? ''),
-      cargoName: client?.name || String(draft.cargoName ?? ''),
-      cargoValue:
-        draft.clientRate != null
-          ? `${draft.clientRate} ${String(draft.currency ?? 'AMD')}`
-          : undefined,
-      cargoWeight:
-        draft.cargoWeight != null && Number(draft.cargoWeight) > 0
-          ? `${Number(draft.cargoWeight)} т`
-          : undefined,
-      transportType: typeof draft.transportType === 'string' ? draft.transportType : undefined,
-      vehiclePlate: vehicle?.plateNumber || (typeof draft.vehiclePlate === 'string' ? draft.vehiclePlate : undefined),
-      additionalConditions:
-        typeof draft.additionalConditions === 'string' ? draft.additionalConditions : undefined,
-      freightAmount,
-      freightCurrency,
-      paymentTerms,
-      carrierName: carrier?.name || (typeof draft.carrierName === 'string' ? draft.carrierName : undefined),
-      carrierInn: carrier?.inn || undefined,
-      carrierAddress: carrier?.address || undefined,
-      carrierContact: carrier?.contactPerson || undefined,
-    };
-  }
-
-  const pdfBytes = await buildCarrierApplicationPdf(input);
-  const safeNum = (input.tripNumber || 'draft').replace(/[^\w.-]+/g, '_');
-  const fileName = `zayavka_perevozchik_${safeNum}.pdf`;
-
-  return new NextResponse(Buffer.from(pdfBytes), {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': buildContentDisposition('attachment', fileName),
-    },
-  });
-}
-
 async function handleCarrierApplicationWord(body: Record<string, unknown>) {
   const freightAmount = String(body.freightAmount ?? '').trim();
   if (!freightAmount) {
     return NextResponse.json({ error: 'Укажите сумму фрахта' }, { status: 400 });
   }
   const freightCurrency = String(body.freightCurrency ?? 'AMD').trim() || 'AMD';
-  const language: 'ru' | 'am' = body.language === 'am' ? 'am' : 'ru';
+  const language: CarrierOrderLang =
+    body.language === 'hy' ? 'hy' : body.language === 'en' ? 'en' : 'ru';
+  const paymentTerms = typeof body.paymentTerms === 'string' ? body.paymentTerms : '';
+  const extra = (body.extra ?? {}) as Record<string, unknown>;
+  const extraStr = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
 
   const tripId = typeof body.tripId === 'string' ? body.tripId.trim() : '';
   let docData: DocData;
+  let carrierAddress = '';
+  let carrierBankDetails = '';
 
   if (tripId) {
     const trip = await prisma.trip.findUnique({
@@ -315,6 +237,8 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
     });
     if (!trip) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 });
     if (!trip.carrier) return NextResponse.json({ error: 'У заявки не указан перевозчик' }, { status: 400 });
+    carrierAddress = trip.carrier.address ?? '';
+    carrierBankDetails = trip.carrier.bankDetails ?? '';
     docData = {
       tripNumber: trip.tripNumber,
       tripDate: (trip.tripDate instanceof Date ? trip.tripDate : new Date(trip.tripDate as unknown as string)).toISOString().slice(0, 10),
@@ -366,9 +290,15 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
   } else {
     const draft = (body.draft ?? {}) as Record<string, unknown>;
     const carrierId = typeof draft.carrierId === 'string' ? draft.carrierId : '';
-    const carrier = carrierId ? await prisma.carrier.findUnique({ where: { id: carrierId } }) : null;
     const clientId = typeof draft.clientId === 'string' ? draft.clientId : '';
-    const client = clientId ? await prisma.client.findUnique({ where: { id: clientId } }) : null;
+    const vehicleId = typeof draft.vehicleId === 'string' ? draft.vehicleId : '';
+    const [carrier, client, vehicle] = await Promise.all([
+      carrierId ? prisma.carrier.findUnique({ where: { id: carrierId } }) : null,
+      clientId ? prisma.client.findUnique({ where: { id: clientId } }) : null,
+      vehicleId ? prisma.vehicle.findUnique({ where: { id: vehicleId } }) : null,
+    ]);
+    carrierAddress = carrier?.address ?? '';
+    carrierBankDetails = carrier?.bankDetails ?? '';
     docData = {
       tripNumber: String(draft.tripNumber ?? 'новая'),
       tripDate: String(draft.tripDate ?? new Date().toISOString().slice(0, 10)),
@@ -379,6 +309,7 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
       carrierRate: draft.carrierRate != null ? Number(draft.carrierRate) : null,
       profit: 0,
       client: { name: client?.name || '—', contactPerson: null, phone: null, email: null, inn: null, address: null },
+      vehicle: vehicle ? { plateNumber: vehicle.plateNumber, brand: vehicle.brand, model: vehicle.model } : null,
       carrier: carrier ? { name: carrier.name, contactPerson: carrier.contactPerson ?? null, phone: carrier.phone ?? null, email: carrier.email ?? null, inn: carrier.inn ?? null }
         : typeof draft.carrierName === 'string' ? { name: draft.carrierName, contactPerson: null, phone: null, email: null, inn: null }
         : null,
@@ -390,43 +321,77 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
     const [y, m, d] = iso.split('-');
     return `${d}.${m}.${y}`;
   };
-  const order: OrderForCarrierRequest = {
-    order_number: docData.requestNumber ?? `TMS-${docData.tripNumber}`,
-    order_date: isoToShort(docData.tripDate) || new Date().toLocaleDateString('ru-RU'),
-    contract_number: docData.contractNumber ?? undefined,
-    contract_date: isoToShort(docData.contractDate) || undefined,
-    carrier: {
-      company_name: docData.carrier?.name ?? '—',
-      truck_plate: docData.vehicle?.plateNumber,
-      trailer_plate: docData.trailerPlate ?? undefined,
-      truck_type: docData.truckType ?? undefined,
-    },
-    route: {
-      from_country: docData.routeFrom,
-      to_country: docData.routeTo,
-      from_address: docData.loadingAddress
-        ? `${docData.routeFrom}, ${docData.loadingAddress}`
-        : docData.routeFrom,
-      to_address: docData.unloadingAddress
-        ? `${docData.routeTo}, ${docData.unloadingAddress}`
-        : docData.routeTo,
-      loading_date: isoToShort(docData.tripDate) || '—',
-      unloading_date: isoToShort(docData.unloadDate) || '—',
-      customs_departure: docData.customsDeparture ?? undefined,
-      customs_destination: docData.customsDestination ?? undefined,
-    },
-    cargo: {
-      name: docData.cargoName ?? '—',
-      value: docData.cargoValue != null ? `${docData.cargoValue} USD` : undefined,
-      weight_tn: docData.cargoWeight != null ? String(docData.cargoWeight) : '—',
-    },
-    additional_terms: docData.additionalTerms ?? undefined,
-    price: Number(freightAmount) || 0,
-    currency: freightCurrency as OrderForCarrierRequest['currency'],
-    all_in: false,
-    payment_days: 10,
+
+  // Реквизиты своей компании — точка истины: /settings (getCompanySettings()), как и у
+  // счёта/акта (lib/document-templates.ts). Название/адрес переведены на каждый язык
+  // в самих .docx-шаблонах (в Settings нет армянских/английских реквизитов — та же
+  // причина, по которой AM-документ раньше не читал Settings вовсе), а ИНН и телефон —
+  // это просто цифры без локализации, поэтому берутся из Settings для всех языков.
+  const companySettings = await getCompanySettings();
+  const COMPANY_NAME_FALLBACK: Record<CarrierOrderLang, string> = {
+    ru: 'ООО «ЛЕВ ЭНД АВ»',
+    hy: '«ԼԵՎ ԸՆԴ ԱՎ» ՍՊԸ',
+    en: 'LEV&AV LLC',
   };
-  const buffer = await carrierRequestDocx(order, { lang: language });
+  const COMPANY_ADDRESS_FALLBACK: Record<CarrierOrderLang, string> = {
+    ru: 'РА, 0046, г. Ереван, ул. С. Таронци 3/18',
+    hy: 'ՀՀ, 0046, ք. Երևան, Ս. Տարոնցու փող. 3/18',
+    en: 'RA, 0046, Yerevan, S. Tarontsi St. 3/18',
+  };
+  const companyName = language === 'ru'
+    ? (companySettings.company_name || COMPANY_NAME_FALLBACK.ru)
+    : COMPANY_NAME_FALLBACK[language];
+  const companyAddress = language === 'ru'
+    ? (companySettings.company_address || COMPANY_ADDRESS_FALLBACK.ru)
+    : COMPANY_ADDRESS_FALLBACK[language];
+  const companyInn = companySettings.company_inn || '02248043';
+  const companyPhone = companySettings.company_phone || '+37499902007';
+
+  const orderData: CarrierOrderData = {
+    application_number: docData.requestNumber || `TMS-${docData.tripNumber}`,
+    application_date: isoToShort(docData.tripDate) || new Date().toLocaleDateString('ru-RU'),
+    issued_by: extraStr(extra.issuedBy),
+    company_name: companyName,
+    company_address: companyAddress,
+    company_inn: companyInn,
+    company_phone: companyPhone,
+    carrier_name: docData.carrier?.name ?? '',
+    carrier_address: carrierAddress,
+    carrier_tin: docData.carrier?.inn ?? '',
+    carrier_phone: docData.carrier?.phone ?? '',
+    carrier_contact_person: docData.carrier?.contactPerson ?? '',
+    route: `${docData.routeFrom} — ${docData.routeTo}`,
+    loading_place: docData.loadingAddress ? `${docData.routeFrom}, ${docData.loadingAddress}` : docData.routeFrom,
+    loading_date: isoToShort(docData.tripDate),
+    loading_time: extraStr(extra.loadingTime),
+    loading_contact: extraStr(extra.loadingContact),
+    unloading_place: docData.unloadingAddress ? `${docData.routeTo}, ${docData.unloadingAddress}` : docData.routeTo,
+    unloading_date: isoToShort(docData.unloadDate),
+    unloading_time: extraStr(extra.unloadingTime),
+    unloading_contact: extraStr(extra.unloadingContact),
+    cargo: docData.cargoName ?? '',
+    weight: docData.cargoWeight != null ? `${docData.cargoWeight} т` : '',
+    volume: extraStr(extra.volume),
+    packaging_type: extraStr(extra.packagingType),
+    places_count: extraStr(extra.placesCount),
+    vehicle_type: docData.truckType ?? '',
+    vehicle_number: docData.vehicle?.plateNumber ?? '',
+    trailer_number: docData.trailerPlate ?? '',
+    driver: docData.driver?.fullName ?? '',
+    driver_phone: docData.driver?.phone ?? '',
+    driver_passport: extraStr(extra.driverPassport),
+    freight_price: (Number(freightAmount) || 0).toLocaleString('ru-RU'),
+    currency: freightCurrency,
+    payment_terms: paymentTerms.trim(),
+    carrier_bank_account: extraStr(extra.carrierBankAccount),
+    carrier_requisites: extraStr(extra.carrierRequisites) || carrierBankDetails,
+    additional_terms: docData.additionalTerms ?? '',
+    notes: extraStr(extra.notes),
+    free_time_hours: extraStr(extra.freeTimeHours) || '48',
+    demurrage_rate: extraStr(extra.demurrageRate) || '50 USD',
+  };
+
+  const buffer = await carrierOrderDocx(language, orderData);
   const safeNum = (docData.tripNumber || 'draft').replace(/[^\w.-]+/g, '_');
   const fileName = `zayavka_perevozchik_${safeNum}.docx`;
   return new NextResponse(buffer, {
@@ -445,9 +410,6 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const body = await req.json();
-      if (body?.mode === 'carrier_application_pdf') {
-        return handleCarrierApplicationPdf(body);
-      }
       if (body?.mode === 'carrier_application_word') {
         return handleCarrierApplicationWord(body);
       }

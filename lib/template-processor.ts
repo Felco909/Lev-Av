@@ -65,15 +65,22 @@ export async function getClientTemplate(clientId: string | null | undefined, doc
 }
 
 /**
- * Process a .docx template with docxtemplater, replacing {placeholders} with data.
- * Uses single curly brace delimiters: {placeholder_name}
+ * Process a .docx template with docxtemplater, replacing placeholders with data.
+ * Defaults to single curly brace delimiters ({placeholder_name}) — invoice/act/etc.
+ * templates use this convention; pass `delimiters` to override for templates that
+ * use a different convention (e.g. carrier-order's {{placeholder_name}}, see
+ * lib/carrier-order-docx.ts).
  */
-export function processDocxTemplate(templateBuffer: Buffer, data: Record<string, string>): Buffer {
+export function processDocxTemplate(
+  templateBuffer: Buffer,
+  data: Record<string, string>,
+  delimiters: { start: string; end: string } = { start: '{', end: '}' },
+): Buffer {
   const zip = new PizZip(templateBuffer);
   const doc = new Docxtemplater(zip, {
     paragraphLoop: true,
     linebreaks: true,
-    delimiters: { start: '{', end: '}' },
+    delimiters,
   });
 
   doc.render(data);
