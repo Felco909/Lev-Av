@@ -388,7 +388,7 @@ async function handleCarrierApplicationWord(body: Record<string, unknown>) {
     additional_terms: docData.additionalTerms ?? '',
     notes: extraStr(extra.notes),
     free_time_hours: extraStr(extra.freeTimeHours) || '48',
-    demurrage_rate: extraStr(extra.demurrageRate) || '50 USD',
+    demurrage_rate: extraStr(extra.demurrageRate) || '100 USD',
   };
 
   const buffer = await carrierOrderDocx(language, orderData);

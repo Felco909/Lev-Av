@@ -500,7 +500,7 @@ export default function AgentsPage() {
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Ставка за простой</label>
-                <input value={extraFields.demurrageRate} onChange={updateExtraField('demurrageRate')} placeholder="50 USD" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
+                <input value={extraFields.demurrageRate} onChange={updateExtraField('demurrageRate')} placeholder="100 USD" className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
               </div>
               <div className="sm:col-span-2">
                 <label className="text-xs text-muted-foreground mb-1 block">Примечания</label>
