@@ -88,6 +88,11 @@ model Vehicle {
   // из Wialon API. atBase=null означает "ещё не проверялось" (например, у машины нет wialonUnitId).
   atBase                  Boolean?               @default(true) @map("at_base")
   atBaseChangedAt         DateTime?              @map("at_base_changed_at")
+  // Dwell (простой) tracking — written only by lib/wialon/dwellCheck.ts on the same 5-minute
+  // schedule. lastMovingAt: last check that saw speed above the moving threshold;
+  // lastGpsMessageAt: tracker's last message time. null = not observed yet.
+  lastMovingAt            DateTime?              @map("last_moving_at")
+  lastGpsMessageAt        DateTime?              @map("last_gps_message_at")
   createdAt               DateTime               @default(now()) @map("created_at")
   trips                   Trip[]
   serviceRecords          ServiceRecord[]

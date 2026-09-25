@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Loader2, AlertTriangle, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { dwellAlertLabel, DWELL_THRESHOLDS_HOURS, type DwellAlert } from '@/lib/dashboard/dwell-alerts';
 
 interface TripRow { id: string; tripNumber: string; entityName: string; remaining?: number; daysOverdue?: number; gapAmd?: number; }
 interface IdleVehicleRow { vehicleId: string; plateNumber: string; daysIdle: number; }
@@ -17,6 +18,21 @@ interface ProblemTripsData {
   noAttachmentTrips: TripRow[];
   idleVehicles: IdleVehicleRow[];
   stuckVehicleTrips: StuckTripRow[];
+  dwellAlerts: DwellAlert[];
+}
+
+function DwellRows({ alerts }: { alerts: DwellAlert[] }) {
+  return (
+    <>
+      {alerts.map(a => (
+        <Link key={a.vehicleId} href={a.href} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/30 transition">
+          <span className="font-mono font-medium">{a.plateNumber} · №{a.tripNumber}</span>
+          <span className="text-xs text-muted-foreground">{a.kind === 'no_signal' ? 'последнее сообщение' : 'без движения с'} {new Date(a.since).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+          <span className={a.severity === 'critical' ? 'text-red-600' : a.severity === 'warning' ? 'text-amber-600' : 'text-emerald-700'}>{dwellAlertLabel(a)}</span>
+        </Link>
+      ))}
+    </>
+  );
 }
 
 function Section({ severity, title, hint, children, count }: { severity: 'crit' | 'warn' | 'info'; title: string; hint?: string; children: React.ReactNode; count: number }) {
@@ -102,6 +118,14 @@ export default function ProblemTripsPage() {
             ))}
           </Section>
 
+          <Section severity="crit" title="Машины в рейсе стоят без движения" hint={`Вне базы компании, ≥${DWELL_THRESHOLDS_HOURS.critical} ч по данным Wialon`} count={(data.dwellAlerts ?? []).filter(a => a.severity === 'critical').length}>
+            <DwellRows alerts={(data.dwellAlerts ?? []).filter(a => a.severity === 'critical')} />
+          </Section>
+
+          <Section severity="warn" title="Долгий простой / нет связи с трекером" hint={`Стоят ≥${DWELL_THRESHOLDS_HOURS.warning} ч или трекер молчит ≥2 ч`} count={(data.dwellAlerts ?? []).filter(a => a.severity === 'warning').length}>
+            <DwellRows alerts={(data.dwellAlerts ?? []).filter(a => a.severity === 'warning')} />
+          </Section>
+
           <Section severity="warn" title="Кассовые разрывы" hint="Перевозчику уже оплачено, клиент ещё не заплатил" count={data.cashGapTrips.length}>
             {data.cashGapTrips.map(r => (
               <Link key={r.id} href={`/trips/${r.id}`} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/30 transition">
@@ -127,6 +151,10 @@ export default function ProblemTripsPage() {
                 <span className="text-muted-foreground truncate max-w-[260px]">{r.entityName}</span>
               </Link>
             ))}
+          </Section>
+
+          <Section severity="info" title="Машины в рейсе стоят" hint={`Вне базы компании, ≥${DWELL_THRESHOLDS_HOURS.info} ч — может быть отдых водителя или граница`} count={(data.dwellAlerts ?? []).filter(a => a.severity === 'info').length}>
+            <DwellRows alerts={(data.dwellAlerts ?? []).filter(a => a.severity === 'info')} />
           </Section>
 
           <Section severity="info" title="Простаивающие машины" hint="Активны, но без рейса ≥5 дней" count={data.idleVehicles.length}>

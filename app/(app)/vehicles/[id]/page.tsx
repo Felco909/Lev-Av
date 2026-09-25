@@ -56,6 +56,14 @@ export default function VehicleDetailPage() {
   const params = useParams();
   const id = params?.id as string;
 
+  // ?tab=telematics — dwell alerts (bell / dashboard / problem trips) open straight on telematics.
+  const [tab, setTab] = useState('general');
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get('tab') === 'telematics') setTab('telematics');
+    } catch {}
+  }, []);
+
   const [vehicle, setVehicle] = useState<VehicleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState<LiveSnapshot | null>(null);
@@ -124,7 +132,7 @@ export default function VehicleDetailPage() {
         </span>
       </div>
 
-      <Tabs defaultValue="general">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="general">Основное</TabsTrigger>
           <TabsTrigger value="telematics">Телематика</TabsTrigger>

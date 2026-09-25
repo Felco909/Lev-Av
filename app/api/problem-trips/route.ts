@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getClientDebtRows, getCarrierDebtRows } from '@/lib/finance/debts-service';
 import { getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
+import { getDwellAlerts } from '@/lib/dashboard/dwell-alerts';
 
 /**
  * "Проблемные рейсы" (аудит ТМС 05.09.2026, приоритет 🟠) — сводный экран, который НЕ считает
@@ -20,11 +21,12 @@ export async function GET() {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const [clientRows, carrierRows, idleVehicles, stuckVehicleTrips] = await Promise.all([
+    const [clientRows, carrierRows, idleVehicles, stuckVehicleTrips, dwellAlerts] = await Promise.all([
       getClientDebtRows(prisma, todayStart),
       getCarrierDebtRows(prisma, todayStart),
       getIdleVehicles(prisma, 5),
       getStuckVehicleTrips(prisma, 14),
+      getDwellAlerts(prisma),
     ]);
 
     const overdueClientPayments = clientRows
@@ -66,10 +68,11 @@ export async function GET() {
       .filter((t) => t._count.attachments === 0)
       .map((t) => ({ id: t.id, tripNumber: t.tripNumber, entityName: t.client?.name ?? '—' }));
 
+    const dwellCount = (sev: string) => dwellAlerts.filter((a) => a.severity === sev).length;
     const counts = {
-      critical: overdueClientPayments.length + overdueCarrierPayments.length,
-      warning: cashGapTrips.length + noInvoiceActTrips.length + noAttachmentTrips.length,
-      info: idleVehicles.length + stuckVehicleTrips.length,
+      critical: overdueClientPayments.length + overdueCarrierPayments.length + dwellCount('critical'),
+      warning: cashGapTrips.length + noInvoiceActTrips.length + noAttachmentTrips.length + dwellCount('warning'),
+      info: idleVehicles.length + stuckVehicleTrips.length + dwellCount('info'),
     };
 
     return NextResponse.json({
@@ -81,6 +84,7 @@ export async function GET() {
       noAttachmentTrips,
       idleVehicles,
       stuckVehicleTrips,
+      dwellAlerts,
     });
   } catch (e: any) {
     console.error(e);

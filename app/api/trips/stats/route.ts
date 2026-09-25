@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth-options';
 import { getClientDebtRows, getCarrierDebtRows } from '@/lib/finance/debts-service';
+import { getDwellAlerts } from '@/lib/dashboard/dwell-alerts';
 
 export async function GET(req: Request) {
   try {
@@ -184,6 +185,9 @@ export async function GET(req: Request) {
     const expiringDocsWarning = expiringDocsEnriched.filter((d) => d.daysLeft >= 0 && d.daysLeft <= 7).slice(0, 10);
     const expiringDocsInfo = expiringDocsEnriched.filter((d) => d.daysLeft > 7 && d.daysLeft <= 30).slice(0, 10);
 
+    // Простой машин в рейсе по Wialon (dwell) — тот же сервис, что Command Center и /problem-trips.
+    const dwellAlerts = await getDwellAlerts(prisma);
+
     return NextResponse.json({
       totalTrips: allTrips?._count ?? 0,
       totalProfit: Number(allTrips?._sum?.profitAmd ?? 0),
@@ -222,6 +226,7 @@ export async function GET(req: Request) {
         expiringDocsCritical,
         expiringDocsWarning,
         expiringDocsInfo,
+        dwellAlerts,
       },
       vehicleUtilization: {
         totalVehicles: totalVehicles ?? 0,

@@ -10,6 +10,7 @@ import { getVehicleMaintenancePartsExpensesAmd } from '@/lib/finance/vehicle-mai
 import { getClientDebtRows, getCarrierDebtRows, sumDebt, getPaymentReminders } from '@/lib/finance/debts-service';
 import { getOperationalSummary, getIdleVehicles, getStuckVehicleTrips } from '@/lib/dashboard/operational-summary';
 import { dedupeCashGapTotal } from '@/lib/finance/cash-gap-dedup';
+import { getDwellAlerts } from '@/lib/dashboard/dwell-alerts';
 
 /**
  * Доход/расход/прибыль собственного транспорта за период VehicleTrip.departureDate — единая
@@ -441,17 +442,19 @@ export async function GET(req: Request) {
     // индикатор был всегда null (аудит 01.08.2026, п.6). Теперь — из Setting('wialon_last_sync_at'),
     // которую lib/company-base/baseCheck.ts обновляет при каждом успешном снимке Wialon.
     const todayStartCC = new Date(); todayStartCC.setHours(0, 0, 0, 0);
-    const [operational, idleVehicles, stuckVehicleTrips, lastWialonSyncSetting] = await Promise.all([
+    const [operational, idleVehicles, stuckVehicleTrips, lastWialonSyncSetting, dwellAlerts] = await Promise.all([
       getOperationalSummary(prisma, todayStartCC),
       getIdleVehicles(prisma, 5),
       getStuckVehicleTrips(prisma, 14),
       prisma.setting.findUnique({ where: { key: 'wialon_last_sync_at' } }),
+      getDwellAlerts(prisma),
     ]);
 
     const commandCenter = {
       attention: { noInvoiceActTrips, noAttachmentTrips },
       idleVehicles,
       stuckVehicleTrips,
+      dwellAlerts,
     };
 
     return NextResponse.json({

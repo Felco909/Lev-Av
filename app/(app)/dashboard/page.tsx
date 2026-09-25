@@ -9,6 +9,7 @@ import {
   ChevronRight, CheckCircle2, Loader2, Percent, FileWarning, Sparkles,
 } from 'lucide-react';
 import { formatCurrency, DOCUMENT_TYPE_MAP } from '@/lib/utils';
+import { dwellAlertLabel, DWELL_THRESHOLDS_HOURS, NO_SIGNAL_THRESHOLD_HOURS, type DwellAlert } from '@/lib/dashboard/dwell-alerts';
 import ReportChart from '../reports/_components/report-chart';
 
 const FleetMap = dynamic(() => import('../telematics/monitoring/_components/fleet-map'), {
@@ -43,7 +44,7 @@ interface DashData {
   expiringDocs: ExpiringDoc[];
   clients: { id: string; name: string }[];
   ownFleet?: { revenue: number; expenses: number; profit: number; breakdown: { salary: number; perDiem: number; fuel: number; other: number }; tripCount: number; vtCount: number; };
-  commandCenter: { attention: { noInvoiceActTrips: any[]; noAttachmentTrips: any[] }; idleVehicles: IdleVehicle[]; stuckVehicleTrips: StuckTrip[] };
+  commandCenter: { attention: { noInvoiceActTrips: any[]; noAttachmentTrips: any[] }; idleVehicles: IdleVehicle[]; stuckVehicleTrips: StuckTrip[]; dwellAlerts?: DwellAlert[] };
   operational: OperationalSummary;
   lastWialonSyncAt: string | null;
 }
@@ -439,6 +440,22 @@ export default function DashboardPage() {
       list.push({ key: g.key, severity: g.severity, icon: ShieldAlert, title: g.title, sub: `${items.length} · ближайший: ${docLabel(nearest)}, через ${nearest.daysLeft} дн.`, owner: 'автопарк', onClick: () => router.push(nearest.href) });
     }
 
+    // Простой машин в рейсе по Wialon (dwell) — одна строка на уровень, клик — в телематику
+    // машины, которая стоит дольше всех на этом уровне.
+    const dwell = data.commandCenter?.dwellAlerts ?? [];
+    const DWELL_ROWS: { key: string; filter: (a: DwellAlert) => boolean; severity: Severity; title: string }[] = [
+      { key: 'dwell-crit', filter: a => a.kind === 'dwell' && a.severity === 'critical', severity: 'crit', title: `Машины в рейсе стоят ≥${DWELL_THRESHOLDS_HOURS.critical} ч` },
+      { key: 'dwell-warn', filter: a => a.kind === 'dwell' && a.severity === 'warning', severity: 'med', title: `Машины в рейсе стоят ≥${DWELL_THRESHOLDS_HOURS.warning} ч` },
+      { key: 'no-signal', filter: a => a.kind === 'no_signal', severity: 'med', title: `Нет связи с трекером ≥${NO_SIGNAL_THRESHOLD_HOURS} ч` },
+      { key: 'dwell-info', filter: a => a.kind === 'dwell' && a.severity === 'info', severity: 'info', title: `Машины в рейсе стоят ≥${DWELL_THRESHOLDS_HOURS.info} ч` },
+    ];
+    for (const row of DWELL_ROWS) {
+      const items = dwell.filter(row.filter);
+      if (items.length === 0) continue;
+      const top = items[0];
+      list.push({ key: row.key, severity: row.severity, icon: Truck, title: row.title, sub: `${items.length} · ${top.plateNumber} (рейс №${top.tripNumber}) — ${dwellAlertLabel(top)}`, impact: row.key === 'no-signal' ? 'местоположение машины неизвестно' : undefined, owner: 'логист', onClick: () => router.push(top.href) });
+    }
+
     const idle = data.commandCenter?.idleVehicles ?? [];
     if (idle.length > 0) list.push({ key: 'idle', severity: 'info', icon: Truck, title: 'Длительный простой машин', sub: `${idle.length} машин · дольше всех — ${idle[0].plateNumber} (${idle[0].daysIdle} дн.)`, owner: 'логист', onClick: () => router.push('/vehicle-trips') });
     const stuck = data.commandCenter?.stuckVehicleTrips ?? [];
@@ -738,6 +755,7 @@ export default function DashboardPage() {
                       const trip = activeTripByVehicle[v.id];
                       const idleDays = data?.commandCenter?.idleVehicles?.find(i => i.vehicleId === v.id)?.daysIdle;
                       const driverName = trip?.driver?.fullName ?? v.driver?.fullName;
+                      const dwellAlert = data?.commandCenter?.dwellAlerts?.find(a => a.vehicleId === v.id);
                       return (
                         <button key={v.id} type="button" onClick={() => router.push(trip ? `/vehicle-trips?vehicleId=${v.id}` : `/vehicles/${v.id}`)}
                           className="w-full text-left flex items-center gap-2 text-[11px] hover:bg-muted/40 rounded px-1.5 py-1 group">
@@ -746,6 +764,7 @@ export default function DashboardPage() {
                             {trip ? `в рейсе №${trip.tripNumber}` : 'свободна'}
                           </span>
                           {!trip && idleDays != null && <span className="text-[9.5px] text-amber-600 whitespace-nowrap">простой {idleDays} дн.</span>}
+                          {dwellAlert && <span className={`text-[9.5px] whitespace-nowrap ${dwellAlert.severity === 'critical' ? 'text-red-600' : dwellAlert.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground'}`}>{dwellAlertLabel(dwellAlert)}</span>}
                           <span className="text-muted-foreground truncate ml-auto">{driverName ?? 'без водителя'}</span>
                           <ChevronRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition shrink-0" />
                         </button>

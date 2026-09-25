@@ -6,6 +6,7 @@ import { signOut } from 'next-auth/react';
 import { Toaster } from 'sonner';
 import { clearTrail } from '@/lib/nav-history';
 import { useServerSync } from '@/hooks/use-server-sync';
+import { dwellAlertLabel, type DwellAlert } from '@/lib/dashboard/dwell-alerts';
 import {
   LayoutDashboard, Route, Users, Car, UserCheck, Building2,
   Menu, X, LogOut, ChevronRight, ChevronDown, BarChart3, Settings, FolderOpen,
@@ -194,6 +195,7 @@ export default function AppShell({ children, user }: { children: React.ReactNode
   const [docsCritical, setDocsCritical] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
   const [docsWarning, setDocsWarning] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
   const [docsInfo, setDocsInfo] = useState<{id:string;docName:string;entityName:string;daysLeft:number;href:string}[]>([]);
+  const [dwellAlerts, setDwellAlerts] = useState<DwellAlert[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const pathname = usePathname() ?? '';
   const { state: syncState, lastOkAt } = useServerSync();
@@ -205,21 +207,23 @@ export default function AppShell({ children, user }: { children: React.ReactNode
       const docsCrit: any[] = d?.reminders?.expiringDocsCritical ?? [];
       const docsWarn: any[] = d?.reminders?.expiringDocsWarning ?? [];
       const docsInf: any[] = d?.reminders?.expiringDocsInfo ?? [];
+      const dwell: DwellAlert[] = d?.reminders?.dwellAlerts ?? [];
       setOverdueTotal(overdue.length);
       setOverduePayments(overdue.slice(0, 8));
       setCashGaps(gaps.slice(0, 5));
       setDocsCritical(docsCrit);
       setDocsWarning(docsWarn);
       setDocsInfo(docsInf);
+      setDwellAlerts(dwell);
       // Громкий бейдж — только срочное (красное + жёлтое); информационные не считаем,
       // чтобы бейдж не разрастался от документов с запасом в месяц.
-      setBellCount(overdue.length + gaps.length + docsCrit.length + docsWarn.length);
+      setBellCount(overdue.length + gaps.length + docsCrit.length + docsWarn.length + dwell.filter(a => a.severity !== 'info').length);
     }).catch(() => {});
   }, [pathname]);
 
-  const critCount = overdueTotal + docsCritical.length;
-  const warnCount = cashGaps.length + docsWarning.length;
-  const infoCount = docsInfo.length;
+  const critCount = overdueTotal + docsCritical.length + dwellAlerts.filter(a => a.severity === 'critical').length;
+  const warnCount = cashGaps.length + docsWarning.length + dwellAlerts.filter(a => a.severity === 'warning').length;
+  const infoCount = docsInfo.length + dwellAlerts.filter(a => a.severity === 'info').length;
 
   useEffect(() => {
     if (!bellOpen) return;
@@ -301,6 +305,23 @@ export default function AppShell({ children, user }: { children: React.ReactNode
                           </div>
                         </div>
                       )}
+                      {dwellAlerts.filter(a => a.severity === 'critical').length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">🔴 Простой машин в рейсе ≥24 ч</p>
+                          <div className="space-y-1">
+                            {dwellAlerts.filter(a => a.severity === 'critical').map(a => (
+                              <Link key={a.vehicleId} href={a.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-mono text-slate-300">{a.plateNumber}</span>
+                                  <span className="font-semibold text-red-400 shrink-0 ml-2">{dwellAlertLabel(a)}</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">рейс машины №{a.tripNumber}{a.kind === 'no_signal' ? ' · трекер не выходит на связь' : ' · без движения вне базы'}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {cashGaps.length > 0 && (
                         <div>
                           <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟡 Кассовые разрывы</p>
@@ -318,6 +339,23 @@ export default function AppShell({ children, user }: { children: React.ReactNode
                           </div>
                         </div>
                       )}
+                      {dwellAlerts.filter(a => a.severity === 'warning').length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟡 Простой ≥12 ч / нет связи с трекером</p>
+                          <div className="space-y-1">
+                            {dwellAlerts.filter(a => a.severity === 'warning').map(a => (
+                              <Link key={a.vehicleId} href={a.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-mono text-slate-300">{a.plateNumber}</span>
+                                  <span className="font-semibold text-amber-400 shrink-0 ml-2">{dwellAlertLabel(a)}</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">рейс машины №{a.tripNumber}{a.kind === 'no_signal' ? ' · трекер не выходит на связь' : ' · без движения вне базы'}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {docsWarning.length > 0 && (
                         <div>
                           <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-wide mb-1.5">🟡 Документы истекают ≤7 дней</p>
@@ -330,6 +368,23 @@ export default function AppShell({ children, user }: { children: React.ReactNode
                                   <span className="font-semibold text-amber-400 shrink-0 ml-2">через {d.daysLeft} дн.</span>
                                 </div>
                                 <span className="text-slate-500 text-[10px]">{d.docName}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {dwellAlerts.filter(a => a.severity === 'info').length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide mb-1.5">🟢 Простой машин в рейсе ≥4 ч</p>
+                          <div className="space-y-1">
+                            {dwellAlerts.filter(a => a.severity === 'info').map(a => (
+                              <Link key={a.vehicleId} href={a.href} onClick={() => setBellOpen(false)}
+                                className="block text-xs p-2 rounded-lg hover:bg-white/10 transition">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-mono text-slate-300">{a.plateNumber}</span>
+                                  <span className="font-semibold text-emerald-400 shrink-0 ml-2">{dwellAlertLabel(a)}</span>
+                                </div>
+                                <span className="text-slate-500 text-[10px]">рейс машины №{a.tripNumber}{a.kind === 'no_signal' ? ' · трекер не выходит на связь' : ' · без движения вне базы'}</span>
                               </Link>
                             ))}
                           </div>
