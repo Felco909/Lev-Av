@@ -290,7 +290,8 @@ export async function GET(req: Request) {
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
     // TMS-AUDIT-0029: DocumentExpiry — полиморфная связь (entityType/entityId), не настоящий FK,
     // поэтому нельзя отфильтровать архивные машины прямо в WHERE — берём с запасом (50 вместо 10)
-    // и после докладки статуса машины отсекаем архивные, только потом режем до 10.
+    // и после докладки статуса машины отсекаем архивные. Не режем до 10: Command Center
+    // показывает количество по группам документов, усечение занижало бы счётчики.
     const expiringDocsRaw = await prisma.documentExpiry.findMany({
       where: { expiryDate: { lte: thirtyDaysFromNow } },
       orderBy: { expiryDate: 'asc' },
@@ -308,8 +309,7 @@ export async function GET(req: Request) {
     ]);
     const archivedVehicleIds = new Set(vehicles.filter(v => v.status === 'archived').map(v => v.id));
     const expiringDocs = expiringDocsRaw
-      .filter(i => !(i.entityType === 'vehicle' && archivedVehicleIds.has(i.entityId)))
-      .slice(0, 10);
+      .filter(i => !(i.entityType === 'vehicle' && archivedVehicleIds.has(i.entityId)));
     const nameMap: Record<string, string> = {};
     vehicles.forEach(v => { nameMap[v.id] = `${v.brand} ${v.model} (${v.plateNumber})`; });
     drivers.forEach(d => { nameMap[d.id] = d.fullName; });
@@ -320,6 +320,9 @@ export async function GET(req: Request) {
       return {
         id: i.id, docName: i.docName, entityName: nameMap[i.entityId] || '\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e',
         expiryDate: i.expiryDate, daysLeft: days,
+        // Same click-through targets as the bell (/api/trips/stats) — vehicle/driver card.
+        entityType: i.entityType,
+        href: i.entityType === 'vehicle' ? `/vehicles/${i.entityId}` : i.entityType === 'driver' ? `/drivers/${i.entityId}` : '/expiry',
         // docType \u0443\u0436\u0435 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0438\u0440\u043e\u0432\u0430\u043d \u0432 \u0411\u0414 (osago|kasko|techosmotr|license|permit|other) \u2014
         // \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f Command Center v3, \u0447\u0442\u043e\u0431\u044b \u0440\u0430\u0437\u043b\u043e\u0436\u0438\u0442\u044c \u043e\u0434\u0438\u043d \u0438 \u0442\u043e\u0442 \u0436\u0435 \u0441\u043f\u0438\u0441\u043e\u043a \u043d\u0430 3 \u0440\u0430\u0437\u043d\u044b\u0435
         // \u0441\u0442\u0440\u043e\u043a\u0438 \u0440\u0438\u0441\u043a\u0430 (\u0441\u0442\u0440\u0430\u0445\u043e\u0432\u043a\u0438/\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u044f/\u0442\u0435\u0445\u043e\u0441\u043c\u043e\u0442\u0440\u044b) \u0431\u0435\u0437 \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e\u0433\u043e \u0437\u0430\u043f\u0440\u043e\u0441\u0430.

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import CrumbLink from '@/components/nav/crumb-link';
 import { Plus, Pencil, Trash2, Loader2, Truck, X, ChevronDown, ChevronUp, Fuel, Wallet, Banknote, Archive, AlertTriangle } from 'lucide-react';
@@ -487,7 +487,12 @@ export default function VehicleTripsPage() {
     }
   };
 
+  // Guards against out-of-order responses: on ?vehicleId= entry the unfiltered request
+  // (filterVehicle='') and the filtered one run concurrently, and the unfiltered one could
+  // resolve last and overwrite the list with every vehicle's trips.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     const p = new URLSearchParams();
     if (filterVehicle) p.set('vehicleId', filterVehicle);
@@ -499,6 +504,7 @@ export default function VehicleTripsPage() {
     if ((showArchived || groupedView) && !filterStatus) p.set('showArchived', '1');
     const res = await fetch(`/api/vehicle-trips?${p}`);
     const data = await res.json();
+    if (seq !== loadSeq.current) return;
     setRows(Array.isArray(data) ? data : []);
     setLoading(false);
   }, [filterVehicle, filterStatus, showArchived]);

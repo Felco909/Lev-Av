@@ -8,7 +8,7 @@ import {
   Download, Clock, ShieldAlert, Truck, Search, RefreshCw, Bell,
   ChevronRight, CheckCircle2, Loader2, Percent, FileWarning, Sparkles,
 } from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, DOCUMENT_TYPE_MAP } from '@/lib/utils';
 import ReportChart from '../reports/_components/report-chart';
 
 const FleetMap = dynamic(() => import('../telematics/monitoring/_components/fleet-map'), {
@@ -23,7 +23,9 @@ interface ProfitRow { id: string; tripNumber: string; clientName: string; income
 interface ProblemRow { id: string; tripNumber: string; clientName: string; carrierName: string; clientPaid: number; carrierPaid: number; diff: number; }
 interface TopDebtor { clientId: string; clientName: string; totalDebt: number; tripCount: number; }
 interface Reminder { id: string; tripNumber: string; clientName?: string; carrierName?: string; amount?: number; paymentDueDate?: string; daysLeft?: number; }
-interface ExpiringDoc { id: string; docName: string; entityName: string; expiryDate: string; daysLeft: number; docType: string; }
+interface ExpiringDoc { id: string; docName: string; entityName: string; expiryDate: string; daysLeft: number; docType: string; entityType: string; href: string; }
+interface FleetVehicle { id: string; plateNumber: string; status: string; driver?: { fullName: string } | null; }
+interface ActiveVehicleTrip { vehicleId: string; tripNumber: string; departureDate: string; driver?: { fullName: string } | null; }
 interface IdleVehicle { vehicleId: string; plateNumber: string; daysIdle: number; }
 interface StuckTrip { vehicleTripId: string; plateNumber: string; tripNumber: string; daysOpen: number; }
 interface OperationalSummary { vehiclesInTrip: number; vehiclesFree: number; totalActiveVehicles: number; tripsInProgress: number; tripsSverka: number; tripsAwaitingPayment: number; completedToday: number; }
@@ -238,7 +240,7 @@ export default function DashboardPage() {
     fetch('/api/backup-status').then(r => r.json()).then(setBackupStatus).catch(() => {});
   }, []);
 
-  const refreshAll = async () => { setRefreshing(true); await Promise.all([load(), Promise.resolve(loadAudit())]); setRefreshing(false); };
+  const refreshAll = async () => { setRefreshing(true); await Promise.all([load(), Promise.resolve(loadAudit()), Promise.resolve(loadFleet())]); setRefreshing(false); };
 
   // ── Финансовый центр (area chart) + Топ клиентов — лениво, 1 запрос, широкое окно (6 мес.) ──
   const [financeData, setFinanceData] = useState<any>(null);
@@ -304,6 +306,28 @@ export default function DashboardPage() {
     if (!heatVisible) return;
     fetch('/api/reports/fleet-heatmap').then(r => r.json()).then(d => { setHeatData(d); setHeatState('ok'); }).catch(() => setHeatState('error'));
   }, [heatVisible]);
+
+  // ── Занятость флота по машинам — те же источники, что сводка на /vehicles ──
+  const [fleetVehicles, setFleetVehicles] = useState<FleetVehicle[]>([]);
+  const [activeTripByVehicle, setActiveTripByVehicle] = useState<Record<string, ActiveVehicleTrip>>({});
+  const [fleetState, setFleetState] = useState<'loading' | 'ok' | 'error'>('loading');
+  const loadFleet = useCallback(() => {
+    setFleetState('loading');
+    Promise.all([
+      fetch('/api/vehicles?kind=tractor').then(r => r.json()),
+      fetch('/api/vehicle-trips?status=active').then(r => r.json()),
+    ]).then(([vehicles, trips]) => {
+      // status 'active' only — same set as getOperationalSummary counts above.
+      setFleetVehicles((Array.isArray(vehicles) ? vehicles : []).filter((v: FleetVehicle) => v.status === 'active'));
+      const map: Record<string, ActiveVehicleTrip> = {};
+      for (const t of (Array.isArray(trips) ? trips : []) as ActiveVehicleTrip[]) {
+        if (!map[t.vehicleId] || new Date(t.departureDate) < new Date(map[t.vehicleId].departureDate)) map[t.vehicleId] = t;
+      }
+      setActiveTripByVehicle(map);
+      setFleetState('ok');
+    }).catch(() => setFleetState('error'));
+  }, []);
+  useEffect(() => { loadFleet(); }, [loadFleet]);
 
   // ── Рейтинги — по табу ──
   const [rankTab, setRankTab] = useState<Tab>('clients');
@@ -391,13 +415,29 @@ export default function DashboardPage() {
     if (noAttach.length > 0) {
       list.push({ key: 'no-attach', severity: 'med', icon: FileWarning, title: 'Заявки без вложений', sub: `${noAttach.length} заявок`, owner: 'логист', onClick: () => noAttach[0] && router.push(`/trips/${noAttach[0].id}`) });
     }
+    // Documents (vehicles + drivers). Expired ones are a separate, higher-severity row; the rest
+    // are grouped by type. Types not listed in a group (incl. future ones) land in "other"
+    // instead of being silently dropped, as dopog/tir/cmr/visa were before.
     const docs = data.expiringDocs ?? [];
-    const insurance = docs.filter(d => d.docType === 'osago' || d.docType === 'kasko');
-    const permits = docs.filter(d => d.docType === 'license' || d.docType === 'permit');
-    const inspections = docs.filter(d => d.docType === 'techosmotr');
-    if (insurance.length > 0) list.push({ key: 'ins', severity: 'med', icon: ShieldAlert, title: 'Истекающие страховки', sub: `${insurance.length} машин · ближайшая через ${Math.min(...insurance.map(d => d.daysLeft))} дн.`, owner: 'автопарк', onClick: () => router.push('/expiry') });
-    if (permits.length > 0) list.push({ key: 'perm', severity: 'med', icon: ShieldAlert, title: 'Истекающие разрешения/лицензии', sub: `${permits.length} · ближайшее через ${Math.min(...permits.map(d => d.daysLeft))} дн.`, owner: 'автопарк', onClick: () => router.push('/expiry') });
-    if (inspections.length > 0) list.push({ key: 'techo', severity: 'info', icon: ShieldAlert, title: 'Истекающие техосмотры', sub: `${inspections.length} · ближайший через ${Math.min(...inspections.map(d => d.daysLeft))} дн.`, owner: 'автопарк', onClick: () => router.push('/expiry') });
+    const docLabel = (d: ExpiringDoc) => `${DOCUMENT_TYPE_MAP[d.docType] ?? d.docName} — ${d.entityName}`;
+    const expiredDocs = docs.filter(d => d.daysLeft < 0);
+    if (expiredDocs.length > 0) {
+      const worst = expiredDocs[0];
+      list.push({ key: 'docs-expired', severity: 'high', icon: ShieldAlert, title: 'Просроченные документы', sub: `${expiredDocs.length} · ${docLabel(worst)}, просрочен ${Math.abs(worst.daysLeft)} дн.`, impact: 'машина/водитель не может выйти в рейс', owner: 'автопарк', onClick: () => router.push(worst.href) });
+    }
+    const upcomingDocs = docs.filter(d => d.daysLeft >= 0);
+    const DOC_GROUPS: { key: string; title: string; types: string[]; severity: Severity }[] = [
+      { key: 'ins', title: 'Истекающие страховки', types: ['osago', 'kasko'], severity: 'med' },
+      { key: 'perm', title: 'Истекающие права, разрешения и допуски', types: ['license', 'permit', 'dopog', 'tir', 'cmr', 'visa'], severity: 'med' },
+      { key: 'techo', title: 'Истекающие техосмотры', types: ['techosmotr'], severity: 'info' },
+    ];
+    const groupedTypes = new Set(DOC_GROUPS.flatMap(g => g.types));
+    for (const g of [...DOC_GROUPS, { key: 'doc-other', title: 'Истекающие прочие документы', types: [] as string[], severity: 'info' as Severity }]) {
+      const items = g.key === 'doc-other' ? upcomingDocs.filter(d => !groupedTypes.has(d.docType)) : upcomingDocs.filter(d => g.types.includes(d.docType));
+      if (items.length === 0) continue;
+      const nearest = items[0];
+      list.push({ key: g.key, severity: g.severity, icon: ShieldAlert, title: g.title, sub: `${items.length} · ближайший: ${docLabel(nearest)}, через ${nearest.daysLeft} дн.`, owner: 'автопарк', onClick: () => router.push(nearest.href) });
+    }
 
     const idle = data.commandCenter?.idleVehicles ?? [];
     if (idle.length > 0) list.push({ key: 'idle', severity: 'info', icon: Truck, title: 'Длительный простой машин', sub: `${idle.length} машин · дольше всех — ${idle[0].plateNumber} (${idle[0].daysIdle} дн.)`, owner: 'логист', onClick: () => router.push('/vehicle-trips') });
@@ -513,7 +553,7 @@ export default function DashboardPage() {
               {['trips', 'vehicles', 'drivers', 'clients', 'carriers'].map(k => (searchResults[k] ?? []).length > 0 && (
                 <div key={k} className="border-b last:border-b-0 py-1">
                   {(searchResults[k] as any[]).map((item: any) => (
-                    <button key={item.id} onClick={() => { setSearchOpen(false); setSearchQuery(''); router.push(k === 'trips' ? `/trips/${item.id}` : k === 'vehicles' ? '/vehicles' : k === 'drivers' ? '/drivers' : k === 'clients' ? '/clients' : '/carriers'); }}
+                    <button key={item.id} onClick={() => { setSearchOpen(false); setSearchQuery(''); router.push(k === 'trips' ? `/trips/${item.id}` : k === 'vehicles' ? `/vehicles/${item.id}` : k === 'drivers' ? `/drivers/${item.id}` : k === 'clients' ? '/clients' : '/carriers'); }}
                       className="w-full text-left px-3 py-1.5 hover:bg-muted/50">
                       {item.tripNumber ?? item.plateNumber ?? item.fullName ?? item.name}
                     </button>
@@ -596,6 +636,7 @@ export default function DashboardPage() {
       <div className="bg-card rounded-xl border shadow-sm p-4">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-bold flex items-center gap-2">🎯 Command Center рисков <span className="text-[10px] font-normal text-muted-foreground">{risks.length} активных, показано {visibleRisks.length}</span></h3>
+          <Link href="/problem-trips" className="text-[11px] text-primary hover:underline whitespace-nowrap">Проблемные рейсы — полный список →</Link>
         </div>
         {risks.length === 0 ? (
           <div className="flex items-center gap-2 text-sm text-emerald-600 py-3"><CheckCircle2 className="w-4 h-4" /> Всё в порядке — открытых рисков нет</div>
@@ -685,6 +726,33 @@ export default function DashboardPage() {
               <div className="bg-muted/40 rounded-lg p-1.5"><p className="font-mono font-bold text-sm">{op?.vehiclesFree ?? '—'}</p>Свободны</div>
               <div className="bg-muted/40 rounded-lg p-1.5"><p className="font-mono font-bold text-sm">{op?.vehiclesInTrip ?? '—'}</p>В рейсе</div>
               <div className="bg-muted/40 rounded-lg p-1.5"><p className="font-mono font-bold text-sm">{data?.commandCenter?.idleVehicles?.length ?? 0}</p>Простой</div>
+            </div>
+            <div className="mt-3 border-t pt-2">
+              <div className="flex items-center gap-2 mb-1"><DQDot state={fleetState} /><p className="text-[11px] font-semibold">Машины сейчас</p><Link href="/vehicles" className="text-[10px] text-primary ml-auto">/vehicles →</Link></div>
+              {fleetState === 'loading' ? <div className="py-3 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+                : fleetState === 'error' ? <p className="text-xs text-red-500">Не удалось загрузить. <button onClick={loadFleet} className="underline">Повторить</button></p>
+                : fleetVehicles.length === 0 ? <p className="text-xs text-muted-foreground">Нет активных тягачей</p>
+                : (
+                  <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                    {[...fleetVehicles].sort((a, b) => Number(!!activeTripByVehicle[a.id]) - Number(!!activeTripByVehicle[b.id]) || a.plateNumber.localeCompare(b.plateNumber)).map(v => {
+                      const trip = activeTripByVehicle[v.id];
+                      const idleDays = data?.commandCenter?.idleVehicles?.find(i => i.vehicleId === v.id)?.daysIdle;
+                      const driverName = trip?.driver?.fullName ?? v.driver?.fullName;
+                      return (
+                        <button key={v.id} type="button" onClick={() => router.push(trip ? `/vehicle-trips?vehicleId=${v.id}` : `/vehicles/${v.id}`)}
+                          className="w-full text-left flex items-center gap-2 text-[11px] hover:bg-muted/40 rounded px-1.5 py-1 group">
+                          <span className="font-mono font-semibold w-20 shrink-0 truncate">{v.plateNumber}</span>
+                          <span className={`text-[9.5px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${trip ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400'}`}>
+                            {trip ? `в рейсе №${trip.tripNumber}` : 'свободна'}
+                          </span>
+                          {!trip && idleDays != null && <span className="text-[9.5px] text-amber-600 whitespace-nowrap">простой {idleDays} дн.</span>}
+                          <span className="text-muted-foreground truncate ml-auto">{driverName ?? 'без водителя'}</span>
+                          <ChevronRight className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-60 transition shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
             </div>
           </div>
         )}
