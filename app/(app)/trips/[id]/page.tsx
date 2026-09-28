@@ -627,7 +627,7 @@ export default function TripDetailPage() {
               <p className="text-[10px] text-muted-foreground uppercase flex items-center justify-center gap-1"><Fuel className="w-3 h-3" /> {"\u0422\u043E\u043F\u043B\u0438\u0432\u043E"}</p>
               <p className="text-sm font-bold font-mono">{formatCurrency(tripCosts.fuelCost)}</p>
               {tripCosts.fuelLiters != null && (
-                <p className="text-[10px] text-muted-foreground mt-0.5">{tripCosts.fuelLiters} \u043B{tripCosts.fuelPer100Km != null ? ` \u00B7 ${tripCosts.fuelPer100Km} \u043B/100\u043a\u043C` : ''}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{tripCosts.fuelLiters}{" \u043B"}{tripCosts.fuelPer100Km != null ? ` \u00B7 ${tripCosts.fuelPer100Km} \u043B/100\u043a\u043C` : ''}</p>
               )}
             </div>
             <div className="text-center p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg">
@@ -758,7 +758,7 @@ export default function TripDetailPage() {
               </div>
 
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">\u0412\u0430\u043B\u044E\u0442\u0430 \u0441\u0447\u0451\u0442\u0430 \u0438 \u0430\u043A\u0442\u0430</label>
+                <label className="text-xs text-muted-foreground mb-1 block">{"\u0412\u0430\u043B\u044E\u0442\u0430 \u0441\u0447\u0451\u0442\u0430 \u0438 \u0430\u043A\u0442\u0430"}</label>
                 <select value={docEditorData.docCurrency || 'RUB'} onChange={(e) => {
                   const cur = e.target.value;
                   setDocEditorData({ ...docEditorData, docCurrency: cur, sumInWords: generateSumInWordsLine(docEditorData.amount || '0', cur) });
@@ -767,11 +767,11 @@ export default function TripDetailPage() {
                   {DOC_CURRENCIES.map((c) => <option key={c} value={c}>{DOC_CURRENCY_LABELS[c]}</option>)}
                 </select>
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043F\u043E\u0434\u0441\u0442\u0430\u0432\u044F\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438: {docEditorData.docCurrency === 'USD' ? 'USD' : 'RUB'} \u0438\u0437 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438.
+                  {`\u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043F\u043E\u0434\u0441\u0442\u0430\u0432\u044F\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438: ${docEditorData.docCurrency === 'USD' ? 'USD' : 'RUB'} \u0438\u0437 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438.`}
                 </p>
                 {docEditorData.docCurrency === 'USD' && !usdBankConfigured && (
                   <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                    \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B USD \u043D\u0435 \u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u044B \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u043D\u0435\u0441\u0438\u0442\u0435 \u0438\u0445 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438.
+                    {"\u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B USD \u043D\u0435 \u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u044B \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u043D\u0435\u0441\u0438\u0442\u0435 \u0438\u0445 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438."}
                   </p>
                 )}
               </div>

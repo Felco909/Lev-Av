@@ -877,7 +877,7 @@ export default function MaintenancePage() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Стоимость, \u058F</label>
+                <label className="text-xs text-muted-foreground mb-1 block">{"Стоимость, \u058F"}</label>
                 <input type="number" min={0} value={recordForm.cost} onChange={e => setRecordForm({ ...recordForm, cost: e.target.value })} placeholder="0" className="w-full border rounded-lg px-3 py-2 text-sm bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none" />
               </div>
               <div>
