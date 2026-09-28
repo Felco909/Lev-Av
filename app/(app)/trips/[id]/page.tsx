@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Pencil, MapPin, Package, Truck, Building2, DollarSign, FileText, Loader2, Paperclip, Download, X, ChevronRight, ClipboardList, Copy, Fuel, Wrench, Info, Lock } from 'lucide-react';
 import { formatCurrency, formatCurrencyRaw, formatRate, formatDate, STATUS_MAP, STATUS_ORDER, TRIP_TYPE_MAP } from '@/lib/utils';
 import { generateSumInWordsLine } from '@/lib/number-to-words';
+import { DOC_CURRENCIES, DOC_CURRENCY_LABELS, defaultDocCurrency, isDocCurrency, type DocCurrency } from '@/lib/document-currency';
 import { detectTripAttachmentSection, TRIP_ATTACHMENT_SECTION_LABELS } from '@/lib/trip-attachment-section';
 import { computeTripProfitAmd } from '@/lib/finance/formulas';
 import Breadcrumbs from '@/components/nav/breadcrumbs';
@@ -370,6 +371,7 @@ export default function TripDetailPage() {
   const [generatingDocs, setGeneratingDocs] = useState(false);
   const [showDocEditor, setShowDocEditor] = useState(false);
   const [docEditorData, setDocEditorData] = useState<Record<string, string>>({});
+  const [usdBankConfigured, setUsdBankConfigured] = useState(true);
 
   const [tripCosts, setTripCosts] = useState<any>(null);
 
@@ -390,8 +392,17 @@ export default function TripDetailPage() {
     }
     const docDate = new Date().toISOString().split('T')[0];
     const amountVal = Number(trip.clientRate ?? 0);
-    const tripCurrency = (trip as any).currency || 'RUB';
+    let docCurrency: DocCurrency = defaultDocCurrency(trip.currency);
+    try {
+      const res = await fetch(`/api/trips/${trip.id}/generate-docs`);
+      if (res.ok) {
+        const d = await res.json();
+        if (isDocCurrency(d.docCurrency)) docCurrency = d.docCurrency;
+        setUsdBankConfigured(d.usdBankConfigured !== false);
+      }
+    } catch {}
     setDocEditorData({
+      docCurrency,
       invoiceNumber: invoiceNum,
       actNumber: actNum,
       clientName: trip.client?.name || '',
@@ -400,7 +411,7 @@ export default function TripDetailPage() {
       amount: String(amountVal),
       docDate,
       basisText: trip.basisText || '',
-      sumInWords: generateSumInWordsLine(amountVal, tripCurrency),
+      sumInWords: generateSumInWordsLine(amountVal, docCurrency),
       vehicleInfo: trip.vehicle ? `${trip.vehicle.brand} \u0433\u043E\u0441.\u043D\u043E\u043C. ${trip.vehicle.plateNumber}` : '',
       trailerInfo: '',
       driverName: trip.driver?.fullName || '',
@@ -746,6 +757,24 @@ export default function TripDetailPage() {
                 <p className="col-span-2 text-[10px] text-blue-500 dark:text-blue-400">{"\u041D\u043E\u043C\u0435\u0440\u0430 \u043F\u043E \u043A\u043B\u0438\u0435\u043D\u0442\u0443. \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043D\u0443\u043C\u0435\u0440\u0430\u0446\u0438\u0438 \u2014 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u041A\u043B\u0438\u0435\u043D\u0442\u043E\u0432."}</p>
               </div>
 
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">\u0412\u0430\u043B\u044E\u0442\u0430 \u0441\u0447\u0451\u0442\u0430 \u0438 \u0430\u043A\u0442\u0430</label>
+                <select value={docEditorData.docCurrency || 'RUB'} onChange={(e) => {
+                  const cur = e.target.value;
+                  setDocEditorData({ ...docEditorData, docCurrency: cur, sumInWords: generateSumInWordsLine(docEditorData.amount || '0', cur) });
+                }}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background">
+                  {DOC_CURRENCIES.map((c) => <option key={c} value={c}>{DOC_CURRENCY_LABELS[c]}</option>)}
+                </select>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043F\u043E\u0434\u0441\u0442\u0430\u0432\u044F\u0442\u0441\u044F \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438: {docEditorData.docCurrency === 'USD' ? 'USD' : 'RUB'} \u0438\u0437 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438.
+                </p>
+                {docEditorData.docCurrency === 'USD' && !usdBankConfigured && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                    \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B USD \u043D\u0435 \u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u044B \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u043D\u0435\u0441\u0438\u0442\u0435 \u0438\u0445 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u044B \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438.
+                  </p>
+                )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -757,8 +786,7 @@ export default function TripDetailPage() {
                   <label className="text-xs text-muted-foreground mb-1 block">{"\u0421\u0443\u043C\u043C\u0430"}</label>
                   <input type="number" step="1" value={docEditorData.amount || ''} onChange={(e) => {
                     const newAmount = e.target.value;
-                    const cur = (trip as any)?.currency || 'RUB';
-                    setDocEditorData({ ...docEditorData, amount: newAmount, sumInWords: generateSumInWordsLine(newAmount, cur) });
+                    setDocEditorData({ ...docEditorData, amount: newAmount, sumInWords: generateSumInWordsLine(newAmount, docEditorData.docCurrency || 'RUB') });
                   }}
                     className="w-full border rounded-lg px-3 py-2 text-sm bg-background" />
                 </div>
@@ -836,7 +864,7 @@ export default function TripDetailPage() {
               </button>
               <button
                 onClick={() => handleGenerateDocs(docEditorData)}
-                disabled={generatingDocs}
+                disabled={generatingDocs || (docEditorData.docCurrency === 'USD' && !usdBankConfigured)}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium disabled:opacity-50 flex items-center gap-2"
               >
                 {generatingDocs && <Loader2 className="w-4 h-4 animate-spin" />}

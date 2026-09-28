@@ -253,6 +253,24 @@ model Expense {
   @@map("expenses")
 }
 
+// One row per issued client invoice/act (generate-docs). Stores the currency chosen at
+// issue time and a snapshot of the bank requisites that were printed, so later edits to
+// company_bank / company_bank_usd never change what an already-issued document said.
+// Deliberately no Prisma relation to Trip: the Trip model is frozen, tripId is enough.
+model TripDocumentIssue {
+  id                  String   @id @default(cuid())
+  tripId              String   @map("trip_id")
+  docType             String   @map("doc_type") // invoice | act
+  docNumber           String   @map("doc_number")
+  currency            String // RUB | USD
+  amount              Decimal  @db.Decimal(14, 2)
+  bankDetailsSnapshot String   @default("") @map("bank_details_snapshot") @db.Text
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([tripId, createdAt])
+  @@map("trip_document_issues")
+}
+
 model Setting {
   id    String @id @default(cuid())
   key   String @unique

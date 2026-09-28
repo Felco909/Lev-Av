@@ -7,6 +7,39 @@ import { generateInvoiceHtml, generateActHtml, type DocOverrides } from '@/lib/d
 import { getCompanySettings } from '@/lib/template-processor';
 import { convertHtmlToPdf } from '@/lib/pdf-convert';
 import { getNextDocNumberPair } from '@/lib/doc-numbering';
+import { isDocCurrency, defaultDocCurrency, bankDetailsForCurrency } from '@/lib/document-currency';
+
+async function getLastIssuedCurrency(tripId: string): Promise<string | null> {
+  const last = await prisma.tripDocumentIssue.findFirst({
+    where: { tripId },
+    orderBy: { createdAt: 'desc' },
+    select: { currency: true },
+  });
+  return last?.currency ?? null;
+}
+
+/** Pre-selection for the document dialog: last issued currency, else derived from the trip. */
+export async function GET(_request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
+  const params = await paramsPromise;
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+
+    const trip = await prisma.trip.findUnique({ where: { id: params.id }, select: { currency: true } });
+    if (!trip) return NextResponse.json({ error: 'Рейс не найден' }, { status: 404 });
+
+    const lastIssuedCurrency = await getLastIssuedCurrency(params.id);
+    const settings = await getCompanySettings();
+    return NextResponse.json({
+      docCurrency: defaultDocCurrency(trip.currency, lastIssuedCurrency),
+      lastIssuedCurrency,
+      usdBankConfigured: bankDetailsForCurrency(settings, 'USD') !== '',
+    });
+  } catch (error) {
+    console.error('Generate docs GET error:', error);
+    return NextResponse.json({ error: 'Ошибка' }, { status: 500 });
+  }
+}
 
 export async function POST(request: Request, { params: paramsPromise }: { params: Promise<{ id: string }> }) {
     const params = await paramsPromise;
@@ -32,8 +65,19 @@ export async function POST(request: Request, { params: paramsPromise }: { params
     };
 
     const settings = await getCompanySettings();
-    const tripCurrency = (trip as any).currency || 'AMD';
     const savedBasisText = (trip as any).basisText || '';
+
+    // RUB → company_bank, USD → company_bank_usd; same template, only the requisites differ.
+    const docCurrency = isDocCurrency(userOverrides.docCurrency)
+      ? userOverrides.docCurrency
+      : defaultDocCurrency(trip.currency, await getLastIssuedCurrency(tripId));
+    const bankDetails = bankDetailsForCurrency(settings, docCurrency);
+    if (docCurrency === 'USD' && !bankDetails) {
+      return NextResponse.json(
+        { error: 'Не заполнены банковские реквизиты USD. Заполните их в Настройки → Реквизиты компании.' },
+        { status: 400 },
+      );
+    }
 
     // Auto-number invoice + act as a pair (same sequence number)
     let invoiceNumber = `СЧ-${trip.tripNumber}`;
@@ -48,9 +92,9 @@ export async function POST(request: Request, { params: paramsPromise }: { params
 
     const baseOv: DocOverrides = {
       basisText: userOverrides.basisText || savedBasisText || undefined,
-      company: settings,
-      currency: tripCurrency,
       ...userOverrides,
+      company: { ...settings, company_bank: bankDetails },
+      currency: docCurrency,
     };
 
     // If user provided amount as string, parse it
@@ -93,6 +137,19 @@ export async function POST(request: Request, { params: paramsPromise }: { params
       });
     } catch (e) {
       console.error('[trips/generate-docs] failed to persist doc numbers', e);
+    }
+
+    // Remember the currency + printed requisites per issued document (see TripDocumentIssue).
+    try {
+      const amount = typeof baseOv.amount === 'number' ? baseOv.amount : tripData.clientRate;
+      await prisma.tripDocumentIssue.createMany({
+        data: [
+          { tripId, docType: 'invoice', docNumber: String(invoiceOv.docNumber), currency: docCurrency, amount, bankDetailsSnapshot: bankDetails },
+          { tripId, docType: 'act', docNumber: String(actOv.docNumber), currency: docCurrency, amount, bankDetailsSnapshot: bankDetails },
+        ],
+      });
+    } catch (e) {
+      console.error('[trips/generate-docs] failed to persist document issue', e);
     }
 
     return NextResponse.json({
