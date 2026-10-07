@@ -170,7 +170,9 @@ Write-Log "END backup success"
 try {
   $gdCopy = Join-Path $scriptsDir 'copy-sql-backup-to-google-drive.ps1'
   if (Test-Path -LiteralPath $gdCopy) {
-    & $gdCopy -SourceFile $outFile -BackupRoot $BackupRoot
+    # SQL dumps are ~1 MB — keep a longer offsite history than locally.
+    $gdKeep = if ($env:LEVAV_GDRIVE_KEEP_BACKUPS) { [int]$env:LEVAV_GDRIVE_KEEP_BACKUPS } else { 90 }
+    & $gdCopy -SourceFile $outFile -BackupRoot $BackupRoot -KeepCount $gdKeep
   }
 }
 catch {

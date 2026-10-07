@@ -108,7 +108,9 @@ try {
   if ((Test-Path -LiteralPath $gdCopy) -and (Test-Path -LiteralPath $outFile)) {
     $myDiskRu = -join [char[]](0x041C, 0x043E, 0x0439, 0x0020, 0x0434, 0x0438, 0x0441, 0x043A)
     $gdriveAttachDir = "G:\$myDiskRu\LevAv_Attachments_Backups"
-    & $gdCopy -SourceFile $outFile -BackupRoot $BackupRoot -GDriveDir $gdriveAttachDir
+    # Full ~100 MB archive every day — without rotation Google Drive fills up in ~2 months.
+    $gdKeep = if ($env:LEVAV_GDRIVE_KEEP_ATTACHMENT_BACKUPS) { [int]$env:LEVAV_GDRIVE_KEEP_ATTACHMENT_BACKUPS } else { 14 }
+    & $gdCopy -SourceFile $outFile -BackupRoot $BackupRoot -GDriveDir $gdriveAttachDir -KeepCount $gdKeep
   }
 }
 catch {

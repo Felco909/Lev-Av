@@ -5,7 +5,10 @@
 .NOTES
   - Только Copy-Item; live PostgreSQL и DATABASE_URL не трогаются.
   - Если диск G: или папка недоступны — пишется WARN в лог, код выхода 0 (локальный backup не страдает).
-  - Старые файлы на Google Drive не удаляются.
+  - Ротация: -KeepCount N (N > 0) после успешного копирования оставляет на Google Drive N самых
+    новых файлов той же серии (тот же префикс имени до метки _yyyyMMdd_HHmmss и то же расширение),
+    остальные удаляет. 0 (по умолчанию) — ничего не удалять. -WhatIfPrune — только записать в лог,
+    что было бы удалено. Удалённое через Google Drive Desktop попадает в корзину Drive (30 дней).
   - Переопределить каталог: переменная окружения LEVAV_GDRIVE_BACKUP_DIR (полный путь, например G:\Мой диск\LevAv_DB_Backups)
   - Авто-восстановление диска G: (инцидент 24-30.07.2026, рецидив 31.07.2026): GoogleDriveFS.exe
     периодически теряет смонтированную букву диска, оставаясь при этом живым процессом
@@ -27,7 +30,11 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$BackupRoot,
 
-  [string]$GDriveDir = ''
+  [string]$GDriveDir = '',
+
+  [int]$KeepCount = 0,
+
+  [switch]$WhatIfPrune
 )
 
 if ([string]::IsNullOrWhiteSpace($GDriveDir)) {
@@ -130,6 +137,33 @@ try {
 
   $sz = (Get-Item -LiteralPath $dest).Length
   Write-GLog "OK copied to Google Drive: $dest ($sz bytes)"
+
+  if ($KeepCount -gt 0) {
+    $m = [regex]::Match($name, '^(.+_)\d{8}_\d{6}(\.[^.]+)$')
+    if (-not $m.Success) {
+      Write-GLog "WARN: prune skipped - file name has no _yyyyMMdd_HHmmss stamp: $name"
+    }
+    else {
+      $prefix = $m.Groups[1].Value
+      $ext = $m.Groups[2].Value
+      $series = @(Get-ChildItem -LiteralPath $GDriveDir -File |
+        Where-Object { $_.Name.StartsWith($prefix) -and $_.Name.EndsWith($ext) -and $_.Name -match '_\d{8}_\d{6}\.[^.]+$' } |
+        Sort-Object Name -Descending)
+      $toRemove = @($series | Select-Object -Skip $KeepCount)
+      foreach ($f in $toRemove) {
+        if ($WhatIfPrune) { Write-GLog "WHATIF prune would remove $($f.Name)"; continue }
+        try {
+          Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+          Write-GLog "PRUNE removed $($f.Name)"
+        }
+        catch {
+          Write-GLog "WARN: prune failed for $($f.Name): $($_.Exception.Message)"
+        }
+      }
+      $suffix = if ($WhatIfPrune) { ' (whatif)' } else { '' }
+      Write-GLog "PRUNE keep=$KeepCount series=$($series.Count) removed=$($toRemove.Count)$suffix"
+    }
+  }
 }
 catch {
   Write-GLog "ERROR: $($_.Exception.Message)"
