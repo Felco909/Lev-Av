@@ -1,7 +1,7 @@
 # LevAV_MAIN_SYSTEM — контекст для Claude Code
 
 ## Стек
-Next.js 16.2.10 (App Router) + React 19.2.7 + Prisma 6.7.0 + PostgreSQL, next-auth 4.24.14, TypeScript 5.2.2.
+Next.js 16.3.8 (App Router) + React 19.2.7 + Prisma 6.7.0 + PostgreSQL, next-auth 4.24.15, TypeScript 5.2.2.
 Документы: `docx`, `exceljs`, локальный LibreOffice для PDF (см. ниже).
 Работает на основном ПК, доступ по LAN (статический IP 192.168.0.100), порт 3000.
 
