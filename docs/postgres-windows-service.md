@@ -21,6 +21,9 @@
 - Тип запуска: `Automatic` (поднимается при загрузке Windows, не зависит от батников)
 - `PGDATA`: `C:\LevAV_DB\pgdata_localprod_utf8` (не менялся)
 - Порт: `5434`
+- Бинарники: `C:\LevAV_DB\pgsql\bin` (PostgreSQL 17.4). С 07.10.2026 вынесены из OneDrive
+  (`scripts/Move-PgBinaries-Out-Of-OneDrive.ps1`), старая копия
+  `LOCAL_DB_RUNTIME\pgsql_full` удалена.
 - Лог: `LOCAL_DB_RUNTIME\pg_local_utf8.log` (без изменений)
 - Обычному пользователю (`win-h4e5l2o21cs\user`) через `sc sdset` выданы права
   start/stop/query на эту службу — `PRODUCTION_START.bat`/`SAFE_SHUTDOWN.bat` управляют
@@ -32,7 +35,7 @@
 
 Из PowerShell "от имени администратора" (разово):
 ```powershell
-$PG_BIN  = "<PROJECT_DIR>\LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin"
+$PG_BIN  = "C:\LevAV_DB\pgsql\bin"
 $PG_DATA = "C:\LevAV_DB\pgdata_localprod_utf8"
 $PG_LOG  = "<PROJECT_DIR>\LOCAL_DB_RUNTIME\pg_local_utf8.log"
 
