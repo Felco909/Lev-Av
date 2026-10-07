@@ -1,4 +1,4 @@
-# Allow inbound TCP 3000 for LevAV TMS LAN access (Private, Domain, Public).
+# Allow inbound TCP 3000 for LevAV TMS LAN access (Private, Domain, Public), local subnet only.
 # Requires Administrator to create or update the firewall rule.
 
 $ErrorActionPreference = 'Stop'
@@ -30,7 +30,7 @@ if (-not (Test-IsAdmin)) {
 try {
   $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
   if ($existing) {
-    Set-NetFirewallRule -DisplayName $ruleName -Enabled True -Profile Private, Domain, Public -ErrorAction Stop | Out-Null
+    Set-NetFirewallRule -DisplayName $ruleName -Enabled True -Profile Private, Domain, Public -RemoteAddress LocalSubnet -ErrorAction Stop | Out-Null
     Write-Host "[OK] Firewall rule active: $ruleName" -ForegroundColor Green
     exit 0
   }
@@ -46,9 +46,10 @@ try {
     -Protocol TCP `
     -LocalPort 3000 `
     -Profile Private, Domain, Public `
+    -RemoteAddress LocalSubnet `
     -Enabled True `
     -ErrorAction Stop | Out-Null
-  Write-Host "[OK] Windows Firewall: inbound TCP 3000 allowed (Private/Domain/Public)" -ForegroundColor Green
+  Write-Host "[OK] Windows Firewall: inbound TCP 3000 allowed (Private/Domain/Public, local subnet only)" -ForegroundColor Green
   exit 0
 } catch {
   Write-Host "[ERROR] Could not create firewall rule: $($_.Exception.Message)" -ForegroundColor Red
