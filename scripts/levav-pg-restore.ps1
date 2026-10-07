@@ -37,7 +37,7 @@ $line = Get-Content -LiteralPath $envPath -Encoding UTF8 |
 $raw = ($line -replace '^\s*DATABASE_URL\s*=\s*', '').Trim().Trim('"').Trim("'")
 if ($raw.Contains('?')) { $raw = $raw.Split('?')[0] }
 
-$psql = Join-Path $ProjectDir 'LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin\psql.exe'
+$psql = 'C:\LevAV_DB\pgsql\bin\psql.exe'
 if (-not (Test-Path -LiteralPath $psql)) {
   $psql = 'psql'
 }

@@ -76,7 +76,7 @@ function Get-DatabaseUrlFromEnv([string]$proj) {
   return $raw
 }
 
-$pgDump = Join-Path $ProjectDir 'LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin\pg_dump.exe'
+$pgDump = 'C:\LevAV_DB\pgsql\bin\pg_dump.exe'
 if (-not (Test-Path -LiteralPath $pgDump)) {
   $pgDump = 'pg_dump'
 }

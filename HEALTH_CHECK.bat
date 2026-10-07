@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 title LevAV LLC TMS Health Check
 set "PROJECT_DIR=%~dp0"
-set "PG_BIN=%PROJECT_DIR%LOCAL_DB_RUNTIME\pgsql_full\pgsql\bin"
+set "PG_BIN=C:\LevAV_DB\pgsql\bin"
 set "PG_DATA=C:\LevAV_DB\pgdata_localprod_utf8"
 set "PG_PORT=5434"
 set "NO_PAUSE=0"
@@ -75,7 +75,7 @@ if not exist "%PROJECT_DIR%\package.json" (
 
 echo [6/10] PostgreSQL runtime...
 if not exist "%PG_BIN%\pg_isready.exe" (
-  echo [FAIL] pg_isready.exe missing in LOCAL_DB_RUNTIME
+  echo [FAIL] pg_isready.exe missing in %PG_BIN%
   set /a FAILS+=1
 ) else (
   if not exist "%PG_DATA%\PG_VERSION" (
